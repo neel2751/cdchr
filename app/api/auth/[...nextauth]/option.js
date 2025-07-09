@@ -35,7 +35,7 @@ export const options = {
               return { status: 500, data: {} }; // Fallback if API fails
             });
 
-          if (newip.status === 200) {
+          if (newip.data.status === "success") {
             await storeSession({
               ...newip.data,
               ...response.data,
@@ -44,12 +44,10 @@ export const options = {
               device: isMobile ? "Mobile" : "Desktop",
               ip,
             });
-
-            // if (!data.status) {
-            //   throw new Error(data?.message);
-            // }
           }
-
+          // based on that we have to show 2FA page once enabled after they can't disable without admin approval
+          // if (response.data.twoFactorEnabled && !response.data.twoFactorVerified) {
+          // }
           return { ...response?.data };
         } catch (error) {
           console.error("Authorize error:", error.message);

@@ -44,28 +44,24 @@ export default function EmployeeOverview({ data }) {
 }
 
 const ProfileCard = ({ data }) => (
-  <div className="bg-white p-1 border-gray-200 border  rounded-2xl flex-col flex">
-    <div className="shadow-sm px-5 bg-white rounded-xl divide-y divide-dashed divide-gray-300">
-      <div className="py-5">
-        <div className="mb-3">
-          <h2 className="text-gray-800 font-semibold text-pretty">
-            {data?.title}
-          </h2>
-        </div>
-        {/* List */}
-        <dl className="sm:gap-y-2 sm:grid-cols-2 gap-x-4 grid-cols-1 grid">
-          {data?.content?.map((item, index) => (
-            <Fragment key={index}>
-              <dt className="sm:py-0.5 text-gray-500 text-base">
-                {item?.label}
-              </dt>
-              <dd className="sm:py-0.5 text-gray-700 font-semibold text-base text-pretty">
-                {item?.value}
-              </dd>
-            </Fragment>
-          ))}
-        </dl>
+  <div className="px-5 bg-white rounded-xl divide-y divide-dashed divide-gray-300 border">
+    <div className="py-5">
+      <div className="mb-3">
+        <h2 className="text-gray-800 font-semibold text-pretty">
+          {data?.title}
+        </h2>
       </div>
+      {/* List */}
+      <dl className="sm:gap-y-2 sm:grid-cols-2 gap-x-4 grid-cols-1 grid">
+        {data?.content?.map((item, index) => (
+          <Fragment key={index}>
+            <dt className="sm:py-0.5 text-gray-500 text-base">{item?.label}</dt>
+            <dd className="sm:py-0.5 text-gray-700 font-semibold text-base text-pretty">
+              {item?.value}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
     </div>
   </div>
 );

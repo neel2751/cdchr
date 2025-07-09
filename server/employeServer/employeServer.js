@@ -2,6 +2,8 @@
 import { connect } from "@/db/db";
 import EmployeModel from "@/models/employeModel";
 import { GenerateHashPassword } from "../officeServer/officeServer";
+import { getServerSideProps } from "../session/session";
+import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
 
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -266,3 +268,45 @@ export const employeeDelete = async (data) => {
     return { success: false, message: `Error Occurred in server problem` };
   }
 };
+
+export async function changeSiteEmployeePassword(data) {
+  if (!data) return { success: false, message: "No Data Provided" };
+  const { props } = await getServerSideProps();
+  const { _id: employeeId } = props?.session?.user;
+  if (!employeeId) return { success: false, message: "User not found" };
+  const { currentPassword, newPassword } = data;
+  if (!currentPassword)
+    return { success: false, message: "Current Password is required" };
+  if (!newPassword)
+    return { success: false, message: "New Password is required" };
+  try {
+    await connect();
+    const updatedEmp = await EmployeModel.findOne({
+      _id: employeeId,
+    }).exec();
+    if (!updatedEmp) {
+      return { success: false, message: "Employee Not Found" };
+    }
+    // if the user is not superAdmin or admin, check for current password
+    const isMatch = await isMatchedPassword(
+      currentPassword,
+      updatedEmp.password
+    );
+    if (!isMatch) {
+      return { success: false, message: "Current Password is Incorrect" };
+    }
+    const hashedPassword = await hashPassword(newPassword);
+    if (!hashedPassword) {
+      return { success: false, message: "Error Hashing Password" };
+    }
+    updatedEmp.password = hashedPassword; // Update the password with the new hashed password
+    const updatedData = await updatedEmp.save();
+    if (!updatedData) {
+      return { success: false, message: "Error Updating Password" };
+    }
+    return { success: true, message: "Password Changed Successfully" };
+  } catch (error) {
+    console.log("Error in changeSiteEmployeePassword:", error);
+    return { success: false, message: "Error Changing Password" };
+  }
+}

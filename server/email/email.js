@@ -46,7 +46,7 @@ export const sendMail = async (data) => {
   });
   try {
     const mailOptions = {
-      from: `"Neel✌️" ${process.env.EMAIL_USERNAME}`,
+      from: `"CDC HR✌️" ${process.env.EMAIL_USERNAME}`,
       to: data?.email ?? "patelneel1732@gmail.com",
       subject: "New Login Attempt",
       // text: "Hello from Node.js",

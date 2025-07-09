@@ -81,6 +81,7 @@ export const updateSiteProjectById = async (data, id) => {
 };
 
 export const getSiteById = async (siteId) => {
+  console.log("Site Id", siteId);
   if (!siteId) return { success: false, message: "Site Id is required." };
   try {
     // const response = await ProjectSiteModel.findOne({where:{id: siteId}}).populate('users');

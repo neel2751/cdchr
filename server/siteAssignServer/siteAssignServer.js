@@ -140,11 +140,10 @@ export async function getAllSiteAssign(filterData) {
 
 export async function handleSiteAssignManager(data, id) {
   if (!data) return { success: false, message: "No data provided" };
-  //Checking if the site id and user id are valid
   try {
     // check if employed id and  site id exists in database with status true and delete false to already assigned error
     const proId = data?.projectSiteID;
-    const rolId = data.roleId;
+    const rolId = data?.roleId;
     const siteData = await isSiteandNameisExists(id, proId);
     if (!siteData?.success) return siteData;
     //Getting the site information to check if it exists
@@ -193,7 +192,8 @@ export async function handleSiteAssignManager(data, id) {
       return result;
     }
   } catch (e) {
-    return { success: false, message: e };
+    console.log("Error in handleSiteAssignManager", e);
+    return { success: false, message: "Server Error" };
   }
 }
 
@@ -214,12 +214,6 @@ const assignSiteData = async (assignData) => {
 const isSiteandNameisExists = async (id, projectSiteID) => {
   try {
     if (!id) {
-      // const existingAssignment = await SiteAssignManagerModel.findOne({
-      //   roleId: roleId,
-      //   // isActive: true,
-      // });
-      // if (existingAssignment)
-      //   return { success: false, message: "This Role already assigned" };
       const existingSite = await SiteAssignManagerModel.findOne({
         projectSiteID: projectSiteID,
         // isActive: true,
@@ -227,9 +221,8 @@ const isSiteandNameisExists = async (id, projectSiteID) => {
       if (existingSite) {
         return { success: false, message: "This Site is Already Assigned." };
       }
-      return true;
-    }
-    if (id) {
+      return { success: true, message: "Site is available for assignment." };
+    } else {
       const existingAssignment = await SiteAssignManagerModel.find({
         projectSiteID: projectSiteID, // exclude the current project site
         _id: { $ne: id }, // Exclude the current assignment
@@ -240,7 +233,7 @@ const isSiteandNameisExists = async (id, projectSiteID) => {
           message: "This Site Already Assigned Another Role.",
         };
       }
-      return true;
+      return { success: true, message: "Site is available for assignment." };
     }
   } catch (error) {
     console.log("this error come from isSiteandNameisExists", error);

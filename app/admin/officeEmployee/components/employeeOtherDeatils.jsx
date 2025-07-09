@@ -47,15 +47,6 @@ const EmployeeOtherDeatils = () => {
       ],
     },
     {
-      title: "Emergency Contact Details",
-      content: [
-        { label: "Name", value: newData?.emergencyName || "-" },
-        { label: "Contact No", value: newData?.emergencyPhoneNumber || "-" },
-        { label: "Address", value: newData?.emergencyAddress || "-" },
-        { label: "Relation", value: newData?.emergencyRelation || "-" },
-      ],
-    },
-    {
       title: "Immigration Deatils",
       content: [
         { label: "Nationality", value: newData?.immigrationType || "-" },
@@ -73,6 +64,15 @@ const EmployeeOtherDeatils = () => {
 
         // { label: "Join Date", value: "22 Sep, 2022" },
         // { label: "End Date", value: "10 Nov, 2023" },
+      ],
+    },
+    {
+      title: "Emergency Contact Details",
+      content: [
+        { label: "Name", value: newData?.emergencyName || "-" },
+        { label: "Contact No", value: newData?.emergencyPhoneNumber || "-" },
+        { label: "Address", value: newData?.emergencyAddress || "-" },
+        { label: "Relation", value: newData?.emergencyRelation || "-" },
       ],
     },
   ];

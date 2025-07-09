@@ -26,45 +26,34 @@ const FilterAttendance = ({ searchParams }) => {
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
+  const [isHydrated, setIsHydrated] = React.useState(false);
   const [filter, setFilter] = React.useState({
     paymentType: searchParams?.paymentType || "All",
     siteId: searchParams?.siteId || "",
-    // for office Employee or site Employee
     employeeType: searchParams?.employeeType || "siteEmployee",
   });
 
   const [date, setDate] = React.useState({
-    from: searchParams.fromDate || new Date(),
-    to: searchParams.toDate || addDays(new Date(), 20),
+    // deafult date is before 20 days from today
+    from: searchParams.fromDate || addDays(new Date(), -20),
+    to: searchParams.toDate || new Date(),
   });
+
+  React.useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const { data: siteData } = useFetchSelectQuery({
     fetchFn: getSelectProjects,
     queryKey: ["siteData"],
   });
 
-  // we have to set the date in query paarams
-  React.useEffect(() => {
-    const fromDate = format(date.from, "yyyy-MM-dd");
-    const toDate = format(date.to, "yyyy-MM-dd");
-    // query we have to set conditionally
-    const params = new URLSearchParams({
-      ...filter,
-      query,
-      page: currentPage,
-      pageSize: pagePerData,
-      fromDate,
-      toDate,
-      employeeType: filter.employeeType,
-    });
-    window.history.replaceState({}, "", `?${params.toString()}`);
-  }, [filter, date, query, currentPage, pagePerData]);
-
   const queryKey = [
     "attendanceData",
     { filter, date, query, currentPage, pagePerData },
   ];
   const { data, isLoading, isError } = useFetchQuery({
+    enabled: isHydrated, // <- don't run before hydration
     params: {
       ...filter,
       query: query || "",
@@ -77,6 +66,26 @@ const FilterAttendance = ({ searchParams }) => {
     queryKey,
     fetchFn: fetchFilteredAttendanceData,
   });
+
+  // we have to set the date in query paarams
+  React.useEffect(() => {
+    if (!isHydrated) return;
+
+    const fromDate = format(date.from, "yyyy-MM-dd");
+    const toDate = format(date.to, "yyyy-MM-dd");
+
+    const params = new URLSearchParams({
+      ...filter,
+      query,
+      page: currentPage,
+      pageSize: pagePerData,
+      fromDate,
+      toDate,
+      employeeType: filter.employeeType,
+    });
+
+    window.history.replaceState({}, "", `?${params.toString()}`);
+  }, [filter, date, query, currentPage, pagePerData, isHydrated]);
 
   const { newData, totalCount } = data || {};
 

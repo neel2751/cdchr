@@ -9,7 +9,6 @@ import { signOut } from "next-auth/react";
 import { sendMail } from "../email/email";
 import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
-import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -171,6 +170,7 @@ export const LoginData = async (email, password) => {
 
   delete user.password;
   user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
+  user.name = user.name || user.firstName || "User";
   return {
     status: true,
     data: user,
@@ -204,7 +204,7 @@ export const storeSession = async (data) => {
     } = data;
     const obj = {
       userId,
-      userType,
+      userType: userType === "OfficeEmployee" ? "OfficeEmploye" : "Employe",
       platform,
       browser,
       device,
@@ -220,7 +220,6 @@ export const storeSession = async (data) => {
     if (alreadyStore) {
       const update = await UserSession.updateOne({ userId, ipAddress }, obj);
       if (update) {
-        // await sendMail({ ...obj, email: data.email });
         return { status: true, message: "Session Updated" };
       }
     } else {
@@ -239,12 +238,20 @@ export const storeSession = async (data) => {
 
 export const getSessionData = async () => {
   try {
-    const session = await getServerSession(options);
-    if (!session) return signOut();
-    const user = await UserSession.findOne({ userId: session?.user?._id });
-    if (!user) return signOut();
+    const { props } = await getServerSideProps();
+    const userId = props?.session?.user?._id;
+    if (!userId) return { status: false, message: "User not found" };
+
+    // and near date on top result
+    const user = await UserSession.find({ userId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
     return { status: true, data: JSON.stringify(user) };
-  } catch (error) {}
+  } catch (error) {
+    console.log(`Error in Getting Session Data ${error}`);
+    return { status: false, message: "Failed to get session data" };
+  }
 };
 
 export const verifyPassword = async (password) => {

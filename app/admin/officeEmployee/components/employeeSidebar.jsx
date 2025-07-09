@@ -20,8 +20,8 @@ export default function EmployeeSidebar() {
   const { newData } = useAvatar();
 
   return (
-    <div className="space-y-6 divide-y divide-dashed divide-gray-300 border border-gray-300 p-4 rounded-xl border-dashed">
-      <div className="space-y-4 ">
+    <div className="space-y-3 divide-y divide-dashed divide-gray-300 border border-gray-300 p-4 rounded-xl border-dashed">
+      <div className="space-y-4 pb-3">
         <div className="flex items-center gap-4">
           <UserAvatar
             className={"h-16 w-16"}
@@ -38,7 +38,7 @@ export default function EmployeeSidebar() {
         </div>
       </div>
 
-      <div className="space-y-3 pt-3">
+      <div className="space-y-3 pb-3 ">
         <h3 className="text-base font-medium text-pretty">About</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -54,7 +54,7 @@ export default function EmployeeSidebar() {
         </div>
       </div>
 
-      <div className="space-y-3 pt-3">
+      <div className="space-y-3 pb-3">
         <h3 className="text-base font-medium text-pretty">Address</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -80,7 +80,7 @@ export default function EmployeeSidebar() {
         </div>
       </div>
 
-      <div className="space-y-3 pt-3">
+      <div className="space-y-3 pb-3">
         <h3 className="text-base font-medium text-pretty">Employee Details</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-muted-foreground">

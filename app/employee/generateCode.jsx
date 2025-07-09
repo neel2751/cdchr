@@ -54,7 +54,7 @@ export default function QRCodeSocket() {
       <Card className={"max-w-sm mx-auto"}>
         <CardHeader className="space-y-3">
           <div className="flex items-center gap-4">
-            <CardTitle>Clock In / Out</CardTitle>
+            <CardTitle>Hi, {session?.user?.name || "Employee"}!</CardTitle>
             <div className="text-sm">
               Site:{" "}
               <Badge className={"bg-purple-100 text-purple-800"}>

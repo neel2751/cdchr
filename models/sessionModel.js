@@ -43,6 +43,10 @@ const userSessionSchema = new mongoose.Schema(
     isp: {
       type: String,
     },
+    loginTime: {
+      type: Date,
+      default: Date.now,
+    },
   },
   { timestamps: true }
 );

@@ -63,12 +63,7 @@ const WeekRotaTable = ({
   };
 
   const handleScheduleChange = (employeeId, day, field, value, date) => {
-    if (day === "Sunday") return; // Skip Sunday edits
-
-    console.log(
-      `Updating ${field} for Employee ID: ${employeeId}, Day: ${day}, Value: ${value} on Date: ${date}`
-    );
-
+    if (day === "Sun") return; // Skip Sunday as it should always be OFF
     setSchedules((prevSchedules) =>
       prevSchedules.map((schedule) => {
         if (schedule.employeeId === employeeId) {
@@ -109,8 +104,6 @@ const WeekRotaTable = ({
   };
 
   const autoFillSchedule = (employeeId) => {
-    console.log(employeeId);
-
     setSchedules((prevSchedules) =>
       prevSchedules.map((schedule) => {
         if (schedule.employeeId !== employeeId) return schedule;
@@ -120,27 +113,24 @@ const WeekRotaTable = ({
           schedule.schedule.map((entry) => [entry.day, entry])
         );
 
-        const mostCommonCategory = findMostCommonCategory(schedule.schedule);
-        const days = [
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday",
-          "Sunday",
-        ];
+        // const mostCommonCategory = findMostCommonCategory(schedule.schedule);
+        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
         const updatedSchedule = days.map((day) => {
           const existingDay = scheduleMap.get(day);
+          console.log(existingDay);
 
           // If it's Sunday, always return OFF
-          if (day === "Sunday") {
+          if (day === "Sun") {
             return {
               day,
               category: "OFF",
               startTime: "00:00",
               endTime: "00:00",
+              date: format(
+                addDays(currentWeek, days.indexOf(day)),
+                "yyyy-MM-dd"
+              ),
             };
           }
 
@@ -156,13 +146,12 @@ const WeekRotaTable = ({
           return {
             ...existingDay,
             day,
+            date: format(addDays(currentWeek, days.indexOf(day)), "yyyy-MM-dd"),
             category: "OFFICE",
             startTime: "09:00",
             endTime: "17:00",
           };
         });
-
-        console.log(updatedSchedule);
 
         return {
           ...schedule,
@@ -198,30 +187,29 @@ const WeekRotaTable = ({
     const updatedSchedules = schedules.map((schedule) => {
       const missingDays = [];
 
-      schedule.schedule.forEach((daySchedule) => {
-        const { day, category, startTime, endTime, site } = daySchedule;
+      schedule.schedule.forEach((entry) => {
+        const { date, category, startTime, endTime, site, day } = entry;
 
-        // Skip validation for Sunday and HOLIDAY
-        if (day === "Sunday" || category === "Holiday") return;
+        if (day === "Sun" || category === "Holiday") return;
 
         if (!category) {
-          missingDays.push(`${day} (missing category)`);
+          missingDays.push(`${date} (missing category)`);
           return;
         }
 
         if (category === "OFFICE/SITE" && !site) {
-          missingDays.push(`${day} (missing site for OFFICE/SITE)`);
+          missingDays.push(`${date} (missing site)`);
           return;
         }
 
         if (category !== "OFF") {
           if (!startTime || !endTime) {
-            missingDays.push(`${day} (missing time)`);
+            missingDays.push(`${date} (missing time)`);
             return;
           }
 
           if (startTime >= endTime) {
-            missingDays.push(`${day} (invalid time range)`);
+            missingDays.push(`${date} (invalid time range)`);
           }
         }
       });

@@ -11,6 +11,7 @@ import {
   NewspaperIcon,
   RadioIcon,
   Stamp,
+  LockIcon,
 } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Collapsible } from "../ui/collapsible";
@@ -30,6 +31,7 @@ const ICON_MAP = {
   RadioIcon: RadioIcon,
   Stamp: Stamp,
   CalendarClock: CalendarClock,
+  Lock: LockIcon,
 };
 
 export default function SideBarMenuCom({ menuItems, path }) {

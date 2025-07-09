@@ -187,7 +187,7 @@ const SiteAssign = ({ searchParams }) => {
             {newData?.length <= 0 ? (
               <div className="text-center text-gray-500">No data available</div>
             ) : (
-              <SiteAssignTable />
+              newData && <SiteAssignTable />
             )}
             {totalCount > 10 && (
               <div className="pt-4 mt-2 border-t">

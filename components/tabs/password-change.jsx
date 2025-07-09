@@ -85,7 +85,7 @@ export default function PasswordChange() {
           Enter your current password and a new password to change your
           password.
         </CardDescription>
-        <TwoFactorAuthCard />
+        {/* <TwoFactorAuthCard /> */}
         <Card
           className={"text-neutral-700 border- shadow-none p-2 max-w-max mt-4"}
         >

@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardTitle,
+} from "@/components/ui/card";
 import { ChevronLeft, ChevronRight, Clock, CalendarIcon } from "lucide-react";
 import {
   format,
@@ -12,69 +17,33 @@ import {
   subWeeks,
   isSameDay,
 } from "date-fns";
-const daysOfWeek = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-];
+import { useFetchQuery } from "@/hooks/use-query";
+import { getWeeklyRotaByWeekStartDate } from "@/server/weeklyRotaServer/weeklyRotaServer";
+import { useAvatar } from "../Avatar/AvatarContext";
 
-export default function WeeklyRota() {
+const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export default function EmployeeWeeklyRota() {
+  const { slug } = useAvatar();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [weekStart, setWeekStart] = useState(
     startOfWeek(currentDate, { weekStartsOn: 1 })
   );
-
-  const [shifts, setShifts] = useState([
-    {
-      id: "1",
-      date: addDays(weekStart, 0),
-      startTime: "09:00",
-      endTime: "17:00",
-      role: "Project Manager",
-      location: "Office",
-      color: "bg-blue-100 border-blue-300 text-blue-800",
+  const { data } = useFetchQuery({
+    fetchFn: getWeeklyRotaByWeekStartDate,
+    params: {
+      employeeId: slug[0],
+      date: format(weekStart, "yyyy-MM-dd"),
     },
-    {
-      id: "2",
-      date: addDays(weekStart, 1),
-      startTime: "09:00",
-      endTime: "17:00",
-      role: "Project Manager",
-      location: "Office",
-      color: "bg-blue-100 border-blue-300 text-blue-800",
-    },
-    {
-      id: "3",
-      date: addDays(weekStart, 2),
-      startTime: "10:00",
-      endTime: "18:00",
-      role: "Team Lead",
-      location: "Remote",
-      color: "bg-purple-100 border-purple-300 text-purple-800",
-    },
-    {
-      id: "4",
-      date: addDays(weekStart, 3),
-      startTime: "09:00",
-      endTime: "17:00",
-      role: "Project Manager",
-      location: "Client Site",
-      color: "bg-green-100 border-green-300 text-green-800",
-    },
-    {
-      id: "5",
-      date: addDays(weekStart, 4),
-      startTime: "09:00",
-      endTime: "15:00",
-      role: "Project Manager",
-      location: "Office",
-      color: "bg-blue-100 border-blue-300 text-blue-800",
-    },
-  ]);
+    queryKey: [
+      "getWeeklyRotaByWeekStartDate",
+      slug[0],
+      format(weekStart, "yyyy-MM-dd"),
+    ],
+    enabled: !!slug[0],
+  });
+  const { newData } = data || {};
+  const shifts = newData?.attendanceData[0]?.schedule || [];
+  console.log("shifts", shifts);
 
   const handlePreviousWeek = () => {
     const newWeekStart = subWeeks(weekStart, 1);
@@ -92,38 +61,80 @@ export default function WeeklyRota() {
     setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
   };
 
+  const shiftColor = (category) => {
+    switch (category) {
+      case "OFFICE":
+        return "bg-indigo-100 border-indigo-300 text-indigo-800";
+      case "OFFICE/SITE":
+        return "bg-green-100 border-green-300 text-green-800";
+      case "Work from Home":
+        return "bg-yellow-100 border-yellow-300 text-yellow-800";
+      case "OFF":
+        return "bg-red-100 border-red-300 text-red-800";
+      default:
+        return "bg-gray-100 border-gray-300 text-gray-800";
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-medium">Weekly Rota</h2>
-          <p className="text-muted-foreground">
-            View and manage your scheduled shifts
-          </p>
+      <div className="flex sm:flex-row flex-col justify-between sm:items-center">
+        <div className="space-y-1">
+          <CardTitle>Weekly Shifts</CardTitle>
+          <CardDescription>
+            View your weekly shifts. You can navigate through the weeks or jump
+            to today.
+          </CardDescription>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handlePreviousWeek}>
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Previous
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleToday}>
+        <div className="flex gap-2 sm:mt-0 mt-4">
+          <Button variant="outline" onClick={handleToday}>
             Today
           </Button>
-          <Button variant="outline" size="sm" onClick={handleNextWeek}>
-            Next
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handlePreviousWeek}
+            className={"sm:flex hidden"}
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleNextWeek}
+            className={"sm:flex hidden"}
+          >
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         </div>
       </div>
 
-      <div className="text-center mb-6">
-        <h3 className="text-lg font-medium flex items-center justify-center">
-          <CalendarIcon className="h-5 w-5 mr-2" />
-          Week of {format(weekStart, "MMMM d, yyyy")}
-        </h3>
+      <div className="text-center my-10">
+        <CardTitle className="flex items-center sm:justify-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handlePreviousWeek}
+            className={"sm:hidden"}
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4" />
+            Week of {format(weekStart, "MMMM d, yyyy")}
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleNextWeek}
+            className={"sm:hidden"}
+          >
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </Button>
+        </CardTitle>
       </div>
 
-      <div className="grid grid-cols-7 gap-4">
+      <div className="grid sm:grid-cols-6 grid-cols-2 gap-4">
         {daysOfWeek.map((day, index) => {
           const date = addDays(weekStart, index);
           const isToday = isSameDay(date, new Date());
@@ -141,20 +152,37 @@ export default function WeeklyRota() {
                 <p className="font-medium">{day}</p>
                 <p className="text-sm">{format(date, "MMM d")}</p>
               </div>
-              <div className="border border-t-0 rounded-b-md p-2 min-h-32">
-                {dayShifts.length > 0 ? (
-                  dayShifts.map((shift) => (
+              <div className="border border-t-0 rounded-b-md max-h-max overflow-y-auto">
+                {dayShifts && dayShifts.length > 0 ? (
+                  dayShifts.map((shift, index) => (
                     <Card
-                      key={shift.id}
-                      className={`mb-2 overflow-hidden border ${shift.color}`}
+                      key={index}
+                      className={`overflow-hidden border rounded-b-md rounded-t-none ${shiftColor(
+                        shift.category
+                      )}`}
                     >
                       <CardContent className="p-3">
-                        <div className="flex items-center gap-1 text-sm font-medium">
-                          <Clock className="h-3.5 w-3.5" />
-                          {shift.startTime} - {shift.endTime}
-                        </div>
-                        <p className="text-xs font-medium mt-1">{shift.role}</p>
-                        <p className="text-xs mt-0.5">{shift.location}</p>
+                        {shift.category !== "OFF" ? (
+                          <>
+                            <div>
+                              <Clock className="h-4 w-4 inline mr-1" />
+                              <span className="text-sm">{shift.startTime}</span>
+                            </div>
+                            <div>
+                              <Clock className="h-4 w-4 inline mr-1" />
+                              <span className="text-sm">{shift.endTime}</span>
+                            </div>
+                            <p className="text-xs mt-1">{shift.category}</p>
+                          </>
+                        ) : (
+                          <p className="text-xs mt-0.5">{shift.category}</p>
+                        )}
+                        {shift.category === "OFFICE/SITE" && (
+                          <p className="text-xs mt-0.5">
+                            <span className="font-medium">Site:</span>{" "}
+                            {shift.site}
+                          </p>
+                        )}
                       </CardContent>
                     </Card>
                   ))
@@ -167,24 +195,6 @@ export default function WeeklyRota() {
             </div>
           );
         })}
-      </div>
-
-      <div className="mt-6 border rounded-md p-4">
-        <h3 className="text-lg font-medium mb-3">Legend</h3>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-blue-300"></div>
-            <span className="text-sm">Office</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-green-300"></div>
-            <span className="text-sm">Client Site</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-purple-300"></div>
-            <span className="text-sm">Remote</span>
-          </div>
-        </div>
       </div>
     </div>
   );

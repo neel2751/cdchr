@@ -108,17 +108,8 @@ const OnBoardingDialog = ({ open, handleClose }) => {
               ({step + 1}/{steps.length})
             </span>
           </h2>
-          <Image
-            src={steps[step].image}
-            alt={steps[step].title}
-            width={100}
-            height={100}
-            className="my-4 w-full h-auto rounded-lg"
-          />
-          <DialogTitle>{steps[step].title}</DialogTitle>
-          <DialogDescription>{steps[step].content}</DialogDescription>
-          {steps[step].teamImages && (
-            <div className="flex flex-wrap justify-around gap-4 mt-4 w-full">
+          {steps[step].teamImages ? (
+            <div className="flex flex-wrap justify-around gap-4 mt-4 w-full bg-gradient-to-b from-indigo-50 via-rose-50 to-blue-50 p-4 rounded-lg mb-4">
               {steps[step].teamImages.map((member, index) => (
                 <div key={index} className="text-center">
                   <div className="flex flex-col items-center">
@@ -137,7 +128,17 @@ const OnBoardingDialog = ({ open, handleClose }) => {
                 </div>
               ))}
             </div>
+          ) : (
+            <Image
+              src={steps[step].image}
+              alt={steps[step].title}
+              width={100}
+              height={100}
+              className="my-4 w-full h-auto rounded-lg"
+            />
           )}
+          <DialogTitle>{steps[step].title}</DialogTitle>
+          <DialogDescription>{steps[step].content}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           {step > 0 && <Button onClick={prevStep}>Previous</Button>}

@@ -7,6 +7,7 @@ import { addDays } from "date-fns";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getSelectOfficeEmployee } from "../selectServer/selectServer";
 import { createObjectId } from "@/lib/mongodb";
+import { getUKTime } from "@/utils/time";
 
 export async function getAllOfficeEmployee() {
   try {
@@ -112,6 +113,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     const existingRota = await WeeklyRotaModel.findOne({
       weekStartDate: date,
     }).lean();
+    const now = getUKTime({ format: "iso" });
 
     const allEmployees = await OfficeEmployeeModel.find({
       isActive: true,

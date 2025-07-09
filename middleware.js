@@ -57,10 +57,7 @@ async function checkRoleMiddleware(req) {
 
   if (!res.ok) {
     if (res.status === 404) {
-      return NextResponse.json(
-        { status: 404, message: "Role not found" },
-        { status: 404 }
-      );
+      return NextResponse.redirect(new URL("/unauthorized", req.url));
     }
     throw new Error("Failed to fetch role data");
   }

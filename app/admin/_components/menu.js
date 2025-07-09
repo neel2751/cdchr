@@ -31,8 +31,8 @@ import EmployeeFiles from "@/components/tabs/employee-files";
 import EmployeePerformance from "@/components/tabs/employee-performance";
 import PasswordChange from "@/components/tabs/password-change";
 import SessionManagement from "@/components/tabs/session-management";
+import EmployeeWeeklyRota from "@/components/tabs/weekly-rota";
 import LeaveRequests from "@/components/tabs/leave-requests";
-import WeeklyRota from "@/components/tabs/weekly-rota";
 import EmployeeOnboarding from "@/components/tabs/employee-onboarding";
 import {
   EmployeeOtherDeatils,
@@ -61,26 +61,25 @@ export const officeMenu = [
   //     icon: SirenIcon,
   //   },
   {
-    name: "Time Off",
-    link: "timeoff",
-    //   content: <LeaveRequestForm />,
+    name: "Weekly Rota",
+    link: "weeklyrota",
     icon: TimerIcon,
   },
-  {
-    name: "Performance",
-    link: "performance",
-    icon: LayoutListIcon,
-  },
-  {
-    name: "Document",
-    link: "document",
-    icon: FileLockIcon,
-  },
-  {
-    name: "OnBoarding",
-    link: "onboarding",
-    icon: ScrollTextIcon,
-  },
+  // {
+  //   name: "Performance",
+  //   link: "performance",
+  //   icon: LayoutListIcon,
+  // },
+  // {
+  //   name: "Document",
+  //   link: "document",
+  //   icon: FileLockIcon,
+  // },
+  // {
+  //   name: "OnBoarding",
+  //   link: "onboarding",
+  //   icon: ScrollTextIcon,
+  // },
   {
     name: "Password",
     link: "password",
@@ -211,14 +210,14 @@ export const siteMenu = [
 export const officeSlugComponentmap = {
   overview: EmployeeOtherDeatils,
   edit: EmployeeEdit,
-  timeoff: EmployeeTimeOff,
-  performance: EmployeePerformance,
-  document: EmployeeFiles,
-  onboarding: EmployeeOnboarding,
+  // timeoff: EmployeeTimeOff,
+  // performance: EmployeePerformance,
+  // document: EmployeeFiles,
+  // onboarding: EmployeeOnboarding,
   password: PasswordChange,
   session: SessionManagement,
   leave: EmployeeLeaveDeatails,
-  weeklyrota: WeeklyRota,
+  weeklyrota: EmployeeWeeklyRota,
 };
 
 export const slugComponentmap = {

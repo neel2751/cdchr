@@ -221,7 +221,8 @@ const EmployeeSiteManagement = () => {
             <CardTitle>Time Tracking Dashboard</CardTitle>
             <CardDescription>Current Time</CardDescription>
           </div>
-          <AddSiteAssignment queryKey={queryKey} />
+          {role === "superAdmin" ||
+            (role === "admin" && <AddSiteAssignment queryKey={queryKey} />)}
         </CardHeader>
         <CardContent className={"grid grid-cols-5 gap-5"}>
           <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">

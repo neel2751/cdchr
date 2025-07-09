@@ -80,9 +80,13 @@ export default function EmployeePerformance() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <CardTitle>Employee Performance</CardTitle>
+          <CardTitle>
+            <CalendarIcon className="w-4 h-4 inline mr-1" />
+            Weekly Shifts
+          </CardTitle>
           <CardDescription>
-            View and manage employee shifts for the current week.
+            View your weekly shifts. You can navigate through the weeks or jump
+            to today.
           </CardDescription>
         </div>
         <div className="flex gap-2">
@@ -124,10 +128,10 @@ export default function EmployeePerformance() {
                 <p className="text-sm">{format(date, "MMM d")}</p>
               </div>
               <div className="border border-t-0 rounded-b-md max-h-max overflow-y-auto">
-                {dayShifts.length > 0 ? (
-                  dayShifts.map((shift) => (
+                {dayShifts && dayShifts.length > 0 ? (
+                  dayShifts.map((shift, index) => (
                     <Card
-                      key={shift.id}
+                      key={shift.index}
                       className={`overflow-hidden border rounded-b-md rounded-t-none ${shiftColor(
                         shift.category
                       )}`}

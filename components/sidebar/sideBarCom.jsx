@@ -37,6 +37,7 @@ import { useFetchSelectQuery } from "@/hooks/use-query";
 import { getEmployeeMenu } from "@/server/selectServer/selectServer";
 import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
+import { encrypt } from "@/lib/algo";
 
 const SideBarHeaderCom = () => {
   return (
@@ -221,20 +222,27 @@ const SideBarFooterCom = () => {
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
-              {/* <DropdownMenuGroup>
+              <DropdownMenuGroup>
                 <DropdownMenuItem>
-                  <BadgeCheck />
-                  Account
+                  <Link
+                    className="flex items-center gap-2"
+                    href={`/admin/account/${encrypt(
+                      session?.user?._id
+                    )}/overview`}
+                  >
+                    <BadgeCheck />
+                    Account
+                  </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                {/* <DropdownMenuItem>
                   <CreditCard />
                   Billing
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <Bell />
                   Notifications
-                </DropdownMenuItem>
-              </DropdownMenuGroup> */}
+                </DropdownMenuItem> */}
+              </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => signOut()}>
                 <LogOut />
