@@ -3,10 +3,10 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import WeeklyRotaModel from "@/models/weeklyRotaModel";
 import { getServerSideProps } from "../session/session";
-import mongoose from "mongoose";
 import { addDays } from "date-fns";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getSelectOfficeEmployee } from "../selectServer/selectServer";
+import { createObjectId } from "@/lib/mongodb";
 
 export async function getAllOfficeEmployee() {
   try {
@@ -80,7 +80,7 @@ export async function getOfficeEmployeeAttendance(weekStartDate) {
     }
 
     const approvedById = await OfficeEmployeeModel.findOne(
-      { _id: new mongoose.Types.ObjectId(attendanceRecord?.approvedBy) },
+      { _id: createObjectId(attendanceRecord?.approvedBy) },
       { name: 1 }
     );
     const approvedBy =
@@ -117,8 +117,12 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
       isActive: true,
       delete: false,
       $or: [
-        { visaEndDate: { $lte: new Date() } },
-        { endDate: { $gte: new Date() } },
+        { visaEndDate: { $gt: now } },
+        { visaEndDate: { $exists: false } },
+        { visaEndDate: null },
+        { endDate: { $gte: now } },
+        { endDate: { $exists: false } },
+        { endDate: null },
       ],
     });
 

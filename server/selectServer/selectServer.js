@@ -155,6 +155,7 @@ export const getEmployeeAssignedProjects = async (employeeId) => {
 export const getSelectOfficeEmployee = async () => {
   try {
     await connect();
+    const now = new Date();
     const roles = await OfficeEmployeeModel.aggregate(
       [
         {
@@ -162,8 +163,12 @@ export const getSelectOfficeEmployee = async () => {
             isActive: true,
             delete: false,
             $or: [
-              { visaEndDate: { $lte: new Date() } },
-              { endDate: { $gte: new Date() } },
+              { visaEndDate: { $gt: now } },
+              { visaEndDate: { $exists: false } },
+              { visaEndDate: null },
+              { endDate: { $gte: now } },
+              { endDate: { $exists: false } },
+              { endDate: null },
             ],
           },
         },

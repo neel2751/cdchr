@@ -176,11 +176,11 @@ export const siteMenu = [
     icon: ScanQrCodeIcon,
     link: "scan",
   },
-  {
-    name: "Employee",
-    icon: TimerIcon,
-    link: "employee",
-  },
+  // {
+  //   name: "Employee",
+  //   icon: TimerIcon,
+  //   link: "employee",
+  // },
   {
     name: "Expense",
     icon: ClipboardPlus,
@@ -191,11 +191,11 @@ export const siteMenu = [
   //   icon: FileLockIcon,
   //   link: "siteassign",
   // },
-  {
-    name: "Weekly Rota",
-    icon: ScrollTextIcon,
-    link: "weeklyrota",
-  },
+  // {
+  //   name: "Weekly Rota",
+  //   icon: ScrollTextIcon,
+  //   link: "weeklyrota",
+  // },
   {
     name: "Report",
     icon: GlobeLockIcon,

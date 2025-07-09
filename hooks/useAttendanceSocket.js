@@ -313,11 +313,11 @@ export function useSiteAttendanceSocket({
 }) {
   const socketRef = useRef(null);
   const queryClient = useQueryClient();
+  const siteOId = siteId ? decrypt(siteId) : null;
   const queryKey = [
     "siteClock",
-    { siteId, employeeId, query, currentPage, pagePerData, fromDate, toDate },
+    { siteOId, employeeId, query, currentPage, pagePerData, fromDate, toDate },
   ];
-  const siteOId = siteId ? decrypt(siteId) : null;
   const [qrData, setQrData] = useState("");
   const [limitReached, setLimitReached] = useState(false);
   const [currentAction, setCurrentAction] = useState("");

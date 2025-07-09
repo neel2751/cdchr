@@ -32,7 +32,7 @@ const OfficeEmplyee = ({ searchParams }) => {
   const query = searchParams.query;
   const [showDialog, setShowDialog] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
-  const [initialValues, setInitialValues] = useState(null);
+  const [initialValues, setInitialValues] = useState({});
   const [alert, setAlert] = useState({});
   const [filter, setFilter] = useState({
     company: "",
@@ -104,10 +104,10 @@ const OfficeEmplyee = ({ searchParams }) => {
   };
   const { mutate: handleSubmit, isPending } = useSubmitMutation({
     mutationFn: async (data) =>
-      await handleOfficeEmployee(data, initialValues._id),
+      await handleOfficeEmployee(data, initialValues?._id),
     invalidateKey: queryKey,
     onSuccessMessage: (response) =>
-      `Employee ${initialValues._id ? "Updated" : "Created"} successfully`,
+      `Employee ${initialValues?._id ? "Updated" : "Created"} successfully`,
     onClose: () => handleClose(),
   });
 

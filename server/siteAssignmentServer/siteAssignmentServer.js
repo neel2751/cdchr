@@ -445,13 +445,9 @@ export async function fetchAssignedWithClocks({
       },
     },
     { $unwind: "$employee" },
-    {
-      $match: {
-        ...(paymentType !== "All" && {
-          "employee.paymentType": paymentType,
-        }),
-      },
-    },
+    ...(paymentType && paymentType !== "All"
+      ? [{ $match: { "employee.paymentType": paymentType } }]
+      : []),
     ...(query
       ? [
           {

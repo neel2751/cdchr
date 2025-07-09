@@ -312,7 +312,7 @@ const WeekRotaTable = ({
                 >
                   <TableCell>{schedule?.employeeName}</TableCell>
 
-                  {weekDates.map(({ dayLabel, date }) => {
+                  {weekDates?.map(({ dayLabel, date }) => {
                     // Find the schedule for the current day
                     const daySchedule =
                       schedule.schedule.find((entry) => entry.date === date) ||

@@ -105,6 +105,9 @@ export async function getAllSiteAssign(filterData) {
         },
       },
       {
+        $unset: ["role", "projectSite", "password", "email"],
+      },
+      {
         $skip: skip,
       },
       {
