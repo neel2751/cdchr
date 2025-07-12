@@ -839,7 +839,7 @@ export const FormImageUpload = ({ field }) => {
                       )}
                     </div>
                   )}
-                  {console.log(fileRejections)}
+                  {/* {console.log(fileRejections)} */}
                 </div>
                 <div className="mt-1">
                   {fileRejections.length > 0 && (
@@ -1045,7 +1045,7 @@ export function ProfileBg({ defaultImage }) {
         <div className="absolute inset-0 flex items-center justify-center gap-2">
           <button
             type="button"
-            className="z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70"
+            className="z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-ring/70"
             onClick={handleThumbnailClick}
             aria-label={currentImage ? "Change image" : "Upload image"}
           >
@@ -1054,7 +1054,7 @@ export function ProfileBg({ defaultImage }) {
           {currentImage && (
             <button
               type="button"
-              className="z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70"
+              className="z-50 flex size-10 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-ring/70"
               onClick={handleImageRemove}
               aria-label="Remove image"
             >
@@ -1114,7 +1114,7 @@ export function AvatarImageProfile({ field }) {
                   )}
                   <button
                     type="button"
-                    className="absolute group-hover:flex hidden size-8 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70"
+                    className="absolute group-hover:flex hidden size-8 cursor-pointer items-center justify-center rounded-full bg-black/60 text-white outline-offset-2 transition-colors hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-ring/70"
                     // onClick={handleThumbnailClick}
                     aria-label="Change profile picture"
                   >

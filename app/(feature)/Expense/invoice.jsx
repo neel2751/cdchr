@@ -1,30 +1,9 @@
+import { formatCurrency } from "@/utils/time";
 import { Download, Printer, X } from "lucide-react";
 import Image from "next/image";
 import React, { memo } from "react";
 
-const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
-  //   const invoicePrint = () => {
-  //     const printWindow = window.open("", "Print", "width=400,height=400");
-  //     printWindow.document.write(`
-  //             <html>
-  //             <head>
-  //             <title>Invoice</title>
-  //             </head>
-  //             <body>
-  //             <h1>Invoice</h1>
-  //             <p>Invoice Number: ${invoiceData._id}</p>
-  //             <p>Invoice Date: ${invoiceData.expenseDate}</p>
-  //             <p>Category: ${invoiceData.expenseCategory.categoryName}</p>
-  //             <p>Title: ${invoiceData.expenseDescription}</p>
-  //             <p>Invoice Total: £${invoiceData.expenseAmount}</p>
-  //             </body>
-  //             </html>
-  //             `);
-  //     // printWindow.document.close();
-  //     printWindow.focus();
-  //     printWindow.print();
-  //   };
-
+const Invoice = memo(({ open, setOpen, invoiceData }) => {
   return (
     <div
       className={` size-full fixed top-0 start-0 overflow-x-hidden overflow-y-auto pointer-events-none z-[80] ${
@@ -40,12 +19,9 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
           <div className="relative overflow-hidden min-h-32 bg-gray-900 text-center rounded-t-xl">
             <div className="absolute top-2 end-2">
               <button
-                onClick={() => {
-                  setInvoiceData("");
-                  setOpen(false);
-                }}
+                onClick={setOpen}
                 type="button"
-                className="flex justify-center items-center size-7 text-sm font-semibold rounded-full border border-transparent text-white/70 hover:bg-white/10 focus:outline-none focus:bg-white/10 disabled:opacity-50 disabled:pointer-events-none"
+                className="flex justify-center items-center size-7 text-sm font-semibold rounded-full border border-transparent text-black hover:bg-white/90 focus:outline-none focus:bg-white/10 disabled:opacity-50 disabled:pointer-events-none"
               >
                 <span className="sr-only">Close</span>
                 <X className="size-4 shrink-0" />
@@ -66,12 +42,55 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                 ></path>
               </svg>
             </figure>
+            <figure>
+              <svg
+                preserveAspectRatio="none"
+                width="576"
+                height="120"
+                viewBox="0 0 576 120"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <g clip-path="url(#clip0_666_273469)">
+                  <rect width="576" height="120" fill="#B2E7FE"></rect>
+                  <rect
+                    x="289.678"
+                    y="-90.3"
+                    width="102.634"
+                    height="391.586"
+                    transform="rotate(59.5798 289.678 -90.3)"
+                    fill="#FF8F5D"
+                  ></rect>
+                  <rect
+                    x="41.3926"
+                    y="-0.996094"
+                    width="102.634"
+                    height="209.864"
+                    transform="rotate(-31.6412 41.3926 -0.996094)"
+                    fill="#3ECEED"
+                  ></rect>
+                  <rect
+                    x="66.9512"
+                    y="40.4817"
+                    width="102.634"
+                    height="104.844"
+                    transform="rotate(-31.6412 66.9512 40.4817)"
+                    fill="#4C48FF"
+                  ></rect>
+                </g>
+                <defs>
+                  <clipPath id="clip0_666_273469">
+                    <rect width="576" height="120" fill="white"></rect>
+                  </clipPath>
+                </defs>
+              </svg>
+            </figure>
           </div>
 
           <div className="relative z-10 -mt-12">
             <span className="mx-auto flex justify-center items-center size-[62px] rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-400">
               <Image
-                src={"/images/Logo.svg"}
+                src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
                 alt="CDC"
                 width={40}
                 height={40}
@@ -85,7 +104,8 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                 id="hs-ai-invoice-modal-label"
                 className="text-lg font-semibold text-gray-800 dark:text-neutral-200"
               >
-                Creative Design & Construction
+                {invoiceData?.company?.name ||
+                  "Creative Design & Construction Ltd."}
               </h3>
               <p className="text-sm text-gray-500 dark:text-neutral-500">
                 Invoice #{invoiceData?._id}
@@ -98,7 +118,7 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                   Amount paid:
                 </span>
                 <span className="block text-sm font-medium text-gray-800 dark:text-neutral-200">
-                  £{invoiceData?.expenseAmount.toFixed(2)}
+                  {formatCurrency(invoiceData?.amount)}
                 </span>
               </div>
 
@@ -107,7 +127,7 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                   Date paid:
                 </span>
                 <span className="block text-sm font-medium text-gray-800 dark:text-neutral-200">
-                  {new Date(invoiceData?.expenseDate).toDateString()}
+                  {new Date(invoiceData?.date).toDateString()}
                 </span>
               </div>
 
@@ -118,7 +138,7 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                 <div className="flex items-center gap-x-2">
                   {/* <ReceiptText className="size-5" /> */}
                   <span className="block text-sm font-medium text-gray-800 dark:text-neutral-200">
-                    {invoiceData?.expenseCategory?.categoryName}
+                    {invoiceData?.categoryLabel || "General"}
                   </span>
                 </div>
               </div>
@@ -133,19 +153,28 @@ const Invoice = memo(({ open, setOpen, invoiceData, setInvoiceData }) => {
                 <li className="inline-flex items-center gap-x-2 py-3 px-4 text-sm border text-gray-800 -mt-px first:rounded-t-lg first:mt-0 last:rounded-b-lg dark:border-neutral-700 dark:text-neutral-200">
                   <div className="flex items-center justify-between w-full">
                     <span>Title</span>
-                    <span>{invoiceData?.expenseDescription}</span>
+                    <span>{invoiceData?.title}</span>
                   </div>
                 </li>
-                <li className="inline-flex items-center gap-x-2 py-3 px-4 text-sm border text-gray-800 -mt-px first:rounded-t-lg first:mt-0 last:rounded-b-lg dark:border-neutral-700 dark:text-neutral-200">
-                  <div className="flex items-center justify-between w-full">
-                    <span>Site Name</span>
-                    <span>{invoiceData?.siteDetail?.siteName}</span>
-                  </div>
-                </li>
+                {invoiceData?.project?.siteName ? (
+                  <li className="inline-flex items-center gap-x-2 py-3 px-4 text-sm border text-gray-800 -mt-px first:rounded-t-lg first:mt-0 last:rounded-b-lg dark:border-neutral-700 dark:text-neutral-200">
+                    <div className="flex items-center justify-between w-full">
+                      <span>Site Name</span>
+                      <span>{invoiceData?.project?.siteName}</span>
+                    </div>
+                  </li>
+                ) : (
+                  <li className="inline-flex items-center gap-x-2 py-3 px-4 text-sm border text-gray-800 -mt-px first:rounded-t-lg first:mt-0 last:rounded-b-lg dark:border-neutral-700 dark:text-neutral-200">
+                    <div className="flex items-center justify-between w-full">
+                      <span>Type</span>
+                      <span>{invoiceData?.type || "General"}</span>
+                    </div>
+                  </li>
+                )}
                 <li className="inline-flex items-center gap-x-2 py-3 px-4 text-sm font-semibold bg-gray-50 border text-gray-800 -mt-px first:rounded-t-lg first:mt-0 last:rounded-b-lg dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-200">
                   <div className="flex items-center justify-between w-full">
                     <span>Amount paid</span>
-                    <span>£{invoiceData?.expenseAmount.toFixed(2)}</span>
+                    <span>£{invoiceData?.amount.toFixed(2)}</span>
                   </div>
                 </li>
               </ul>

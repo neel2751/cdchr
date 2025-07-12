@@ -138,6 +138,8 @@ export async function storeClockTime(token, codeSiteId) {
         date: date,
       });
 
+      console.log("Existing Attendance:", existingAttendance);
+
       const MIN_BREAK_DURATION_MINUTES = 30;
       const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
       const MIN_BREAK_TIME_HOURS = 2;
@@ -155,7 +157,7 @@ export async function storeClockTime(token, codeSiteId) {
           actions: [
             {
               action: "clockIn",
-              time: currentTime,
+              time: date,
               source: "scanner",
             },
           ],
@@ -184,7 +186,7 @@ export async function storeClockTime(token, codeSiteId) {
             $push: {
               actions: {
                 action: "breakIn",
-                time: currentTime,
+                time: date,
                 source: "scanner",
               },
             },
@@ -215,7 +217,7 @@ export async function storeClockTime(token, codeSiteId) {
             $push: {
               actions: {
                 action: "breakOut",
-                time: currentTime,
+                time: date,
                 source: "scanner",
               },
             },
@@ -241,7 +243,7 @@ export async function storeClockTime(token, codeSiteId) {
             $push: {
               actions: {
                 action: "clockOut",
-                time: currentTime,
+                time: date,
                 source: "scanner",
               },
             },

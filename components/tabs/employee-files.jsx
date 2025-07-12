@@ -33,6 +33,19 @@ export default function EmployeeFiles() {
   const [showForm, setShowForm] = useState(false);
   const fields = [
     {
+      name: "docName",
+      labelText: "Document Name",
+      type: "text",
+      placeholder: "Enter Document Name",
+      validationOptions: {
+        required: "Document name is required",
+        minLength: {
+          value: 3,
+          message: "Document name must be at least 3 characters long",
+        },
+      },
+    },
+    {
       name: "docImage",
       labelText: "Document",
       type: "image",
@@ -60,7 +73,7 @@ export default function EmployeeFiles() {
           onClick={() => setShowForm(!showForm)}
         >
           <PlusIcon
-            className={`transition-all duration-700 ${
+            className={`transition-all duration-500 ${
               showForm ? "rotate-[45deg]" : ""
             } `}
           />

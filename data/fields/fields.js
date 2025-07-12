@@ -928,10 +928,9 @@ export const COMPANYFIELD = [
         message: "Company Name at least 3 characters",
       },
       maxLength: {
-        value: 20,
+        value: 40,
         message: "Company Name cannot be more than 20 characters",
       },
-      ...PATTERN,
     },
   },
   {

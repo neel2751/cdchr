@@ -33,7 +33,8 @@ export default function ChnageEmailPassword({ smtpId }) {
       validationOptions: {
         required: "Confirm password is required",
         validate: (value, formValues) =>
-          value === formValues.newPassword || "Passwords do not match",
+          value === formValues.newPassword ||
+          "Confirm password must match new password",
       },
     },
   ];

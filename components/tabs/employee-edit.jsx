@@ -19,13 +19,12 @@ import {
 } from "@/data/fields/fields";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { useFetchSelectQuery } from "@/hooks/use-query";
-import {
-  getSelectCompanies,
-  getSelectRoleType,
-} from "@/server/selectServer/selectServer";
+import { getSelectRoleType } from "@/server/selectServer/selectServer";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { useCommonContext } from "@/context/commonContext";
 import { handleOfficeEmployee } from "@/server/officeServer/officeServer";
+import { useSession } from "next-auth/react";
+import { useSelectCompany } from "@/hooks/useSelect/useSelect";
 
 const EmployeeEdit = () => {
   const { newData } = useAvatar();
@@ -42,10 +41,7 @@ const EmployeeEdit = () => {
     fetchFn: getSelectRoleType,
   });
 
-  const { data: selectCompany = [] } = useFetchSelectQuery({
-    queryKey: ["selectCompany"],
-    fetchFn: getSelectCompanies,
-  });
+  const company = useSelectCompany();
 
   const field = DEPARTMENTFIELD.map((item) => {
     if (item.name === "department") {
@@ -57,7 +53,7 @@ const EmployeeEdit = () => {
     if (item.name === "company") {
       return {
         ...item,
-        options: selectCompany,
+        options: company,
       };
     }
     return item;
@@ -135,12 +131,15 @@ const Form = ({
   btnName = "Update Setting",
   handleSubmit,
 }) => {
+  const { data: session } = useSession();
+  const role = session?.user?.role;
   return (
     <GlobalForm
       fields={fields}
       initialValues={initialValues}
       btnName={btnName}
       onSubmit={handleSubmit}
+      isHide={role === "superAdmin" ? false : true}
     />
   );
 };

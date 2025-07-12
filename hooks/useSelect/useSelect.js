@@ -1,7 +1,12 @@
 "use client";
 
-import { getSelectLeaveCategories } from "@/server/selectServer/selectServer";
+import {
+  getSelectCompanies,
+  getSelectLeaveCategories,
+  getSelectProjects,
+} from "@/server/selectServer/selectServer";
 import { useFetchSelectQuery } from "../use-query";
+import { createSelectHook } from "./useSelectHook";
 
 export function useSelectAllLeaveCategories() {
   const { data: leaveTypes = [] } = useFetchSelectQuery({
@@ -10,3 +15,11 @@ export function useSelectAllLeaveCategories() {
   });
   return leaveTypes;
 }
+
+export const useSelectCompany = createSelectHook(getSelectCompanies, [
+  "selectCompany",
+]);
+
+export const useSelectSiteProject = createSelectHook(getSelectProjects, [
+  "selectSiteProject",
+]);

@@ -70,8 +70,7 @@ const Company = ({ searchParams }) => {
     onClose: initialValues?._id ? handleEditClose : handleClose,
   });
   const onSubmit = (data) => {
-    console.log(data);
-    // handleSubmit(data);
+    handleSubmit(data);
   };
 
   const handleEdit = (item) => {

@@ -221,7 +221,7 @@ export async function changeOfficeEmployeePassword(data, id) {
   const { role, _id } = props?.session?.user;
   const employeeId = role === "superAdmin" ? decrypt(id) : _id;
   if (!employeeId) return { success: false, message: "User not found" };
-  const { currentPassword, newPassword } = data;
+  const { password: currentPassword, newPassword } = data;
   if (role !== "superAdmin" && role !== "admin") {
     if (!currentPassword)
       return { success: false, message: "Current Password is required" };

@@ -14,7 +14,8 @@ import {
 import { Button } from "../ui/button";
 import { Loader2 } from "lucide-react";
 import { isObjectEmpty } from "@/lib/object";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import useGlobalForm from "@/hooks/useGlobalForm";
 
 export function GlobalForm({
   fields,
@@ -23,11 +24,13 @@ export function GlobalForm({
   isLoading,
   btnName,
   resetForm = true, // Whether to reset form after submission
+  isHide = false, // Whether to hide the submit button
 }) {
-  const method = useForm({
-    defaultValues: initialValues || {},
-    shouldUnregister: true,
-  });
+  // const method = useForm({
+  //   defaultValues: initialValues || {},
+  //   shouldUnregister: true,
+  // });
+  const method = useGlobalForm(initialValues || {}, null);
 
   // Reset form values after form submission
   useEffect(() => {
@@ -36,7 +39,45 @@ export function GlobalForm({
     }
   }, [resetForm]);
 
-  const watchField = method.watch();
+  fields.forEach((field) => {
+    if (field.dependField && typeof field.function === "function") {
+      const dependFields = Array.isArray(field.dependField)
+        ? field.dependField
+        : [field.dependField];
+
+      const prevValues = useRef([]);
+
+      useEffect(
+        () => {
+          const allValues = method.watch(); // get all form values
+          const dependValues = dependFields.map((key) => allValues[key]);
+
+          // Only run if value has changed
+          const hasChanged = dependValues.some(
+            (val, i) => val !== prevValues.current[i]
+          );
+
+          if (hasChanged) {
+            // ✅ Reset the main field's value
+            method.setValue(field.name, "");
+
+            // ✅ Trigger the dependent function
+            field.function(
+              dependFields.length === 1
+                ? dependValues[0]
+                : Object.fromEntries(
+                    dependFields.map((k, i) => [k, dependValues[i]])
+                  )
+            );
+
+            // Update previous values
+            prevValues.current = dependValues;
+          }
+        },
+        dependFields.map((key) => method.watch(key))
+      ); // dependencies
+    }
+  });
 
   // First: filter only visible fields
   const visibleFields = fields.filter((field) => {
@@ -77,6 +118,17 @@ export function GlobalForm({
       }
     }
   }
+
+  // return {
+  //   method,
+  //   groupedFields,
+  //   visibleFields,
+  //   onSubmit: (data) => {
+  //     if (onSubmit) {
+  //       onSubmit(data);
+  //     }
+  //   },
+  // }
 
   return (
     <FormProvider {...method}>
@@ -165,24 +217,26 @@ export function GlobalForm({
             ))}
           </div>
         ))}
-        <div className="mt-7">
-          <Button disabled={isLoading} type="submit">
-            {isLoading ? (
-              <>
-                <Loader2 className="animate-spin" />
-                <span>Please wait...</span>
-              </>
-            ) : (
-              <span>
-                {btnName
-                  ? btnName
-                  : isObjectEmpty(initialValues)
-                  ? "Submit"
-                  : "Update"}
-              </span>
-            )}
-          </Button>
-        </div>
+        {!isHide && (
+          <div className="mt-7">
+            <Button disabled={isLoading} type="submit">
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  <span>Please wait...</span>
+                </>
+              ) : (
+                <span>
+                  {btnName
+                    ? btnName
+                    : isObjectEmpty(initialValues)
+                    ? "Submit"
+                    : "Update"}
+                </span>
+              )}
+            </Button>
+          </div>
+        )}
       </form>
     </FormProvider>
   );

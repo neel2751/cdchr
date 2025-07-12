@@ -5,7 +5,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -15,7 +14,6 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
-import { Button } from "@/components/ui/button";
 import { verify2FAWithDB } from "@/server/2FAServer/TwoAuthserver";
 import { toast } from "sonner";
 
@@ -53,6 +51,11 @@ export default function TwoFAConfirmModal({ open, onClose, onSuccess }) {
             authenticator app to confirm your action.
           </DialogDescription>
         </DialogHeader>
+        {loading && (
+          <div className="flex items-center justify-center mt-4">
+            <p>Loading...</p>
+          </div>
+        )}
         <div className="mt-4">
           <Label htmlFor="code-input-0" className="sr-only">
             Enter verification code

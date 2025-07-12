@@ -54,6 +54,11 @@ const statusThemeMap = {
   // Newly added statuses
   Expired: "purple",
   Restored: "lime",
+
+  // For Expense Status
+  pending: "amber",
+  approved: "green",
+  rejected: "red",
 };
 
 const Status = ({ title }) => {
@@ -66,7 +71,7 @@ const Status = ({ title }) => {
   return (
     <div className="flex items-center">
       <Badge
-        className={`${statusColor} cursor-pointer shadow-none whitespace-nowrap`}
+        className={`${statusColor} cursor-pointer shadow-none whitespace-nowrap capitalize`}
       >
         {/* Display the title, defaulting to "Unassigned" if empty */}
         {title || "Unassigned"}

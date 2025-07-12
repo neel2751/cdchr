@@ -17,6 +17,7 @@ import CommonLeaveModel from "@/models/commonLeaveModel";
 import mongoose from "mongoose";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { createObjectId } from "@/lib/mongodb";
+import ExpenseCategoryModel from "@/models/expense/expenseCategoryModel";
 
 export const getSelectRoleType = async () => {
   try {
@@ -415,6 +416,75 @@ export const getSelectLeaveRequestForEmployee = async () => {
     }
   } catch (error) {
     console.log(error);
+    return { success: false, message: "Error Occured" };
+  }
+};
+
+export const getSelectExpenseCategory = async ({ companyId, projectId }) => {
+  try {
+    console.log("companyId:", companyId, "projectId:", projectId);
+    await connect();
+    const match = { isActive: true, isDeleted: false };
+    if (companyId) {
+      match.companyId = createObjectId(companyId);
+
+      if (projectId) {
+        match.projectIds = { $in: [createObjectId(projectId)] };
+      } else {
+        // ✅ Match categories not tied to any project (no projectIds OR empty array)
+        match.$or = [
+          { projectIds: { $exists: false } },
+          { projectIds: { $size: 0 } },
+        ];
+      }
+    }
+
+    const categories = await ExpenseCategoryModel.aggregate([
+      { $match: match },
+      {
+        $project: {
+          _id: 0,
+          value: "$_id", // Renames `_id` to `value`
+          label: "$name", // Renames `roleTitle` to `name`
+        },
+      },
+    ]).exec();
+    const data = {
+      success: true,
+      data: JSON.stringify(categories),
+    };
+    return data;
+  } catch (err) {
+    console.log(" Error fetching expense categories:", err);
+    return { success: false, message: "Error Occured" };
+  }
+};
+export const getSelectExpenseCategoryBySite = async ({ projectId }) => {
+  try {
+    await connect();
+    const categories = await ExpenseCategoryModel.aggregate([
+      {
+        $match: {
+          isActive: true,
+          isDeleted: false,
+          projectIds: { $in: [createObjectId(projectId)] },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          value: "$_id", // Renames `_id` to `value`
+          label: "$name", // Renames `roleTitle` to `name`
+        },
+      },
+    ]).exec();
+    const data = {
+      success: true,
+      data: JSON.stringify(categories),
+    };
+    return data;
+  } catch (err) {
+    console.log("Error fetching expense categories by site:", err);
     return { success: false, message: "Error Occured" };
   }
 };

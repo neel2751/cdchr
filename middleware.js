@@ -3,13 +3,27 @@ import { NextResponse } from "next/server";
 import { MENU, COMMONMENUITEMS } from "./data/menu";
 
 async function checkRoleMiddleware(req) {
-  const userRole = req?.nextauth?.token?.role;
   const requestedPath = req?.nextUrl?.pathname;
-  const employeeId = req?.nextauth?.token?.id;
+  const token = req?.nextauth?.token;
+  const employeeId = token?.id;
+  const userRole = token?.role;
+  const requires2FA = token?.requiresTwoFactor === true;
 
   // If no token is found, redirect to login
   if (!userRole || !employeeId) {
     return NextResponse.redirect(new URL("/api/auth/signin", req.url));
+  }
+
+  // we have to allow all route for /admin/account/*
+  const isAdminAccountRoute = requestedPath.startsWith("/admin/account/");
+
+  if (requestedPath === "/verify" || isAdminAccountRoute) {
+    return NextResponse.next();
+  }
+
+  // If 2FA is required, redirect to verification page
+  if (requires2FA && requestedPath !== "/verify") {
+    return NextResponse.redirect(new URL("/verify", req.url));
   }
 
   const rolePathMap = {

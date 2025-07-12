@@ -184,6 +184,18 @@ export async function checkUserHas2FA() {
   }
 }
 
+export async function check2FAEnabled(employeeId) {
+  try {
+    await connect();
+    const exist = await TwoFAMoldel.findOne({ employeeId });
+    if (exist && exist.isEnabled) return true;
+    return false;
+  } catch (error) {
+    console.error("Error checking 2FA enabled:", error);
+    return false;
+  }
+}
+
 export async function verify2FAWithDB(code) {
   try {
     const { props } = await getServerSideProps();

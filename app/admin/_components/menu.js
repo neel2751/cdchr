@@ -43,6 +43,7 @@ import { AddEmploeeLeave } from "../leaveManagement/components/addEmployeeLeave/
 import EmployeeSiteManagement from "../siteAssignEmployee/test";
 import QRDialog from "../siteAssign/features/siteScan";
 import ScanQrcode from "@/components/2FA/scanQrcode";
+import SiteExpense from "../siteAssign/features/siteExpense";
 
 export const officeMenu = [
   {
@@ -60,21 +61,26 @@ export const officeMenu = [
   //     link: "compensation",
   //     icon: SirenIcon,
   //   },
-  {
-    name: "Weekly Rota",
-    link: "weeklyrota",
-    icon: TimerIcon,
-  },
+  // {
+  //   name: "Time Off",
+  //   link: "timeoff",
+  //   icon: TimerIcon,
+  // },
+  // {
+  //   name: "Weekly Rota",
+  //   link: "weeklyrota",
+  //   icon: TimerIcon,
+  // },
   // {
   //   name: "Performance",
   //   link: "performance",
   //   icon: LayoutListIcon,
   // },
-  // {
-  //   name: "Document",
-  //   link: "document",
-  //   icon: FileLockIcon,
-  // },
+  {
+    name: "Document",
+    link: "document",
+    icon: FileLockIcon,
+  },
   // {
   //   name: "OnBoarding",
   //   link: "onboarding",
@@ -180,11 +186,11 @@ export const siteMenu = [
   //   icon: TimerIcon,
   //   link: "employee",
   // },
-  {
-    name: "Expense",
-    icon: ClipboardPlus,
-    link: "expense",
-  },
+  // {
+  //   name: "Expense",
+  //   icon: ClipboardPlus,
+  //   link: "expense",
+  // },
   // {
   //   name: "Site Assign",
   //   icon: FileLockIcon,
@@ -212,7 +218,7 @@ export const officeSlugComponentmap = {
   edit: EmployeeEdit,
   // timeoff: EmployeeTimeOff,
   // performance: EmployeePerformance,
-  // document: EmployeeFiles,
+  document: EmployeeFiles,
   // onboarding: EmployeeOnboarding,
   password: PasswordChange,
   session: SessionManagement,
@@ -235,4 +241,5 @@ export const slugComponentmap = {
 export const siteSlugComponentmap = {
   overview: EmployeeSiteManagement,
   scan: QRDialog,
+  expense: SiteExpense,
 };

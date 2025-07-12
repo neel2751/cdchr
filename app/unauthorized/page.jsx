@@ -49,7 +49,7 @@ export default async function UnauthPage() {
       ) : (
         <Button asChild>
           <Link
-            href="/admin/dahsboard"
+            href="/admin/dashboard"
             className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
           >
             Go to Admin Dashboard
