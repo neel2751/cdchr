@@ -12,12 +12,13 @@ const S3 = new AWS.S3({
     secretAccessKey: process.env.AWS_ACCESS_PORTAL_KEY,
   },
 });
+const Bucket = process.env.AWS_BUCKET_NAME;
 
 export const uploadAWSMultipartDocument = async (file) => {
   const { props } = await getServerSideProps();
   const { _id: employeeId } = props?.session?.user;
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME,
+    Bucket,
     Key: `${employeeId}/${file.name}`,
     ContentType: file.type,
     ACL: "private", // or "public-read" if needed
@@ -32,7 +33,7 @@ export const getPresignedURLAWS = async (uploadId, partNumber, fileName) => {
   const { props } = await getServerSideProps();
   const { _id: employeeId } = props?.session?.user;
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME,
+    Bucket,
     Key: `${employeeId}/${fileName}`,
     PartNumber: partNumber,
     UploadId: uploadId,
@@ -53,7 +54,7 @@ export const completeUploadAwsMultipartDocument = async (
     const { props } = await getServerSideProps();
     const { _id: employeeId } = props?.session?.user;
     const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
+      Bucket,
       Key: `${employeeId}/${fileName}`,
       MultipartUpload: {
         Parts: parts,
@@ -72,7 +73,7 @@ export const listParts = async (uploadId, fileName) => {
   const { props } = await getServerSideProps();
   const { _id: employeeId } = props?.session?.user;
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME,
+    Bucket,
     Key: `${employeeId}/${fileName}`,
     UploadId: uploadId,
   };
@@ -102,7 +103,7 @@ export const generatePreSignedURL = async (file) => {
   const { props } = await getServerSideProps();
   const { _id: employeeId } = props?.session?.user;
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME,
+    Bucket,
     Key: `${employeeId}/${file.name}`,
     ContentType: file.type,
   };
@@ -143,7 +144,7 @@ const uploadFileOnSignedUrl = async (file, signedUrl) => {
 
 export const generatePreSignedGetURL = async (key) => {
   const params = {
-    Bucket: process.env.AWS_BUCKET_NAME,
+    Bucket,
     Key: key,
   };
   const command = new AWS.GetObjectCommand(params);
@@ -175,7 +176,7 @@ export async function generatePreSignedUrl({
     }
 
     const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
+      Bucket,
       Key: `${path}/${fileName}`,
       ContentType: contentType,
     };
@@ -187,6 +188,7 @@ export async function generatePreSignedUrl({
     return {
       success: true,
       url,
+      fileName,
       key: `${path}/${fileName}`,
     };
   } catch (error) {
@@ -194,6 +196,52 @@ export async function generatePreSignedUrl({
     return {
       success: false,
       message: "Failed to generate pre-signed URL",
+    };
+  }
+}
+
+export async function createMultipartUpload({
+  fileName,
+  contentType,
+  path = "uploads",
+  access = "private",
+}) {
+  try {
+    const validAccessTypes = ["public", "private"];
+    if (!validAccessTypes.includes(access)) {
+      throw new Error("Invalid access type. Use 'public' or 'private'.");
+    }
+    if (!fileName || !contentType) {
+      throw new Error("File name and content type are required.");
+    }
+    if (!path) {
+      path = "uploads"; // Default path if not provided
+    }
+    if (access === "public" && !path.startsWith("public")) {
+      path = `public/${path}`;
+    }
+    // Generate a random file name to avoid conflicts
+    const key = generateRandomFileName(fileName);
+    const params = {
+      Bucket,
+      path: `${path}/${key}`,
+      Key: key,
+      ContentType: contentType,
+    };
+    console.log("Creating multipart upload with params:", params);
+    // Log the S3 client configuration
+    const command = new AWS.CreateMultipartUploadCommand(params);
+    const response = await S3.send(command);
+    return {
+      success: true,
+      uploadId: response.UploadId,
+      key: response.Key,
+    };
+  } catch (error) {
+    console.error("Error creating multipart upload:", error);
+    return {
+      success: false,
+      message: "Failed to create multipart upload",
     };
   }
 }
@@ -244,4 +292,40 @@ export async function uploadImage({ file, path, access = "private" }) {
 
   // Filter out failed uploads
   return uploaded.filter((f) => f !== null);
+}
+
+export async function deleteFileFromS3(key) {
+  try {
+    const params = {
+      Bucket,
+      Key: key,
+    };
+    const command = new AWS.DeleteObjectCommand(params);
+    await S3.send(command);
+    return { success: true, message: "File deleted successfully" };
+  } catch (error) {
+    console.error("Error deleting file from S3:", error);
+    return { success: false, message: "Failed to delete file" };
+  }
+}
+
+export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
+  try {
+    const params = {
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+    };
+    const command = new AWS.GetObjectCommand(params);
+    const url = await getSignedUrl(S3, command, { expiresIn });
+    return {
+      success: true,
+      url,
+    };
+  } catch (error) {
+    console.error("Error generating download URL:", error);
+    return {
+      success: false,
+      message: "Failed to generate download URL",
+    };
+  }
 }

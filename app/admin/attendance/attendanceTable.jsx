@@ -392,56 +392,6 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                             assignment?.breakOut
                           ) || "-"}
                         </TableCell>
-
-                        {(role === "superAdmin" || role === "admin") &&
-                          assignment?.clockOut && (
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      disabled={assignment?.isLocked}
-                                      className="text-red-600 hover:text-red-700"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </AlertDialogTrigger>
-
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle>
-                                        Remove Assignment
-                                      </AlertDialogTitle>
-
-                                      <AlertDialogDescription>
-                                        Are you sure you want to remove{" "}
-                                        {assignment?.firstName} from{" "}
-                                        {assignment?.siteName}? This action
-                                        cannot be undone.
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel>
-                                        Cancel
-                                      </AlertDialogCancel>
-
-                                      <AlertDialogAction
-                                        onClick={() =>
-                                          handleRemoveAssignment(assignment._id)
-                                        }
-                                        className="bg-red-600 hover:bg-red-700"
-                                      >
-                                        Remove
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
-                              </div>
-                            </TableCell>
-                          )}
                         {(role === "superAdmin" || role === "admin") &&
                           assignment?.clockOut && (
                             <TableCell>
@@ -473,7 +423,56 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                               )}
                             </TableCell>
                           )}
-                        <TableCell className="px-6 py-4">
+
+                        {(role === "superAdmin" || role === "admin") &&
+                          assignment?.clockOut && (
+                            <TableCell>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={assignment?.isLocked}
+                                    className="text-red-600 hover:text-red-700"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>
+                                      Remove Assignment
+                                    </AlertDialogTitle>
+
+                                    <AlertDialogDescription>
+                                      Are you sure you want to remove{" "}
+                                      {assignment?.firstName} from{" "}
+                                      {assignment?.siteName}? This action cannot
+                                      be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>
+                                      Cancel
+                                    </AlertDialogCancel>
+
+                                    <AlertDialogAction
+                                      onClick={() =>
+                                        handleRemoveAssignment(assignment._id)
+                                      }
+                                      className="bg-red-600 hover:bg-red-700"
+                                    >
+                                      Remove
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </TableCell>
+                          )}
+
+                        <TableCell>
                           <div className="flex items-center gap-2">
                             {!assignment?.clockIn && (
                               <Button
@@ -554,14 +553,16 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           )}
         </CardContent>
         <CardFooter className={"border-t"}>
-          <PaginationWithLinks
-            page={1}
-            pageSizeSelectOptions={{
-              pageSizeOptions: [10, 20, 50, 100],
-            }}
-            pageSize={pageSize}
-            totalCount={total}
-          />
+          {attendanceList?.length > 0 && (
+            <PaginationWithLinks
+              page={currentPage}
+              pageSizeSelectOptions={{
+                pageSizeOptions: [10, 20, 50, 100],
+              }}
+              pageSize={pageSize}
+              totalCount={total}
+            />
+          )}
         </CardFooter>
       </Card>
     </div>

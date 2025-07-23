@@ -112,8 +112,8 @@ const Employee = ({ searchParams }) => {
     setIsEdit(true);
   };
   const onSubmit = (data) => {
-    console.log(data);
-    return;
+    // console.log(data);
+    // return;
 
     if (data?.visaEndDate && !isFuture(new Date(data.eVisaExp))) {
       return toast.error("Visa Expiry should be greater than start date");

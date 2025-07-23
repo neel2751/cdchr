@@ -16,13 +16,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { format, formatDistanceStrict, isPast } from "date-fns";
-import { Edit, Trash2 } from "lucide-react";
+import { Edit, Eye, Trash2 } from "lucide-react";
 import React from "react";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import { CheckBoxNormal } from "@/components/form/formFields";
 import { useCommonContext } from "@/context/commonContext";
 import { TableStatus } from "@/components/tableStatus/status";
 import EmployeeSheet from "./employeeSheet";
+import Link from "next/link";
+import { encrypt } from "@/lib/algo";
 
 const EmployeTabel = () => {
   const {
@@ -122,6 +124,14 @@ const EmployeTabel = () => {
 
               <TableCell>
                 <div className="flex gap-2">
+                  <Button variant="outline" size="icon" asChild>
+                    <Link
+                      href={`/admin/employee/${encrypt(item?._id)}/overview`}
+                    >
+                      <Eye className="text-blue-600" />
+                    </Link>
+                  </Button>
+
                   <Dialog open={isEdit} onOpenChange={setIsEdit}>
                     <DialogTrigger asChild>
                       <Button

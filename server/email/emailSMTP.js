@@ -359,7 +359,7 @@ export async function getSMTPForFeature(feature) {
     isPrimary: true,
     isDeleted: false,
     isActive: true,
-  });
+  }).lean(); // Use lean() for better performance if you don't need mongoose doc methods
   if (!smtp) {
     throw new Error(`No primary SMTP configured for feature: ${feature}`);
   }
@@ -367,10 +367,9 @@ export async function getSMTPForFeature(feature) {
   smtp.password = decrypt(smtp.password);
   return {
     success: true,
-    data: JSON.stringify({ ...smtp, password: null }),
+    data: JSON.stringify(smtp),
   };
 }
-
 export async function getOneSMTPEmail(smtpId) {
   try {
     if (!smtpId) return { success: false, message: "Id is required!" };
@@ -385,7 +384,6 @@ export async function getOneSMTPEmail(smtpId) {
     return { success: false, message: "Something want wrong" };
   }
 }
-
 export async function testSMTPConnection(smtp) {
   try {
     const data = {
@@ -411,7 +409,6 @@ export async function testSMTPConnection(smtp) {
     return { success: false, message: "Error testing SMTP email" };
   }
 }
-
 export async function addSMTP(data) {
   try {
     const { host, userName, password, port, icon } = data;
@@ -627,6 +624,29 @@ export async function testSMTPEmil(smtpId) {
     // } else {
     //     return { success: false, message: "Failed to send test email" };
     // }
+  } catch (error) {
+    console.error("Error testing SMTP email:", error);
+    return { success: false, message: "Error testing SMTP email" };
+  }
+}
+export async function userRegisterEmail(smtp) {
+  try {
+    const data = {
+      host: smtp.host,
+      port: smtp.port || 587,
+      secure: smtp.secure || false, // true for 465, false for other ports
+      userName: smtp.userName,
+      password: smtp.password,
+      fromName: `<${smtp.fromName}>`,
+      toEmail: smtp.toEmail || smtp.userName, // Sending to the SMTP username for testing
+      subject: smtp.subject || "User Registration Email",
+      html: smtp.html || "<p>Welcome to our service!</p>",
+    };
+    const result = await sendMail(data);
+    if (result.success) {
+      return { success: true, message: "Test email sent successfully" };
+    }
+    return { success: false, message: "Failed to send test email" };
   } catch (error) {
     console.error("Error testing SMTP email:", error);
     return { success: false, message: "Error testing SMTP email" };

@@ -8,6 +8,25 @@ export const PATTERN = {
   },
 };
 
+export const EMPLOYEID = {
+  name: "employeId",
+  labelText: "Employee ID",
+  type: "text",
+  placeholder: "Enter Employee ID",
+  validationOptions: {
+    required: "Employee ID is required",
+    minLength: {
+      value: 3,
+      message: "Minimum 3 characters required",
+    },
+    maxLength: {
+      value: 20,
+      message: "Maximum 20 characters allowed",
+    },
+    ...PATTERN,
+  },
+};
+
 export const EMERGENCYFIELD = [
   {
     name: "emergencyName",
@@ -267,11 +286,13 @@ export const EMPLOYEFIELD = [
       },
     },
   },
+  EMPLOYEID,
   {
     name: "address",
     labelText: "Address",
     type: "text",
     placeholder: "Apt, Syuite, Building",
+    size: true,
     validationOptions: {
       required: "Address is required",
       minLength: {
@@ -282,7 +303,6 @@ export const EMPLOYEFIELD = [
         value: 50,
         message: "Maximum 50 characters allowed",
       },
-      ...PATTERN,
     },
   },
   {
@@ -387,6 +407,37 @@ export const EMPLOYEFIELD = [
       },
     },
   },
+  // {
+  //   name: "cis",
+  //   labelText: "CIS",
+  //   type: "select",
+  //   options: [
+  //     { value: "Registered", label: "Registered" },
+  //     { value: "Unregistered", label: "Unregistered" },
+  //   ],
+  //   placeholder: "Select CIS Status",
+  //   validationOptions: {
+  //     required: "CIS status is required",
+  //   },
+  // },
+  {
+    name: "cisDeduction",
+    labelText: "CIS Deduction",
+    type: "select",
+    options: [
+      { value: "20", label: "20%" },
+      { value: "30", label: "30%" },
+      // { value: "0", label: "0%" },
+    ],
+    placeholder: "Select CIS Deduction",
+    // showIf: {
+    //   field: "cis",
+    //   value: "Registered",
+    // },
+    validationOptions: {
+      required: "CIS Deduction is required",
+    },
+  },
   {
     name: "utr",
     labelText: " UTR",
@@ -404,6 +455,21 @@ export const EMPLOYEFIELD = [
         value: /^\d{10}$/i,
         message: "Must be exactly 10 digits",
       },
+    },
+  },
+  {
+    name: "payType",
+    labelText: "Pay Type",
+    type: "select",
+    options: [
+      { value: "Hourly", label: "Hourly" },
+      { value: "Daily", label: "Daily" },
+      { value: "Weekly", label: "Weekly" },
+      { value: "Monthly", label: "Monthly" },
+    ],
+    placeholder: "Select Pay Type",
+    validationOptions: {
+      required: "Pay Type is required",
     },
   },
   {
@@ -710,6 +776,7 @@ export const OFFICEFIELD = [
       },
     },
   },
+  EMPLOYEID,
   ...DEPARTMENTFIELD,
   {
     name: "employeType",

@@ -51,7 +51,7 @@ const Invoice = memo(({ open, setOpen, invoiceData }) => {
                 fill="none"
                 xmlns="http://www.w3.org/2000/svg"
               >
-                <g clip-path="url(#clip0_666_273469)">
+                <g clipPath="url(#clip0_666_273469)">
                   <rect width="576" height="120" fill="#B2E7FE"></rect>
                   <rect
                     x="289.678"

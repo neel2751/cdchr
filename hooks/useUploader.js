@@ -1,5 +1,8 @@
 "use client";
-import { generatePreSignedUrl } from "@/server/aws/upload";
+import {
+  createMultipartUpload,
+  generatePreSignedUrl,
+} from "@/server/aws/upload";
 import { generateRandomFileName } from "@/utils/generateRandomFileName";
 import axios from "axios";
 import { useState } from "react";
@@ -38,12 +41,19 @@ export function useUploader() {
           const progress = Math.round(
             (progressEvent.loaded * 100) / progressEvent.total
           );
-          setProgressMap((prev) => ({ ...prev, [key]: progress }));
+          setProgressMap((prev) => ({ ...prev, [file.name]: progress }));
         },
       });
 
       if (response.status === 200) {
-        return { success: true, key, url };
+        return {
+          success: true,
+          key,
+          url,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+        };
       } else {
         throw new Error("Upload failed");
       }
@@ -136,7 +146,7 @@ export function useUploader() {
     }
   };
 
-  const uploadFiles = async (fileList) => {
+  const uploadFiles = async (fileList, path, access) => {
     setIsUploading(true);
     const uploadPromises = fileList.map((file) =>
       uploadFile(file, path, access)
@@ -158,6 +168,7 @@ export function useUploader() {
     uploadFiles,
     cancelUpload,
     progressMap,
+    setProgressMap,
     files,
     isUploading,
   };

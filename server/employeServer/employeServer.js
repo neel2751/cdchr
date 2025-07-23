@@ -4,6 +4,12 @@ import EmployeModel from "@/models/employeModel";
 import { GenerateHashPassword } from "../officeServer/officeServer";
 import { getServerSideProps } from "../session/session";
 import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
+import { extractData } from "../officeServer/officeEmployeeDetails";
+import { createObjectId } from "@/lib/mongodb";
+import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
+import { decrypt } from "@/lib/algo";
+import SiteClockModel from "@/models/siteClockModel";
+import { normalizeDateToUTC } from "@/lib/formatDate";
 
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -154,11 +160,32 @@ export const handleEmploye = async (data, isChecked, id) => {
       if (!addEmploye)
         return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
       if (addEmploye) {
-        const data = {
-          success: true,
-          message: `Employee added successfully`,
-        };
-        return data;
+        const { firstName, lastName, email } = addEmploye; // get the employee id
+        const type = "IT";
+        const response = await getSMTPForFeature(type);
+        if (response?.success) {
+          const emailData = JSON.parse(response?.data);
+          // register email we have to send the welcome mail with email and password with site link
+          const html = `<p>Dear ${firstName} ${lastName},</p>
+          <p>Welcome to our team! We are excited to have you on board.</p>
+          <p>Your login details are as follows:</p>
+          <p>Email: ${email}</p>
+          <p>Password: Cdc@1234</p>
+          <p>Please log in to your account using the following link:</p>
+          <p><a href="https://cdchr.onrender.com/employee">Click here to login</a></p>
+          <p>Thank you for joining us!</p>
+          <p>Best regards,</p>
+          <p>Hr Management</p>`;
+          const subject = "Welcome to Our Team";
+          const smtp = { ...emailData, toEmail: email, html, subject };
+          await userRegisterEmail(smtp);
+        } else {
+          const data = {
+            success: true,
+            message: `Employee added successfully`,
+          };
+          return data;
+        }
       }
     }
   } catch (error) {
@@ -308,5 +335,425 @@ export async function changeSiteEmployeePassword(data) {
   } catch (error) {
     console.log("Error in changeSiteEmployeePassword:", error);
     return { success: false, message: "Error Changing Password" };
+  }
+}
+
+export async function getEmployeeWiseData(params) {
+  try {
+    const employeeId = await extractData(params);
+    if (!employeeId) {
+      return { success: false, message: "Employee ID not found" };
+    }
+    await connect();
+    const pipeline = [
+      {
+        $match: {
+          _id: createObjectId(employeeId),
+          delete: false,
+        },
+      },
+      {
+        $unset: ["password"],
+      },
+    ];
+    // we have to set the signal as well in this case
+    const employeeDeatils = await EmployeModel.aggregate(pipeline);
+    return { success: true, data: JSON.stringify(employeeDeatils[0]) };
+  } catch (error) {
+    console.error("Error fetching employee data:", error);
+    return { success: false, message: "Error fetching employee data" };
+  }
+}
+
+export async function getSiteEmployeAttendanceData(params) {
+  try {
+    const { props } = await getServerSideProps();
+    const employeeId = props?.session?.user?._id;
+    const role = props?.session?.user?.role;
+    const employeId =
+      role === "superAdmin" ? decrypt(params?.employeId) : employeeId;
+    if (!employeId) {
+      return { success: false, message: "Employee ID not found" };
+    }
+    await connect();
+    const today = normalizeDateToUTC(new Date());
+    const start = params?.fromDate
+      ? normalizeDateToUTC(new Date(params?.fromDate))
+      : today;
+    const end = params?.toDate
+      ? normalizeDateToUTC(new Date(params?.toDate))
+      : today;
+
+    if (start > end) {
+      return {
+        success: false,
+        message: "Start date cannot be later than end date",
+      };
+    }
+    const page = parseInt(params?.page || 1);
+    const pageSize = parseInt(params?.pageSize || 10);
+    const skip = (page - 1) * pageSize;
+
+    const match = {
+      employeeId: createObjectId(employeId),
+      isDeleted: false,
+      date: {
+        $gte: start,
+        $lte: end,
+      },
+    };
+
+    const pipeline = [
+      {
+        $match: match,
+      },
+      // {
+      //   $sort: { date: -1 }, // Sort by date in descending order
+      // },
+      {
+        $lookup: {
+          from: "employes",
+          localField: "employeeId",
+          foreignField: "_id",
+          as: "employee",
+        },
+      },
+      { $unwind: "$employee" },
+      {
+        $lookup: {
+          from: "projectsites",
+          localField: "siteId",
+          foreignField: "_id",
+          as: "site",
+        },
+      },
+      { $unwind: "$site" },
+      {
+        $facet: {
+          metadata: [
+            {
+              $addFields: {
+                // Convert to minutes, but only if the time exists
+                clockInMinutes: {
+                  $cond: [
+                    { $gt: ["$clockIn", null] },
+                    {
+                      $let: {
+                        vars: { parts: { $split: ["$clockIn", ":"] } },
+                        in: {
+                          $add: [
+                            {
+                              $multiply: [
+                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                                60,
+                              ],
+                            },
+                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                          ],
+                        },
+                      },
+                    },
+                    null,
+                  ],
+                },
+                clockOutMinutes: {
+                  $cond: [
+                    { $gt: ["$clockOut", null] },
+                    {
+                      $let: {
+                        vars: { parts: { $split: ["$clockOut", ":"] } },
+                        in: {
+                          $add: [
+                            {
+                              $multiply: [
+                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                                60,
+                              ],
+                            },
+                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                          ],
+                        },
+                      },
+                    },
+                    null,
+                  ],
+                },
+                breakInMinutes: {
+                  $cond: [
+                    { $gt: ["$breakIn", null] },
+                    {
+                      $let: {
+                        vars: { parts: { $split: ["$breakIn", ":"] } },
+                        in: {
+                          $add: [
+                            {
+                              $multiply: [
+                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                                60,
+                              ],
+                            },
+                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                          ],
+                        },
+                      },
+                    },
+                    null,
+                  ],
+                },
+                breakOutMinutes: {
+                  $cond: [
+                    { $gt: ["$breakOut", null] },
+                    {
+                      $let: {
+                        vars: { parts: { $split: ["$breakOut", ":"] } },
+                        in: {
+                          $add: [
+                            {
+                              $multiply: [
+                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                                60,
+                              ],
+                            },
+                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                          ],
+                        },
+                      },
+                    },
+                    null,
+                  ],
+                },
+              },
+            },
+            {
+              $addFields: {
+                totalWorkMinutes: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ne: ["$clockOutMinutes", null] },
+                        { $ne: ["$clockInMinutes", null] },
+                        { $gte: ["$clockOutMinutes", "$clockInMinutes"] },
+                      ],
+                    },
+                    { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
+                    0,
+                  ],
+                },
+                totalBreakMinutes: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $ne: ["$breakOutMinutes", null] },
+                        { $ne: ["$breakInMinutes", null] },
+                        { $gte: ["$breakOutMinutes", "$breakInMinutes"] },
+                      ],
+                    },
+                    { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
+                    0,
+                  ],
+                },
+              },
+            },
+            {
+              $addFields: {
+                totalWorkMinutes: {
+                  $subtract: ["$clockOutMinutes", "$clockInMinutes"],
+                },
+                totalBreakMinutes: {
+                  $subtract: ["$breakOutMinutes", "$breakInMinutes"],
+                },
+              },
+            },
+            {
+              $addFields: {
+                netWorkMinutes: {
+                  $subtract: ["$totalWorkMinutes", "$totalBreakMinutes"],
+                },
+              },
+            },
+            {
+              $addFields: {
+                totalPay: {
+                  $switch: {
+                    branches: [
+                      {
+                        case: { $eq: ["$employee.payType", "Hourly"] },
+                        then: {
+                          $multiply: [
+                            "$employee.payRate",
+                            { $divide: ["$netWorkMinutes", 60] }, // Convert minutes to hours
+                          ],
+                        },
+                      },
+                      {
+                        case: { $eq: ["$employee.payType", "Daily"] },
+                        then: {
+                          $multiply: [
+                            "$employee.payRate",
+                            { $divide: ["$netWorkMinutes", 480] }, // Assuming 8 hours a day
+                          ],
+                        },
+                      },
+                      {
+                        case: { $eq: ["$employee.payType", "Weekly"] },
+                        then: {
+                          $multiply: [
+                            "$employee.payRate",
+                            { $divide: ["$netWorkMinutes", 2880] }, // Assuming 48 hours a week
+                          ],
+                        },
+                      },
+                      {
+                        case: { $eq: ["$employee.payType", "Monthly"] },
+                        then: {
+                          $multiply: [
+                            "$employee.payRate",
+                            { $divide: ["$netWorkMinutes", 129600] }, // Assuming 2160 hours a month
+                          ],
+                        },
+                      },
+                      {
+                        case: { $eq: ["$employee.payType", "Yearly"] },
+                        then: {
+                          $multiply: [
+                            "$employee.payRate",
+                            { $divide: ["$netWorkMinutes", 1555200] }, // Assuming 25920 hours a year
+                          ],
+                        },
+                      },
+                    ],
+                    default: {
+                      $multiply: [
+                        "$employee.payRate",
+                        { $divide: ["$netWorkMinutes", 60] }, // Default to hourly calculation
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              $addFields: {
+                cisDeductedAmount: {
+                  $multiply: [
+                    "$totalPay",
+                    { $divide: ["$employee.cisDeduction", 100] },
+                  ],
+                },
+              },
+            },
+            {
+              $addFields: {
+                finalPay: {
+                  $subtract: ["$totalPay", "$cisDeductedAmount"],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: "$employeeId",
+                employeeName: { $first: "$employee.firstName" },
+                payRate: { $first: "$employee.payRate" },
+                cisDeduct: { $first: "$employee.cisDeduction" },
+                totalWorkMinutes: { $sum: "$totalWorkMinutes" },
+                totalBreakMinutes: { $sum: "$totalBreakMinutes" },
+                totalNetMinutes: { $sum: "$netWorkMinutes" },
+                totalPay: { $sum: "$totalPay" },
+                totalCIS: { $sum: "$cisDeductedAmount" },
+                finalTotalPay: { $sum: "$finalPay" },
+              },
+            },
+            {
+              $addFields: {
+                totalHour: {
+                  $concat: [
+                    {
+                      $cond: [
+                        {
+                          $lt: [
+                            { $floor: { $divide: ["$totalNetMinutes", 60] } },
+                            10,
+                          ],
+                        },
+                        {
+                          $concat: [
+                            "0",
+                            {
+                              $toString: {
+                                $floor: { $divide: ["$totalNetMinutes", 60] },
+                              },
+                            },
+                          ],
+                        },
+                        {
+                          $toString: {
+                            $floor: { $divide: ["$totalNetMinutes", 60] },
+                          },
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      $cond: [
+                        { $lt: [{ $mod: ["$totalNetMinutes", 60] }, 10] },
+                        {
+                          $concat: [
+                            "0",
+                            { $toString: { $mod: ["$totalNetMinutes", 60] } },
+                          ],
+                        },
+                        { $toString: { $mod: ["$totalNetMinutes", 60] } },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          data: [
+            { $sort: { date: -1 } }, // Sort by date descending
+            { $skip: skip }, // Skip for pagination
+            { $limit: pageSize }, // Limit results for pagination
+            {
+              $project: {
+                _id: 1,
+                siteName: "$site.siteName",
+                clockIn: 1,
+                clockOut: 1,
+                breakIn: 1,
+                breakOut: 1,
+                date: 1,
+              },
+            },
+          ],
+          totalCount: [
+            {
+              $count: "count",
+            },
+          ],
+        },
+      },
+    ];
+
+    const attendanceData = await SiteClockModel.aggregate(pipeline);
+    if (!attendanceData || attendanceData.length === 0) {
+      return { success: false, message: "No Attendance Data Found" };
+    }
+    const result = attendanceData[0];
+    const datas = {
+      metadata: result.metadata[0],
+      data: result.data || [],
+    };
+    return {
+      success: true,
+      data: JSON.stringify(datas),
+      totalCount: result.totalCount[0]?.count || 0,
+    };
+  } catch (error) {
+    console.error("Error fetching employee attendance data:", error);
+    return {
+      success: false,
+      message: "Error fetching employee attendance data",
+    };
   }
 }

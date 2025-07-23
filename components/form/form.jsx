@@ -79,6 +79,9 @@ export function GlobalForm({
     }
   });
 
+  // Watch the field values that are used for conditional rendering
+  const watchField = method.watch();
+
   // First: filter only visible fields
   const visibleFields = fields.filter((field) => {
     if (field.showIf) {

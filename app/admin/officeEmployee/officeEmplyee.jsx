@@ -2,6 +2,7 @@
 import SearchDebounce from "@/components/search/searchDebounce";
 import { Button } from "@/components/ui/button";
 import {
+  countCompanyWiseEmployees,
   getOfficeEmployee,
   handleOfficeEmployee,
   officeEmployeeDelete,
@@ -25,6 +26,7 @@ import { CommonContext } from "@/context/commonContext";
 import { OFFICEFIELD } from "@/data/fields/fields";
 import Alert from "@/components/alert/alert";
 import OfficeEmployeeForm from "./components/officeEmployeeForm";
+import CompanyWiseCountCard from "./components/companyWiseCountCard";
 
 const OfficeEmplyee = ({ searchParams }) => {
   const currentPage = parseInt(searchParams.page || "1");
@@ -43,6 +45,12 @@ const OfficeEmplyee = ({ searchParams }) => {
     "officeEmployee",
     { query, currentPage, pagePerData, filter },
   ];
+
+  const { data: companyWiseCount } = useFetchQuery({
+    fetchFn: countCompanyWiseEmployees,
+    queryKey: ["countCompanyWiseEmployees"],
+  });
+  const { newData: companyWiseEmployeeCount = [] } = companyWiseCount || {};
 
   const {
     data: queryResult,
@@ -178,6 +186,7 @@ const OfficeEmplyee = ({ searchParams }) => {
       >
         <div>
           <Card>
+            <CompanyWiseCountCard data={companyWiseEmployeeCount} />
             <CardHeader>
               <div className="mb-4">
                 <CardTitle>Office Management</CardTitle>

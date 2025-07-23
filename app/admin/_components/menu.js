@@ -44,17 +44,21 @@ import EmployeeSiteManagement from "../siteAssignEmployee/test";
 import QRDialog from "../siteAssign/features/siteScan";
 import ScanQrcode from "@/components/2FA/scanQrcode";
 import SiteExpense from "../siteAssign/features/siteExpense";
+import { SiteEmployeeOtherDeatils } from "../employee/components/employeeOtherDeatils";
+import EmployeDocument from "../employee/components/employeDocument";
 
 export const officeMenu = [
   {
     name: "Overview",
     icon: HomeIcon,
     link: "overview",
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   {
     name: "Edit",
     icon: EditIcon,
     link: "edit",
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   //   {
   //     name: "Compensation",
@@ -66,11 +70,12 @@ export const officeMenu = [
   //   link: "timeoff",
   //   icon: TimerIcon,
   // },
-  // {
-  //   name: "Weekly Rota",
-  //   link: "weeklyrota",
-  //   icon: TimerIcon,
-  // },
+  {
+    name: "Weekly Rota",
+    link: "weeklyrota",
+    icon: TimerIcon,
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
+  },
   // {
   //   name: "Performance",
   //   link: "performance",
@@ -80,6 +85,7 @@ export const officeMenu = [
     name: "Document",
     link: "document",
     icon: FileLockIcon,
+    role: ["superAdmin", "admin"],
   },
   // {
   //   name: "OnBoarding",
@@ -90,17 +96,53 @@ export const officeMenu = [
     name: "Password",
     link: "password",
     icon: LockIcon,
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   {
     name: "Leave",
     link: "leave",
     icon: CalendarIcon,
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   {
     name: "Session",
     link: "session",
     icon: GlobeLockIcon,
+    role: ["superAdmin", "admin", "employee", "user"],
   },
+];
+
+export const siteEmployeeMenu = [
+  {
+    name: "Overview",
+    icon: HomeIcon,
+    link: "overview",
+    role: ["superadmin", "admin", "siteadmin", "employee"],
+  },
+  // {
+  //   name: "Edit",
+  //   icon: EditIcon,
+  //   link: "edit",
+  //   role: ["superadmin", "admin", "siteadmin", "employee"],
+  // },
+  {
+    name: "Document",
+    link: "document",
+    icon: FileLockIcon,
+    role: ["superadmin", "admin"],
+  },
+  {
+    name: "Password",
+    link: "password",
+    icon: LockIcon,
+    role: ["superadmin", "admin", "siteadmin", "employee"],
+  },
+  // {
+  //   name: "Session",
+  //   link: "session",
+  //   icon: GlobeLockIcon,
+  //   role: ["superadmin", "admin", "employee"],
+  // },
 ];
 
 export const leaveMenu = [
@@ -201,16 +243,16 @@ export const siteMenu = [
   //   icon: ScrollTextIcon,
   //   link: "weeklyrota",
   // },
-  {
-    name: "Report",
-    icon: GlobeLockIcon,
-    link: "report",
-  },
-  {
-    name: "Settings",
-    icon: SettingsIcon,
-    link: "settings",
-  },
+  // {
+  //   name: "Report",
+  //   icon: GlobeLockIcon,
+  //   link: "report",
+  // },
+  // {
+  //   name: "Settings",
+  //   icon: SettingsIcon,
+  //   link: "settings",
+  // },
 ];
 
 export const officeSlugComponentmap = {
@@ -242,4 +284,9 @@ export const siteSlugComponentmap = {
   overview: EmployeeSiteManagement,
   scan: QRDialog,
   expense: SiteExpense,
+};
+
+export const siteOfficeEmployeSlugComponentmap = {
+  overview: SiteEmployeeOtherDeatils,
+  document: EmployeDocument,
 };

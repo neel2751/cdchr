@@ -40,7 +40,7 @@ import { format } from "date-fns";
 import { useFetchQuery } from "@/hooks/use-query";
 import {
   getCommonApplicationsAnalytics,
-  GetDevice,
+  getDevice,
 } from "@/server/deviceServer/deviceServer";
 import { toast } from "sonner";
 import { usePasswordConfirm } from "@/context/usePasswordContext";
@@ -54,7 +54,7 @@ export function DeviceSubmissionsDashboard() {
   const [showDetails, setShowDetails] = useState(false);
 
   const { data } = useFetchQuery({
-    fetchFn: GetDevice,
+    fetchFn: getDevice,
     queryKey: ["deviceInfo"],
   });
 

@@ -1,5 +1,6 @@
 "use client";
 import { useFetchQuery } from "@/hooks/use-query";
+import { getEmployeeWiseData } from "@/server/employeServer/employeServer";
 import { employeeDeatils } from "@/server/officeServer/officeEmployeeDetails";
 import { createContext, useState, useContext, useEffect, useMemo } from "react";
 
@@ -55,4 +56,62 @@ const useAvatar = () => {
   return context;
 };
 
-export { AvatarProvider, useAvatar };
+const SiteEmployeeContext = createContext();
+// create a provider for site employee context
+const SiteEmployeeProvider = ({ children, slug, searchParams }) => {
+  const [selectedAvatar, setSelectedAvatar] = useState(null); // Don't use localStorage here
+  const [isClient, setIsClient] = useState(false); // to ensure client-only logic
+
+  useEffect(() => {
+    setIsClient(true);
+    const savedAvatar =
+      localStorage.getItem("selectedAvatar") ||
+      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/9439775.jpg-4JVJWOjPksd3DtnBYJXoWHA5lc1DU9.jpeg";
+    setSelectedAvatar(savedAvatar);
+  }, []);
+
+  useEffect(() => {
+    if (isClient && selectedAvatar) {
+      localStorage.setItem("selectedAvatar", selectedAvatar);
+    }
+  }, [selectedAvatar, isClient]);
+
+  const queryKey = ["employeeDeatils", slug];
+  const { data } = useFetchQuery({
+    params: slug,
+    fetchFn: getEmployeeWiseData,
+    queryKey,
+    enabled: !!slug,
+  });
+
+  const { newData } = data || {};
+
+  const memoData = useMemo(() => newData, [newData]);
+
+  return (
+    <SiteEmployeeContext.Provider
+      value={{
+        selectedAvatar,
+        setSelectedAvatar,
+        newData: memoData,
+        slug,
+        searchParams,
+      }}
+    >
+      {children}
+    </SiteEmployeeContext.Provider>
+  );
+};
+
+// create a hook for site employee context
+const useSiteEmployee = () => {
+  const context = useContext(SiteEmployeeContext);
+  if (!context) {
+    throw new Error(
+      "useSiteEmployee must be used within a SiteEmployeeProvider"
+    );
+  }
+  return context;
+};
+
+export { AvatarProvider, useAvatar, SiteEmployeeProvider, useSiteEmployee };

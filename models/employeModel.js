@@ -74,6 +74,14 @@ const employeSchema = new mongoose.Schema(
       type: String,
       enum: ["Weekly", "Monthly"],
     },
+    employeId: {
+      type: String,
+      required: false,
+    },
+    cisDeduction: {
+      type: Number,
+      required: true,
+    },
     bankDetail: {
       type: bankDetailSchema,
       required: false,
@@ -81,6 +89,11 @@ const employeSchema = new mongoose.Schema(
     projectSite: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ProjectSite",
+    },
+    payType: {
+      type: String,
+      enum: ["Hourly", "Daily", "Weekly", "Monthly", "Yearly"],
+      required: true,
     },
     payRate: {
       type: Number,

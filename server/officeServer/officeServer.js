@@ -4,6 +4,9 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
 import { storeLeave } from "../leaveServer/leaveServer";
 import { createObjectId } from "@/lib/mongodb";
+import { getCompanyById } from "../companyServer/companyServer";
+import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
+import { syncMissingLeaveTypesNew } from "../leaveServer/countLeaveServer";
 
 export const handleOfficeEmployee = async (data, id) => {
   // make dealy for  testing
@@ -60,10 +63,43 @@ export const handleOfficeEmployee = async (data, id) => {
             success: false,
             message: "Failed to create office Employee",
           };
-        const employeeId = result?._id;
-        const leaveResult = await storeLeave(employeeId, data);
+        const {
+          _id: employeeId,
+          name,
+          email,
+          company,
+          joinDate,
+          dayPerWeek,
+        } = result; // get the employee id
+        const leaveResult = await syncMissingLeaveTypesNew(
+          joinDate,
+          dayPerWeek,
+          employeeId
+        );
         if (!leaveResult?.success)
           return { success: false, message: leaveResult.message };
+        const companyData = await getCompanyById(company);
+        const cData = JSON.parse(companyData?.data);
+        const type = "IT";
+        const response = await getSMTPForFeature(type);
+        if (response?.success) {
+          const emailData = JSON.parse(response?.data);
+          // register email we have to send the welcome mail with email and password with site link
+          const html = `<p>Dear ${name},</p>
+          <p>Welcome to our team! We are excited to have you on board.</p>
+          <p>Your login details are as follows:</p>
+          <p>Email: ${email}</p>
+          <p>Password: Cdc@1234</p>
+          <p>Please log in to your account using the following link:</p>
+          <p><a href="https://cdchr.onrender.com">Click here to login</a></p>
+          <p>Thank you for joining us!</p>
+          <p>Best regards,</p>
+          <p>Hr Management</p>`;
+          // we have to add the company name on this subject
+          const subject = `Weclome to our ${cData.name} family`;
+          const smtp = { ...emailData, toEmail: email, html, subject };
+          await userRegisterEmail(smtp);
+        }
         return {
           success: true,
           message: "Successfully added office employee",
@@ -293,5 +329,51 @@ export const getSuperAdmins = async () => {
       success: false,
       message: "Something went wrong",
     };
+  }
+};
+
+export const countCompanyWiseEmployees = async () => {
+  try {
+    await connect();
+    const pipeline = [
+      {
+        $match: { delete: false }, // Only consider active employees
+      },
+      {
+        $group: {
+          _id: "$company", // Group by company ID (this becomes _id)
+          employeeCount: { $sum: 1 },
+        },
+      },
+      {
+        $lookup: {
+          from: "companies",
+          localField: "_id", // ✅ Use _id from group stage
+          foreignField: "_id", // Must match _id in companies collection
+          as: "companyDetails",
+        },
+      },
+      {
+        $unwind: "$companyDetails",
+      },
+      {
+        $project: {
+          _id: 0,
+          companyId: "$_id",
+          companyName: "$companyDetails.name",
+          employeeCount: 1, // ✅ This is the count we calculated, not from companyDetails.employees
+        },
+      },
+    ];
+
+    const result = await OfficeEmployeeModel.aggregate(pipeline);
+
+    if (!result || result.length === 0) {
+      return { success: false, message: "No employees found" };
+    }
+    return { success: true, data: JSON.stringify(result) };
+  } catch (error) {
+    console.error("Error counting company-wise employees:", error);
+    return { success: false, message: "Error counting company-wise employees" };
   }
 };

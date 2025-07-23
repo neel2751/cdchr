@@ -12,7 +12,7 @@ export const handleTimeAction = async ({
   manualTimes = null, // { clockIn, clockOut, breakIn, breakOut }
 }) => {
   const now = getUKTime({ format: "HH:mm" });
-  const fullDate = getUKTime({ format: "full" });
+  const fullDate = new Date();
 
   const date = normalizeDateToUTC(new Date());
   const payload = {

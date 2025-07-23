@@ -1,9 +1,21 @@
 import mongoose from "mongoose";
 
 const DocumentFileSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+  },
+  fileName: {
+    type: String,
+    required: true,
+  },
   key: {
     type: String,
     required: true,
+  },
+  docType: {
+    type: String,
+    default: "other",
   },
   access: {
     type: String,
@@ -24,6 +36,10 @@ const DocumentFileSchema = new mongoose.Schema({
   projectId: {
     type: mongoose.Schema.Types.ObjectId,
   },
+  isDeleted: {
+    type: Boolean,
+    default: false,
+  },
   uploadedAt: Date,
   uploadedBy: mongoose.Types.ObjectId,
 });
@@ -34,16 +50,18 @@ const DocumentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       required: true,
     },
-    title: {
+    docType: {
       type: String,
-      required: true,
-      minlength: 3,
-      maxlength: 100,
+      default: "other",
     },
     description: {
       type: String,
     },
     documentsFiles: [DocumentFileSchema],
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

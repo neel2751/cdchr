@@ -1,6 +1,6 @@
 "use client";
 import mime from "mime";
-import { useAvatar } from "@/components/Avatar/AvatarContext";
+import { useSiteEmployee } from "@/components/Avatar/AvatarContext";
 import { GlobalForm } from "@/components/form/form";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +63,7 @@ export default function EmployeDocument() {
   const [showForm, setShowForm] = useState(false);
   const [filteredDocType, setFilteredDocType] = useState("all");
   const [open, setOpen] = useState(false);
-  const { slug } = useAvatar();
+  const { slug } = useSiteEmployee();
 
   const { data } = useFetchQuery({
     fetchFn: getEmployeeDocuments,
@@ -353,8 +353,7 @@ export default function EmployeDocument() {
       <div className="border rounded-xl">
         <div className="flex items-center justify-between border-b p-4">
           <CardTitle className="text-indigo-600 ">
-            All Document ({(newData && newData[0]?.documentsFiles?.length) || 0}
-            )
+            All Document ({newData && newData[0].documentsFiles.length})
           </CardTitle>
           <SelectFilter
             value={filteredDocType}

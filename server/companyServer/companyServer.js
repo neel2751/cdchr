@@ -1,5 +1,6 @@
 "use server";
 import { connect } from "@/db/db";
+import { isValidObjectId } from "@/lib/mongodb";
 import CompanyModel from "@/models/companyModel";
 
 export async function getCompanies(filterData) {
@@ -122,5 +123,19 @@ export const companyDelete = async (data) => {
   } catch (error) {
     console.log(error);
     return { success: false, message: `Error Occurred in server problem` };
+  }
+};
+
+export const getCompanyById = async (id) => {
+  try {
+    await connect();
+    // if (isValidObjectId(id)) {
+    //   return { success: false, message: "Company Id is not valid" };
+    // }
+    const company = await CompanyModel.findById(id);
+    return { success: true, data: JSON.stringify(company) };
+  } catch (error) {
+    console.log("error while get company id function", error);
+    return { success: false, message: "Something went wrong" };
   }
 };

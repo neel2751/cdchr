@@ -1,5 +1,4 @@
 "use server";
-
 import { getServerSideProps } from "../session/session";
 import { connect } from "@/db/db";
 import mongoose from "mongoose";
@@ -7,8 +6,12 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { decrypt } from "@/lib/algo";
 import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
+import { createObjectId } from "@/lib/mongodb";
+import DocumentModel from "@/models/document/documentModel";
+import { deleteFileFromS3 } from "../aws/upload";
+import EmployeModel from "@/models/employeModel";
 
-async function extractData(params) {
+export async function extractData(params) {
   try {
     const { props } = await getServerSideProps();
     const { role, _id } = props?.session?.user;
@@ -259,5 +262,265 @@ export async function changeOfficeEmployeePassword(data, id) {
   } catch (error) {
     console.log("Error in changeOfficeEmployeePassword:", error);
     return { success: false, message: "Error Changing Password" };
+  }
+}
+
+export async function changeEmployeePassword(data, id) {
+  if (!data) return { success: false, message: "No Data Provided" };
+  const { props } = await getServerSideProps();
+  const { role, _id } = props?.session?.user;
+  const employeeId = role === "superAdmin" ? decrypt(id) : _id;
+  if (!employeeId) return { success: false, message: "User not found" };
+  const { password: currentPassword, newPassword } = data;
+  if (role !== "superAdmin" && role !== "admin") {
+    if (!currentPassword)
+      return { success: false, message: "Current Password is required" };
+  }
+  if (!newPassword)
+    return { success: false, message: "New Password is required" };
+  try {
+    await connect();
+    const updatedEmp = await EmployeModel.findOne({
+      _id: employeeId,
+    }).exec();
+    if (!updatedEmp) {
+      return { success: false, message: "Employee Not Found" };
+    }
+    // if the user is not superAdmin or admin, check for current password
+    if (role !== "superAdmin" && role !== "admin") {
+      const isMatch = await isMatchedPassword(
+        currentPassword,
+        updatedEmp.password
+      );
+      if (!isMatch) {
+        return { success: false, message: "Current Password is Incorrect" };
+      }
+    }
+    const hashedPassword = await hashPassword(newPassword);
+    if (!hashedPassword) {
+      return { success: false, message: "Error Hashing Password" };
+    }
+    updatedEmp.password = hashedPassword; // Update the password with the new hashed password
+    const updatedData = await updatedEmp.save();
+    if (!updatedData) {
+      return { success: false, message: "Error Updating Password" };
+    }
+    return { success: true, message: "Password Changed Successfully" };
+  } catch (error) {
+    console.log("Error in changeEmployeePassword:", error);
+    return { success: false, message: "Error Changing Password" };
+  }
+}
+
+export async function deleteOfficeEmployee(id) {
+  if (!id) return { success: false, message: "No Employee ID Provided" };
+  try {
+    await connect();
+    const employeeId = decrypt(id);
+    const updatedEmp = await OfficeEmployeeModel.findOneAndUpdate(
+      { _id: employeeId },
+      { isDeleted: true },
+      { new: true }
+    ).exec();
+    if (!updatedEmp) {
+      return { success: false, message: "Employee Not Found" };
+    }
+    return { success: true, message: "Employee Deleted Successfully" };
+  } catch (error) {
+    console.log(error);
+    return { success: false, message: "Error Deleting Employee" };
+  }
+}
+
+export async function uploadDocument(data) {
+  if (!data) return { success: false, message: "No Data Provided" };
+  const { props } = await getServerSideProps();
+  const { _id } = props?.session?.user;
+  const { employeeId, title, docType, documentsFiles } = data;
+  try {
+    await connect();
+
+    const docuemntData = await DocumentModel.findOne({
+      employeeId: createObjectId(employeeId),
+      isDeleted: false,
+      // we have to check only document is not deleted
+      documentsFiles: {
+        $elemMatch: { isDeleted: false }, // Check if a document with the same title and type already exists and is not deleted
+      },
+      // documentsFiles: { $elemMatch: { fileName: title, docType } },
+    });
+    // Check if the document already exists for the employee
+    if (
+      docuemntData &&
+      docuemntData.documentsFiles.some(
+        (file) => file.title === title && file.docType === docType
+      )
+    ) {
+      documentsFiles.forEach(async (file) => {
+        console.log("Deleting file from S3:", file.key);
+        await deleteFileFromS3(file.key);
+      });
+      return {
+        success: false,
+        message: "Document with this title and type already exists",
+      };
+    }
+    if (docuemntData) {
+      // If document already exists, update it
+      docuemntData.documentsFiles.push(
+        ...documentsFiles.map((file) => ({
+          fileName: file.fileName,
+          title: title,
+          docType,
+          key: file.key,
+          access: file.access,
+          fileSize: file.fileSize,
+          fileType: file.fileType,
+          employeeId: createObjectId(employeeId),
+          uploadedAt: new Date(),
+          uploadedBy: _id ? createObjectId(_id) : employeeId, // Use _id if available, else use employeeId
+        }))
+      );
+      const updatedDocument = await docuemntData.save();
+      if (!updatedDocument) {
+        return { success: false, message: "Error Updating Document" };
+      }
+      return { success: true, data: JSON.stringify(updatedDocument) };
+    } else {
+      // If document does not exist, create a new one
+      if (
+        !title ||
+        !docType ||
+        !documentsFiles ||
+        documentsFiles.length === 0
+      ) {
+        documentsFiles.forEach(async (file) => {
+          console.log("Deleting file from S3:", file.key);
+          await deleteFileFromS3(file.key);
+        });
+        return {
+          success: false,
+          message: "Title, DocType and Files are required",
+        };
+      }
+      const newDocument = new DocumentModel({
+        employeeId: createObjectId(employeeId),
+        documentsFiles: documentsFiles.map((file) => ({
+          fileName: file.fileName,
+          title: title,
+          docType,
+          key: file.key,
+          access: file.access,
+          fileSize: file.fileSize,
+          fileType: file.fileType,
+          employeeId: createObjectId(employeeId),
+          uploadedAt: new Date(),
+          uploadedBy: _id ? createObjectId(_id) : employeeId, // Use _id if available, else use employeeId
+        })),
+      });
+      const savedDocument = await newDocument.save();
+      if (!savedDocument) {
+        return { success: false, message: "Error Saving Document" };
+      }
+      return { success: true, data: JSON.stringify(savedDocument) };
+    }
+  } catch (error) {
+    console.log(error);
+    return { success: false, message: "Error Uploading Document" };
+  }
+}
+
+export async function getEmployeeDocuments(params) {
+  if (!params) return { success: false, message: "No Params Provided" };
+  const employeeId = decrypt(params.slug);
+  if (!employeeId) return { success: false, message: "User not found" };
+  try {
+    await connect();
+    const pipeline = [
+      {
+        $match: {
+          employeeId: createObjectId(employeeId),
+          isDeleted: false,
+        },
+      },
+      {
+        $unwind: "$documentsFiles",
+      },
+      {
+        $match: {
+          "documentsFiles.isDeleted": false, // Only include files that are not deleted
+        },
+      },
+      // Group by employeeId and document type
+      {
+        $group: {
+          _id: "$_id",
+          employeeId: { $first: "$employeeId" },
+          docType: { $first: "$docType" },
+          description: { $first: "$description" },
+          documentsFiles: { $push: "$documentsFiles" }, // Collect all files in an array
+          createdAt: { $first: "$createdAt" },
+          updatedAt: { $first: "$updatedAt" },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          employeeId: 1,
+          docType: 1,
+          description: 1,
+          documentsFiles: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      },
+    ];
+    const documents = await DocumentModel.aggregate(pipeline);
+    return { success: true, data: JSON.stringify(documents) };
+  } catch (error) {
+    console.log(error);
+    return { success: false, message: "Error Fetching Employee Documents" };
+  }
+}
+
+export async function deleteEmployeeDocument(data) {
+  if (!data) return { success: false, message: "No Data Provided" };
+  const { documentId, fileKey } = data;
+  console.log("Deleting Document:", documentId, fileKey);
+  if (!documentId || !fileKey) {
+    return { success: false, message: "Document ID and File Key are required" };
+  }
+  try {
+    await connect();
+    // Delete the file from S3
+
+    // Update the document in the database
+    const updatedDocument = await DocumentModel.findOneAndUpdate(
+      {
+        "documentsFiles._id": documentId,
+        "documentsFiles.key": fileKey,
+      },
+      {
+        $set: {
+          "documentsFiles.$.isDeleted": true,
+        },
+      },
+      { new: true }
+    ).exec();
+
+    if (!updatedDocument) {
+      return {
+        success: false,
+        message: "Document Not Found or Already Deleted",
+      };
+    }
+    // If the document has no more files, delete the document itself
+    // This is optional, this only for hard delete the document
+    // await deleteFileFromS3(fileKey);
+
+    return { success: true, message: "Document Deleted Successfully" };
+  } catch (error) {
+    console.log(error);
+    return { success: false, message: "Error Deleting Document" };
   }
 }

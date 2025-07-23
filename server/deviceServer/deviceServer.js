@@ -7,10 +7,15 @@ import { getServerSideProps } from "../session/session";
 export async function StoreDevice(data) {
   try {
     const { props } = await getServerSideProps();
+    const employeeId = props?.session?.user?._id;
     await connect();
 
     // first we have to chcek if this alreday submit the device info
-    const exists = await DeviceModel.findOne({ email: data?.submittedBy });
+    const exists = await DeviceModel.findOne({
+      email: data?.submittedBy,
+      employeeId: employeeId,
+      isDeleted: false,
+    });
     if (exists)
       return { success: false, message: "You alreday submit the device info" };
 
@@ -36,11 +41,27 @@ export async function StoreDevice(data) {
   }
 }
 
-export async function GetDevice() {
+export async function getDevice() {
   try {
+    const { props } = await getServerSideProps();
+    const employeeId = props?.session?.user?._id;
+    const role = props?.session?.user?.role;
+    if (!employeeId)
+      return { success: false, message: "You are not authorized" };
+    // first we have to chcek if this alreday submit the device info
     await connect();
-    const result = await DeviceModel.find();
-    return { success: true, data: JSON.stringify(result) };
+    if (role === "superAdmin" || role === "admin") {
+      const result = await DeviceModel.find({
+        isDeleted: false,
+      });
+      return { success: true, data: JSON.stringify(result) };
+    } else {
+      const result = await DeviceModel.find({
+        employeeId: employeeId,
+        isDeleted: false,
+      });
+      return { success: true, data: JSON.stringify(result) };
+    }
   } catch (error) {
     console.log(error);
     return { success: false, message: "Something went wrong" };

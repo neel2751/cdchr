@@ -44,6 +44,7 @@ import { useDropzone } from "react-dropzone";
 import Image from "next/image";
 import { useImageUpload } from "@/hooks/use-image-upload-profile";
 import { formatToDateString, normalizeDateToUTC } from "@/lib/formatDate";
+import { Card, CardDescription, CardHeader, CardTitle } from "../ui/card";
 
 export const FormInput = ({ field, ...props }) => {
   const [showPassword, setShowPassword] = useState(false);
@@ -381,7 +382,7 @@ export const SearchableSelect = ({ field }) => {
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[200px] p-0">
+              <PopoverContent className="max-w-max p-0">
                 <Command
                   filter={(value, search) => {
                     const item = options.find((item) => item.value === value);
@@ -680,12 +681,42 @@ export const FormImageUpload = ({ field }) => {
         />
       );
     }
+    // word or excel file preview
+    // if (
+    //   fileType === "application/msword" ||
+    //   fileType ===
+    //     "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    //   fileType === "application/vnd.ms-excel" ||
+    //   fileType ===
+    //     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    // ) {
+    //   return (
+    //     // show the preview of word or excel file
+    //     <div className=" h-28 w-28 flex items-center justify-center bg-gray-200 flex-wrap p-1 overflow-hidden">
+    //       <span>{file.name}</span>
+    //       <p className="text-xs text-gray-500">Preview not available</p>
+    //     </div>
+    //   );
+    // }
 
     // Fallback for other file types
     return (
-      <div className="size-28 flex items-center justify-center bg-gray-200">
-        {file.name}
-      </div>
+      // Show a generic preview for unsupported file types
+
+      <Card className={"w-28 h-28 flex-wrap "}>
+        <CardHeader>
+          <CardTitle>
+            {file.name.length > 20 ? `${file.name.slice(0, 20)}...` : file.name}
+          </CardTitle>
+          <CardDescription>
+            <div className="flex space-x-2 h-3 items-center mt-1 text-xs">
+              <span className="text-gray-500">
+                {(file.size / 1024).toFixed(2)} KB
+              </span>
+            </div>
+          </CardDescription>
+        </CardHeader>
+      </Card>
     );
   };
 

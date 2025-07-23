@@ -109,6 +109,20 @@ const EmployeTabel = () => {
                 {!item?.isSuperAdmin && (
                   <div className="flex gap-2">
                     <Button
+                      size={"icon"}
+                      variant={"outline"}
+                      asChild
+                      className={"text-blue-600"}
+                    >
+                      <Link
+                        href={`/admin/officeEmployee/${encrypt(
+                          item?._id
+                        )}/overview`}
+                      >
+                        <Eye />
+                      </Link>
+                    </Button>
+                    <Button
                       onClick={() => handleEdit(item)}
                       variant="outline"
                       size="icon"
@@ -123,15 +137,6 @@ const EmployeTabel = () => {
                       size="icon"
                     >
                       <Trash2 className="text-rose-600" />
-                    </Button>
-                    <Button size={"icon"} variant={"outline"} asChild>
-                      <Link
-                        href={`/admin/officeEmployee/${encrypt(
-                          item?._id
-                        )}/overview`}
-                      >
-                        <Eye />
-                      </Link>
                     </Button>
                   </div>
                 )}

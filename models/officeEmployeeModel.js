@@ -18,6 +18,7 @@ const officeEmployeSchema = new mongoose.Schema(
       ref: "Companie",
       required: false, // make it after true
     },
+    employeId: { type: String, required: false },
     immigrationType: { type: String, required: true },
     immigrationCategory: { type: String, required: false },
     employeType: { type: String, required: true },
