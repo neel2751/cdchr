@@ -78,7 +78,7 @@ export default function EmployeDocument() {
   // Assuming newData is an array of objects with a documentsFiles property
   const docTypeCount =
     newData && newData[0]
-      ? newData[0].documentsFiles.reduce((acc, file) => {
+      ? newData[0]?.documentsFiles?.reduce((acc, file) => {
           const type = file.docType || "other"; // Default to 'other' if docType is not defined
           acc[type] = (acc[type] || 0) + 1;
           return acc;
@@ -268,10 +268,10 @@ export default function EmployeDocument() {
     if (!newData || newData.length === 0) return [];
     if (filteredDocType === "all") {
       // we have to send _id
-      return newData[0].documentsFiles;
+      return newData[0]?.documentsFiles;
     }
-    return newData[0].documentsFiles.filter(
-      (item) => item.docType === filteredDocType
+    return newData[0]?.documentsFiles.filter(
+      (item) => item?.docType === filteredDocType
     );
   }, [filteredDocType, newData]);
 
@@ -353,7 +353,8 @@ export default function EmployeDocument() {
       <div className="border rounded-xl">
         <div className="flex items-center justify-between border-b p-4">
           <CardTitle className="text-indigo-600 ">
-            All Document ({newData && newData[0].documentsFiles.length})
+            All Document ({(newData && newData[0]?.documentsFiles?.length) || 0}
+            )
           </CardTitle>
           <SelectFilter
             value={filteredDocType}

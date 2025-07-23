@@ -161,7 +161,7 @@ export const handleEmploye = async (data, isChecked, id) => {
         return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
       if (addEmploye) {
         const { firstName, lastName, email } = addEmploye; // get the employee id
-        const type = "IT";
+        const type = "HR";
         const response = await getSMTPForFeature(type);
         if (response?.success) {
           const emailData = JSON.parse(response?.data);

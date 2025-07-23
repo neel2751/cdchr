@@ -478,6 +478,7 @@ export const EMPLOYEFIELD = [
     type: "text",
     inputMode: "numeric",
     placeholder: "Enter Pay Rate",
+    helperText: "*Minimum Pay Rate is £10.42(UK Minimum Wage)*",
     validationOptions: {
       required: "Pay rate is required",
       pattern: {
@@ -486,6 +487,11 @@ export const EMPLOYEFIELD = [
         message: "Must be a number with optional decimal places",
         //   value: /^\d{1,2}\.\d{2}$/i,
         //   value: /^\d+(\.\d{1,2})?$/i,
+      },
+      // we have to set min pay rate start ok UK minimum wage
+      min: {
+        value: 10.42,
+        message: "Minimum pay rate is £10.42",
       },
     },
   },

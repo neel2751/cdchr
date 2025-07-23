@@ -80,7 +80,7 @@ export const handleOfficeEmployee = async (data, id) => {
           return { success: false, message: leaveResult.message };
         const companyData = await getCompanyById(company);
         const cData = JSON.parse(companyData?.data);
-        const type = "IT";
+        const type = "HR";
         const response = await getSMTPForFeature(type);
         if (response?.success) {
           const emailData = JSON.parse(response?.data);

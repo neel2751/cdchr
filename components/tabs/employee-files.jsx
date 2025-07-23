@@ -78,8 +78,8 @@ export default function EmployeDocument() {
   // Assuming newData is an array of objects with a documentsFiles property
   const docTypeCount =
     newData && newData[0]
-      ? newData[0].documentsFiles.reduce((acc, file) => {
-          const type = file.docType || "other"; // Default to 'other' if docType is not defined
+      ? newData[0]?.documentsFiles?.reduce((acc, file) => {
+          const type = file?.docType || "other"; // Default to 'other' if docType is not defined
           acc[type] = (acc[type] || 0) + 1;
           return acc;
         }, {})
@@ -113,23 +113,6 @@ export default function EmployeDocument() {
       count: count, // Include count if needed for further processing
     };
   });
-  const ShowNameCheckListUI = () => {
-    return showName.map((option) => {
-      return (
-        <span className="flex items-center gap-2">
-          <span>
-            {option.label.split(" (")[0] /* Display the label without count */}
-          </span>
-          {/*  If they have zero document show x other show true */}
-          {option.count > 0 ? (
-            <span className="text-green-500 font-bold">({option.count})</span>
-          ) : (
-            <span className="text-red-500 font-bold"> (0)</span>
-          )}
-        </span>
-      );
-    });
-  };
 
   const fields = [
     {
@@ -265,13 +248,13 @@ export default function EmployeDocument() {
   };
 
   const filterData = useMemo(() => {
-    if (!newData || newData.length === 0) return [];
+    if (!newData || newData?.length === 0) return [];
     if (filteredDocType === "all") {
       // we have to send _id
-      return newData[0].documentsFiles;
+      return newData[0]?.documentsFiles;
     }
-    return newData[0].documentsFiles.filter(
-      (item) => item.docType === filteredDocType
+    return newData[0]?.documentsFiles.filter(
+      (item) => item?.docType === filteredDocType
     );
   }, [filteredDocType, newData]);
 

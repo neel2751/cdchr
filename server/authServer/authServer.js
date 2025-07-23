@@ -3,9 +3,6 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
 import UserSession from "@/models/sessionModel";
-import { getServerSession } from "next-auth";
-import { options } from "@/app/api/auth/[...nextauth]/option";
-import { signOut } from "next-auth/react";
 import { sendMail } from "../email/email";
 import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
@@ -15,6 +12,7 @@ export const LoginDataOld = async (email, password) => {
     return { status: false, message: "Please Provide  all details" };
   password = password.trim();
   email = email.trim();
+  email = email.toLowerCase();
   try {
     await connect();
     const foundData = await OfficeEmployeeModel.findOne({ email })
