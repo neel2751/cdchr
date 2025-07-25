@@ -10,6 +10,7 @@ import { createObjectId } from "@/lib/mongodb";
 import DocumentModel from "@/models/document/documentModel";
 import { deleteFileFromS3 } from "../aws/upload";
 import EmployeModel from "@/models/employeModel";
+import { getLeaveYearString } from "@/lib/getLeaveYear";
 
 export async function extractData(params) {
   try {
@@ -85,18 +86,18 @@ export async function employeeDeatils(params) {
 
 export async function employeeLeaveDetailsNew(data) {
   try {
+    const { props } = await getServerSideProps();
+    const { role, _id } = props?.session?.user;
     const params = data?.searchParams;
+    const employeeId = role === "superAdmin" ? await extractData(params) : _id;
     const leaveYear = data?.leaveYear;
-    const employeeId = await extractData(params);
     if (!employeeId) return { success: false, message: "User not found" };
-
     await connect();
-    const checkLeaveYear = Number(parseInt(leaveYear)) || getYear(new Date());
+    const checkLeaveYear = leaveYear || getLeaveYearString(new Date());
     const match = {
       leaveYear: checkLeaveYear,
-      employeeId: new mongoose.Types.ObjectId(employeeId),
+      employeeId: createObjectId(employeeId),
     };
-
     const lookup = {
       from: "officeemployes",
       localField: "employeeId",

@@ -17,8 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-import LeaveRequestStatus from "../../leaveManagement/components/leaveRequest/request-status";
 import { Status } from "@/components/tableStatus/status";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -34,6 +32,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useAvatar } from "@/components/Avatar/AvatarContext";
+import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { useSubmitMutation } from "@/hooks/use-mutate";
+import { rejectPastLeaveRequest } from "@/server/leaveServer/getLeaveServer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
+import LeaveSheet from "../../leaveManagement/components/leaveEntitlements/leave-sheet";
 
 const EmployeeOtherDeatils = () => {
   const { newData } = useAvatar();
@@ -86,10 +100,26 @@ const EmployeeLeaveDeatails = () => {
   const [initialValues, setInitialValues] = useState(null);
   const queryKey = ["leaveDeatils", searchParams];
   const { data } = useFetchQuery({
-    params: { searchParams, leaveYear: getYear(new Date()) },
+    params: { searchParams, leaveYear: getLeaveYearString(new Date()) },
     fetchFn: employeeLeaveDetailsNew,
     queryKey,
     enabled: !!searchParams,
+  });
+
+  const { data: commonLeave } = useFetchQuery({
+    queryKey: ["commonLeave", searchParams],
+    fetchFn: getEmployeeLeaveData,
+  });
+
+  const { newData: employeeCommonLeave } = commonLeave || {};
+
+  const { mutate: deleteLeaveRequest } = useSubmitMutation({
+    mutationFn: async (data) =>
+      rejectPastLeaveRequest(data.leaveId, data.leaveStatus),
+    invalidateKey: queryKey,
+    onSuccessMessage: (message) =>
+      message || "Leave request deleted successfully",
+    onClose: () => setShowDialog(false),
   });
   const handleEdit = (item) => {
     setShowDialog(true);
@@ -99,9 +129,7 @@ const EmployeeLeaveDeatails = () => {
     setShowDialog(true);
     setInitialValues(null);
   };
-
   const id = useId();
-
   const { newData } = data || {};
   return (
     <>
@@ -112,16 +140,27 @@ const EmployeeLeaveDeatails = () => {
               <CardTitle>Leave Requests</CardTitle>
               <CardDescription>List of leave requests</CardDescription>
             </div>
-            <LeaveRequestNew
-              showDialog={showDialog}
-              setShowDialog={setShowDialog}
-              initialValues={initialValues}
-              setInitialValues={setInitialValues}
-            >
+            {/* map item.leaveData.map */}
+            <div className="flex items-center gap-2">
               <Button size="icon" variant="outline" onClick={handelOpen}>
                 <PlusIcon />
               </Button>
-            </LeaveRequestNew>
+              <LeaveRequestNew
+                showDialog={showDialog}
+                setShowDialog={setShowDialog}
+                initialValues={initialValues}
+                setInitialValues={setInitialValues}
+                newData={employeeCommonLeave}
+              />
+              {newData?.length === 0 && (
+                <LeaveSheet
+                  item={{
+                    name: newData[0]?.employee.name,
+                    ...employeeCommonLeave,
+                  }}
+                />
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -175,17 +214,32 @@ const EmployeeLeaveDeatails = () => {
                           </SelectTrigger>
                           <SelectContent>
                             {/* show last 5 years */}
-                            {Array.from({ length: 5 }, (_, k) => k).map(
-                              (year) => (
-                                <SelectItem
-                                  key={getYear(new Date()) - year}
-                                  value={(
-                                    getYear(new Date()) - year
-                                  ).toString()}
-                                >
-                                  {getYear(new Date()) - year}
-                                </SelectItem>
-                              )
+                            {Array.from({ length: 2 }, (_, k) => k).map(
+                              (year) => {
+                                const yearValue =
+                                  new Date().getFullYear() + year;
+                                const leaveYear = getLeaveYearString(
+                                  new Date(yearValue, 0, 1)
+                                );
+                                const isCurrentYear =
+                                  yearValue === getYear(new Date());
+                                if (isCurrentYear) {
+                                  return (
+                                    <SelectItem
+                                      key={yearValue}
+                                      value={leaveYear}
+                                      disabled
+                                    >
+                                      {leaveYear} (Current Year)
+                                    </SelectItem>
+                                  );
+                                }
+                                return (
+                                  <SelectItem key={yearValue} value={leaveYear}>
+                                    {leaveYear}
+                                  </SelectItem>
+                                );
+                              }
                             )}
                           </SelectContent>
                         </Select>
@@ -203,6 +257,7 @@ const EmployeeLeaveDeatails = () => {
                           key={index}
                           data={data}
                           handleEdit={handleEdit}
+                          handleDelete={deleteLeaveRequest}
                           queryKey={queryKey}
                         />
                       ))}
@@ -218,18 +273,14 @@ const EmployeeLeaveDeatails = () => {
   );
 };
 
-const LeaveRequestCard = ({ data, handleEdit, queryKey }) => {
+const LeaveRequestCard = ({ data, handleEdit, handleDelete, queryKey }) => {
   return (
     <Card className="group">
       <CardHeader>
         <CardTitle>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">{data?.leaveType}</div>
-            <Status
-              title={
-                isPast(data?.leaveStartDate) ? "Rejected" : data?.leaveStatus
-              }
-            />
+            <Status title={data?.leaveStatus} />
           </div>
         </CardTitle>
         <CardDescription>
@@ -238,38 +289,128 @@ const LeaveRequestCard = ({ data, handleEdit, queryKey }) => {
             {format(data?.leaveEndDate, "PPP")}
           </p>
         </CardDescription>
+        <div className="flex items-center flex-wrap my-4 gap-x-3">
+          <div className="flex gap-[6px] text-[13px] text-[#222222] font-normal items-center">
+            <span>{data.leaveDays} Days</span>
+          </div>
+          <svg
+            stroke="currentColor"
+            fill="currentColor"
+            strokeWidth="0"
+            viewBox="0 0 512 512"
+            className="text-gray-400"
+            height="4"
+            width="4"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8z"></path>
+          </svg>
+          <div className="flex gap-[6px] text-[13px] text-[#222222] font-normal items-center">
+            <span>{data.leaveYear}</span>
+          </div>
+          <svg
+            stroke="currentColor"
+            fill="currentColor"
+            strokeWidth="0"
+            viewBox="0 0 512 512"
+            className="text-gray-400"
+            height="4"
+            width="4"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8z"></path>
+          </svg>
+          <div className="flex gap-[6px] text-[13px] text-[#222222] font-normal items-center">
+            <span>{format(data?.leaveSubmitDate, "PPP")}</span>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground mt-2">
-          Requested on {format(data.leaveSubmitDate, "PPP")}
-        </p>
-      </CardContent>
 
-      {data?.leaveStatus === "Approved" || data?.leaveStatus === "Rejected" ? (
+      {["Approved", "Rejected", "Expired", "Cancelled"].includes(
+        data?.leaveStatus
+      ) ? (
         <></>
       ) : isPast(data?.leaveStartDate) ? (
-        <CardFooter className="border-b">
-          <LeaveRequestStatus
-            leaveId={data?._id}
-            invalidateKey={queryKey}
-            leaveDate={data?.leaveStartDate}
-          />
-          {/* <Button size="sm" variant="outline" className="text-red-500">
-            <XIcon className="h-4 w-4x" />
-            Cancel
-          </Button> */}
+        <CardFooter>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button size="sm" variant="outline" className="text-red-500">
+                <XIcon className="h-4 w-4x" />
+                Expired
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className={"text-blue-700 tracking-tight"}>
+                  This action to mark the leave request as expired.
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action your leave balance will be updated accordingly.
+                  The leave request will be marked as expired.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction
+                  onClick={() =>
+                    handleDelete({
+                      leaveId: data?._id,
+                      leaveStatus: "Expired",
+                    })
+                  }
+                  className="bg-blue-700 hover:bg-blue-800"
+                >
+                  Continue
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardFooter>
       ) : (
         <CardFooter>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="text-indigo-500">
+            <Button
+              onClick={() => handleEdit(data)}
+              size="sm"
+              variant="outline"
+              className="text-indigo-500"
+            >
               <EditIcon className="h-4 w-4x" />
               Edit
             </Button>
-            <Button size="sm" variant="outline" className="text-red-500">
-              <XIcon className="h-4 w-4x" />
-              Cancel
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="outline" className="text-red-500">
+                  <XIcon className="h-4 w-4x" />
+                  Cancel
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className={"text-red-700"}>
+                    Are you sure you want to cancel this leave request?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. If you proceed, the leave
+                    request will be marked as rejected and you will not be able
+                    to edit it again.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() =>
+                      handleDelete({
+                        leaveId: data?._id,
+                        leaveStatus: "Cancelled",
+                      })
+                    }
+                    className="bg-red-500 hover:bg-red-600"
+                  >
+                    Continue
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </CardFooter>
       )}

@@ -1,28 +1,17 @@
 "use client";
 import { GlobalForm } from "@/components/form/form";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
-import {
-  getEmployeeLeaveData,
-  storeEmployeeLeave,
-} from "@/server/leaveServer/leaveServer";
-import { getSelectLeaveCategories } from "@/server/selectServer/selectServer";
+import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
+import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
+import { getSelectLeaveRequestForEmployee } from "@/server/selectServer/selectServer";
 import { differenceInDays, isBefore } from "date-fns";
 import React from "react";
 import { toast } from "sonner";
@@ -32,18 +21,19 @@ const LeaveRequestNew = ({
   setShowDialog,
   initialValues,
   setInitialValues,
-  children,
+  newData,
 }) => {
   //   const [showDialog, setShowDialog] = React.useState(false);
   //   const [initialValues, setInitialValues] = React.useState(null);
 
   const { data: leaveTypes = [] } = useFetchSelectQuery({
     queryKey: ["leave-types"],
-    fetchFn: getSelectLeaveCategories,
+    fetchFn: getSelectLeaveRequestForEmployee,
   });
 
   const { mutate: submitLeaveRequest } = useSubmitMutation({
-    mutationFn: async (data) => storeEmployeeLeave(data, initialValues?._id),
+    mutationFn: async (data) =>
+      storeEmployeeLeaveData(data, initialValues?._id),
     invalidateKey: ["leave-requests"],
     onSuccessMessage: () => "Leave request submitted successfully",
     onClose: () => {
@@ -51,18 +41,6 @@ const LeaveRequestNew = ({
       setInitialValues(null);
     },
   });
-
-  const handleClose = () => {
-    setShowDialog(false);
-    setInitialValues(null);
-  };
-
-  const { data } = useFetchQuery({
-    queryKey: ["employee-leave-types"],
-    fetchFn: getEmployeeLeaveData,
-  });
-
-  const { newData } = data || {};
 
   const handleSubmit = (data) => {
     // ✅ Task1 : Implement the logic to submit the leave request
@@ -86,9 +64,6 @@ const LeaveRequestNew = ({
     const result = newData?.leaveData.find(
       (item) => item.leaveType === leaveType
     );
-    // change the logic after test finish... add the ! on the isPast
-    if (!isPast(new Date(result?.eligibleDate)))
-      return toast.warning("You are not eligible for this leave type"); // ✅ Task6
     if (!initialValues?._id) {
       if (result?.total < totalCount)
         return toast.warning(
@@ -168,7 +143,6 @@ const LeaveRequestNew = ({
 
   return (
     <>
-      {children}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         {/* <DialogTrigger asChild>{children}</DialogTrigger> */}
         <DialogContent className="max-w-xl h-auto">

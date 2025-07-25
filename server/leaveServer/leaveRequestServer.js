@@ -16,6 +16,7 @@ import {
   validateLeaveData,
   validateOverlap,
 } from "./helper/helper";
+import { normalizeDateToUTC } from "@/lib/formatDate";
 
 export async function storeEmployeeLeaveData(data, requestId) {
   try {
@@ -128,6 +129,7 @@ export async function addLeaveRequest({ data, employeeId, adminId }) {
         : {};
       requestsToInsert.push({
         ...data,
+        leaveSubmitDate: normalizeDateToUTC(new Date()),
         ...entry,
         ...approved,
         addByAdmin: adminId ? true : false,

@@ -192,25 +192,35 @@ export const FormCheckbox = ({ field }) => {
     formState: { errors },
   } = useFormContext();
   return (
-    <div className="flex items-center space-x-2">
-      <Controller
-        name={field.name}
-        control={control}
-        render={({ field: { onChange, value } }) => (
-          <Checkbox
-            id={field.name}
-            checked={value}
-            onCheckedChange={onChange}
-          />
-        )}
-      />
-      <Label htmlFor={field.name}>{field.labelText}</Label>
+    <>
+      <div className="flex items-center space-x-2">
+        <Controller
+          name={field.name}
+          control={control}
+          rules={field.validationOptions}
+          render={({ field: { onChange, value } }) => (
+            <Checkbox
+              id={field.name}
+              checked={value}
+              onCheckedChange={onChange}
+            />
+          )}
+        />
+        <Label
+          htmlFor={field.name}
+          className={`${
+            errors[field.name] ? "text-destructive" : "text-neutral-700"
+          }`}
+        >
+          {field.labelText}
+        </Label>
+      </div>
       {errors[field.name] && (
-        <p className="text-sm text-destructive">
+        <p className="text-sm text-destructive ml-6 mt-1">
           {errors[field.name]?.message}
         </p>
       )}
-    </div>
+    </>
   );
 };
 

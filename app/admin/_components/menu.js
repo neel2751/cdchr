@@ -175,11 +175,11 @@ export const leaveMenu = [
     icon: TentTreeIcon,
   },
 
-  {
-    name: "Add Leave For Employee",
-    link: "addleaveEmployee",
-    icon: ClipboardPlus,
-  },
+  // {
+  //   name: "Add Leave For Employee",
+  //   link: "addleaveEmployee",
+  //   icon: ClipboardPlus,
+  // },
 
   // {
   //   name: "History",
@@ -275,7 +275,7 @@ export const slugComponentmap = {
   entitlement: EmployeeLeaveEntitlement,
   requestoff: RequestOff,
   history: LeaveHistory,
-  addleaveEmployee: AddEmploeeLeave,
+  // addleaveEmployee: AddEmploeeLeave,
   bankholiday: BankHoliday,
   report: LeaveReport,
 };

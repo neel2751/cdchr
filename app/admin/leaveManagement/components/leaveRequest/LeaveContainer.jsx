@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
+import { AddEmploeeLeave } from "../addEmployeeLeave/addEmplyoeeLeave";
 
 export default function LeaveContainer() {
   const [showDialog, setShowDialog] = useState(false);
@@ -162,7 +163,10 @@ export default function LeaveContainer() {
               <CardTitle>Leave Requests</CardTitle>
               <CardDescription>List of leave requests</CardDescription>
             </div>
-            <AddLeaveRequest onAdd={handleAdd} />
+            <div className="flex items-center gap-2">
+              <AddLeaveRequest title={"Add Leave"} onAdd={handleAdd} />
+              <AddEmploeeLeave />
+            </div>
           </div>
         </CardHeader>
         <CardContent>

@@ -18,6 +18,7 @@ import mongoose from "mongoose";
 import { getServerSideProps } from "../session/session";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { fetchLeaveCategory } from "../category/category";
+import { getLeaveYearString } from "@/lib/getLeaveYear";
 
 export async function storeLeave(employeeId, data) {
   try {
@@ -313,7 +314,7 @@ export async function getEmployeeLeaveData() {
     await connect();
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
-    const leaveYear = getYear(new Date());
+    const leaveYear = getLeaveYearString(new Date());
     const data = getLeaveData(employeeId, leaveYear);
     return data;
   } catch (error) {

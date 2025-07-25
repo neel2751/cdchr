@@ -38,6 +38,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useSubmitMutation } from "@/hooks/use-mutate";
+import { useCommonContext } from "@/context/commonContext";
+import { PaginationWithLinks } from "@/components/filters/pagination/pagination-client";
 
 export function LeaveRequestTable({
   showDialog,
@@ -155,15 +157,20 @@ export function LeaveRequestTable({
 }
 
 export function LeaveRequestTableNew({ onEdit }) {
-  const queryKey = ["leave-superadmin"];
+  const { searchParams } = useCommonContext();
+  const currentPage = searchParams?.page || 1;
+  const limit = searchParams?.pageSize || 10;
+  const queryKey = ["leave-superadmin", currentPage, limit];
   const { data, isPending } = useFetchQuery({
     params: {
       leaveYear: getLeaveYearString(new Date()),
+      page: currentPage,
+      limit: limit,
     },
     queryKey,
     fetchFn: getLeaveRequestDataAdmin,
   });
-  const { newData } = data || {};
+  const { newData, totalCount } = data || {};
 
   return (
     <div>
@@ -207,6 +214,9 @@ export function LeaveRequestTableNew({ onEdit }) {
           </TableBody>
         )}
       </Table>
+      <div className="flex justify-between items-center mt-4">
+        <PaginationWithLinks totalCount={totalCount || 0} />
+      </div>
     </div>
   );
 }

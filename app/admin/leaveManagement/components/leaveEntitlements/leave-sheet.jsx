@@ -26,10 +26,13 @@ import Leavehistory from "./leave-history";
 import { Switch } from "@/components/ui/switch";
 import AddLeaveForEmployee from "./leave-add";
 import LeaveEdit from "./leave-edit";
+import { useSession } from "next-auth/react";
 
 export default function LeaveSheet({ item, queryKey }) {
   const [initialValues, setInitialValues] = useState(null);
   const [value, setValue] = useState(null);
+  const { data } = useSession();
+  const role = data?.user?.role;
 
   function onEdit(item, allData) {
     setInitialValues({
@@ -56,6 +59,19 @@ export default function LeaveSheet({ item, queryKey }) {
     },
   });
 
+  const adminHeader = ["Hide", "Action"];
+  const isAdmin = ["superAdmin", "admin"].includes(role);
+
+  const headers = [
+    "Id",
+    "Leave Type",
+    "Total",
+    "Used",
+    "Remaining",
+    "Usage",
+    ...(isAdmin ? adminHeader : []),
+  ];
+
   // In new We have to use nuqs for the open sheet
 
   return (
@@ -67,7 +83,10 @@ export default function LeaveSheet({ item, queryKey }) {
       </SheetTrigger>
       <SheetContent
         side="bottom"
-        className="max-w-6xl mx-auto rounded-md bottom-4 inset-x-4"
+        className={`
+          ${
+            isAdmin ? "max-w-7xl" : "max-w-3xl"
+          } mx-auto rounded-md bottom-4 inset-x-4`}
       >
         <SheetHeader className="pb-4 ms-2">
           <div className="flex items-center justify-between mt-6">
@@ -84,27 +103,31 @@ export default function LeaveSheet({ item, queryKey }) {
               <Button disabled size="sm" className="bg-indigo-700">
                 Export
               </Button>
-              <AddLeaveForEmployee leaveData={item} queryKey={queryKey} />
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button size="sm" variant="outline">
-                    <HistoryIcon />
-                    History
-                  </Button>
-                </SheetTrigger>
-                <SheetContent className="max-w-7xl w-full rounded-md  top-2 right-4">
-                  <SheetHeader className="pb-4 ms-2">
-                    <SheetTitle>Leave History</SheetTitle>
-                    <SheetDescription>
-                      Leave history of{" "}
-                      <span className="font-semibold text-indigo-700">
-                        {item?.name}
-                      </span>
-                    </SheetDescription>
-                  </SheetHeader>
-                  <Leavehistory leaveHistory={item?.leaveHistory} />
-                </SheetContent>
-              </Sheet>
+              {isAdmin && (
+                <>
+                  <AddLeaveForEmployee leaveData={item} queryKey={queryKey} />
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <Button size="sm" variant="outline">
+                        <HistoryIcon />
+                        History
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent className="max-w-7xl w-full rounded-md  top-2 right-4">
+                      <SheetHeader className="pb-4 ms-2">
+                        <SheetTitle>Leave History</SheetTitle>
+                        <SheetDescription>
+                          Leave history of{" "}
+                          <span className="font-semibold text-indigo-700">
+                            {item?.name}
+                          </span>
+                        </SheetDescription>
+                      </SheetHeader>
+                      <Leavehistory leaveHistory={item?.leaveHistory} />
+                    </SheetContent>
+                  </Sheet>
+                </>
+              )}
             </div>
           </div>
         </SheetHeader>
@@ -112,16 +135,7 @@ export default function LeaveSheet({ item, queryKey }) {
           <Table>
             <TableHeader>
               <TableRow>
-                {[
-                  "Id",
-                  "Leave Type",
-                  "Total",
-                  "Used",
-                  "Remaining",
-                  "Usage",
-                  "Hide",
-                  "Action",
-                ].map((th, index) => (
+                {headers.map((th, index) => (
                   <TableHead key={index} className="uppercase text-xs">
                     {th}
                   </TableHead>
@@ -173,45 +187,51 @@ export default function LeaveSheet({ item, queryKey }) {
                         : 0}
                       %
                     </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={entitlement.isHide}
-                        onCheckedChange={() => handleSwitchChange(entitlement)}
-                        disabled={
-                          isPending ||
-                          entitlement?.isDelete ||
-                          entitlement?.used > 0 ||
-                          entitlement?.leaveType === "Maternity Leave" ||
-                          entitlement?.leaveType === "Paternity Leave"
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="space-x-2">
-                      {/* To be implemented */}
-                      {entitlement?.isDelete ? (
-                        <Button size="sm" variant="outline">
-                          <HistoryIcon />
-                          Restore
-                        </Button>
-                      ) : (
-                        <LeaveEdit
-                          initialValues={initialValues}
-                          onEdit={onEdit}
-                          entitlement={entitlement}
-                          item={item}
-                          queryKey={queryKey}
-                          setInitialValues={setInitialValues}
-                          setValue={setValue}
+                    {isAdmin && (
+                      <TableCell>
+                        <Switch
+                          checked={entitlement.isHide}
+                          onCheckedChange={() =>
+                            handleSwitchChange(entitlement)
+                          }
+                          disabled={
+                            isPending ||
+                            entitlement?.isDelete ||
+                            entitlement?.used > 0 ||
+                            entitlement?.leaveType === "Maternity Leave" ||
+                            entitlement?.leaveType === "Paternity Leave"
+                          }
                         />
-                      )}
+                      </TableCell>
+                    )}
+                    {isAdmin && (
+                      <TableCell className="space-x-2">
+                        {/* To be implemented */}
+                        {entitlement?.isDelete ? (
+                          <Button size="sm" variant="outline">
+                            <HistoryIcon />
+                            Restore
+                          </Button>
+                        ) : (
+                          <LeaveEdit
+                            initialValues={initialValues}
+                            onEdit={onEdit}
+                            entitlement={entitlement}
+                            item={item}
+                            queryKey={queryKey}
+                            setInitialValues={setInitialValues}
+                            setValue={setValue}
+                          />
+                        )}
 
-                      {/* <LeaveDelete
+                        {/* <LeaveDelete
                         leaveType={entitlement?.leaveType}
                         leaveYear={item?.leaveYear}
                         employeeId={item._id}
                         queryKey={queryKey}
                       /> */}
-                    </TableCell>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

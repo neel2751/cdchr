@@ -22,7 +22,7 @@ const leaveRequestSchema = new mongoose.Schema(
     },
     leaveStatus: {
       type: String,
-      enum: ["Pending", "Approved", "Rejected", "Expired"],
+      enum: ["Pending", "Approved", "Rejected", "Expired", "Cancelled"],
       default: "Pending",
     },
     leaveReason: {
@@ -67,7 +67,7 @@ const leaveRequestSchema = new mongoose.Schema(
       type: mongoose.Types.ObjectId,
       ref: "OfficeEmploye",
     },
-    isDeletd: {
+    isDeleted: {
       type: Boolean,
       default: false,
     },

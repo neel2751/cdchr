@@ -19,6 +19,7 @@ export async function adminEmployeeLeaveRequest(data) {
       leaveYear,
       specificLeave: leaveType,
     });
+
     if (!commonLeave)
       return {
         success: false,

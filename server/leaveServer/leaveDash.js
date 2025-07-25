@@ -1,9 +1,8 @@
 "use server";
-
 import { connect } from "@/db/db";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getServerSideProps } from "../session/session";
-import mongoose from "mongoose";
+import { createObjectId } from "@/lib/mongodb";
 
 // Count the number of Pending, Approved, Reject of total leave
 export async function leaveCount() {
@@ -13,7 +12,7 @@ export async function leaveCount() {
   try {
     const { props } = await getServerSideProps();
     const { role, _id: employeeId } = props?.session?.user;
-    const userFilter = { employeeId: new mongoose.Types.ObjectId(employeeId) };
+    const userFilter = { employeeId: createObjectId(employeeId) };
     await connect();
     // Count the number of Pending, Approved, Reject of total leave
 

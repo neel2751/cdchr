@@ -1,11 +1,10 @@
 "use server";
 import { connect } from "@/db/db";
 import { getServerSideProps } from "../session/session";
-import { format, getYear, isPast } from "date-fns";
-import mongoose from "mongoose";
+import { getYear, isPast } from "date-fns";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import CommonLeaveModel from "@/models/commonLeaveModel";
-import { withTransaction } from "@/lib/mongodb";
+import { createObjectId, withTransaction } from "@/lib/mongodb";
 import { validateLeaveData } from "./helper/helper";
 
 export async function getLeaveRequestData(leaveYear) {
@@ -23,7 +22,7 @@ export async function getLeaveRequestData(leaveYear) {
       role === "superAdmin"
         ? { leaveYear: checLeaveYear }
         : {
-            employeeId: new mongoose.Types.ObjectId(employeeId),
+            employeeId: createObjectId(employeeId),
             leaveYear: checLeaveYear,
           };
     const lookup =
@@ -95,13 +94,12 @@ export async function getLeaveRequestDataAdmin(filterData) {
     if (!employeeId) return { success: false, message: "Employee not found" };
 
     await connect();
-    const { leaveYear } = filterData;
-
+    const { leaveYear, page, limit } = filterData;
     const match =
       role === "superAdmin"
         ? { leaveYear: leaveYear }
         : {
-            employeeId: new mongoose.Types.ObjectId(employeeId),
+            employeeId: createObjectId(employeeId),
             leaveYear: leaveYear,
           };
     const lookup =
@@ -256,10 +254,26 @@ export async function getLeaveRequestDataAdmin(filterData) {
       {
         $unset: ["employees", "admin"], // Remove the arrays
       },
+      {
+        $facet: {
+          data: [
+            { $skip: (page - 1) * limit }, // Skip for pagination
+            { $limit: limit }, // Limit the number of results
+          ],
+          totalCount: [{ $count: "count" }], // Count total documents
+        },
+      },
+      {
+        $unwind: "$totalCount", // Unwind the total count array
+      },
     ];
 
     const leaveData = await LeaveRequestModel.aggregate(pipeline);
-    return { success: true, data: JSON.stringify(leaveData) }; // Return the data as a string
+    return {
+      success: true,
+      data: JSON.stringify(leaveData[0].data),
+      totalCount: leaveData[0].totalCount.count,
+    }; // Return the data as a string
   } catch (error) {
     console.log("Get Leave Request Data for Admin", error);
     return { success: false, message: "Failed to get leave request data" };
@@ -336,7 +350,7 @@ async function rejectLeaveRequest(requestId, adminId, adminComment = "") {
   });
 }
 
-export async function rejectPastLeaveRequest(requestId) {
+export async function rejectPastLeaveRequest(requestId, leaveStatus) {
   return await withTransaction(async (session) => {
     const { props } = await getServerSideProps();
     const adminId = props.session.user?._id;
@@ -347,6 +361,7 @@ export async function rejectPastLeaveRequest(requestId) {
     if (
       leaveRequest?.leaveStatus === "Approved" ||
       leaveRequest?.leaveStatus === "Rejected" ||
+      leaveRequest?.leaveStatus === "Cancelled" ||
       leaveRequest?.leaveStatus === "Expired"
     )
       throw new Error("Leave is alreday approved or rejected");
@@ -371,10 +386,15 @@ export async function rejectPastLeaveRequest(requestId) {
 
     await commonLeave.save({ session });
     //Step 5: Update the leave request status and add admin rejectoin deatils
-    leaveRequest.leaveStatus = "Expired";
+    leaveRequest.leaveStatus = leaveStatus || "Rejected";
     leaveRequest.rejectedBy = adminId;
-    leaveRequest.wasExpired = true;
-    leaveRequest.adminComment = "Leave request is rejected due to past date";
+    leaveRequest.wasExpired = leaveStatus === "Expired" ? true : false;
+    leaveRequest.adminComment =
+      leaveStatus === "Expired"
+        ? "Leave request is expired due to past date"
+        : leaveStatus === "Cancelled"
+        ? "Leave request is cancelled by admin"
+        : leaveRequest.adminComment;
     await leaveRequest.save({ session });
     return { success: true, message: "Reject Leave Successfully..." };
   });
@@ -578,9 +598,10 @@ export async function getCommonSpecificLeave({
     const specificLeaveData = await CommonLeaveModel.aggregate([
       {
         $match: {
-          employeeId: employeeId,
+          employeeId: createObjectId(employeeId),
           leaveYear,
-          "leaveData.leaveType": specificLeave, // Initial filter to narrow down documents
+          // leaveData is a array, so we need to match the specific leave type within it
+          "leaveData.leaveType": specificLeave,
         },
       },
       {

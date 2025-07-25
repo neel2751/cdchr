@@ -5,6 +5,6 @@ export function LeaveRequestForm() {
   return <LeaveContainer />;
 }
 
-export const AddLeaveRequest = ({ onAdd }) => (
-  <Button onClick={onAdd}>Leave Request</Button>
+export const AddLeaveRequest = ({ onAdd, title }) => (
+  <Button onClick={onAdd}>{title || "Add Leave Request"}</Button>
 );

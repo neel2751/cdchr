@@ -124,25 +124,17 @@ export const AddEmploeeLeave = () => {
   };
 
   return (
-    <div className="mt-4">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <CardTitle>Leave Requests</CardTitle>
-              <CardDescription>List of leave requests</CardDescription>
-            </div>
-            <AddLeaveRequest onAdd={() => setShowDialog(true)} />
-          </div>
-        </CardHeader>
-        <CardContent>{/* Table here... */}</CardContent>
-      </Card>
+    <>
+      <AddLeaveRequest
+        onAdd={() => setShowDialog(true)}
+        title={"Add Employee Leave"}
+      />
       <LeaveForm
         showDialog={showDialog}
         setShowDialog={() => setShowDialog(false)}
         fields={fields}
         handleSubmit={handleSubmit}
       />
-    </div>
+    </>
   );
 };
