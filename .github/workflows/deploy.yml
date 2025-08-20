@@ -12,6 +12,7 @@ jobs:
         uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
             if [ -d "/cdchr" ]; then
