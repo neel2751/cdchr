@@ -217,15 +217,15 @@ const SideBarFooterCom = () => {
                 <DropdownMenuItem>
                   <Sparkles className="text-neutral-500" />
                   <span className="text-xs font-medium text-neutral-500">
-                    Current Version : IS/V5.9
+                    Current Version : HR/V12.7
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem>
+                <DropdownMenuItem className="w-full">
                   <Link
-                    className="flex items-center gap-2"
+                    className="flex items-center gap-2 w-full"
                     href={`/admin/account/${encrypt(
                       session?.user?._id
                     )}/overview`}

@@ -10,7 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../ui/breadcrumb";
-// import OnBoarding from "../onboarding/onBoarding";
+import OnBoarding from "../onboarding/onBoarding";
 
 const Header = () => {
   const pathName = usePathname();
@@ -36,9 +36,9 @@ const Header = () => {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      {/* <div className="flex-end ml-auto flex items-center gap-2 pr-4">
+      <div className="flex-end ml-auto flex items-center gap-2 pr-4">
         <OnBoarding />
-      </div> */}
+      </div>
     </header>
   );
 };

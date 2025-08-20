@@ -456,7 +456,7 @@ export default function EmployeDocument() {
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>
+                                <AlertDialogTitle className={"tracking-tight"}>
                                   Are you sure you want to delete this document?
                                 </AlertDialogTitle>
                                 <AlertDialogDescription>

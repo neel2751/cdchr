@@ -3,13 +3,14 @@ import Navbar from "../../leaveManagement/components/nav";
 import { officeMenu, officeSlugComponentmap } from "../../_components/menu";
 import EmployeeSidebar from "../components/employeeSidebar";
 
-export default async function IdPage({ params }) {
+export default async function IdPage({ params, searchParams }) {
   const slug = (await params).id;
+  const searchParam = await searchParams;
   const popSlug = slug.pop();
   const basePath = `/admin/officeEmployee/${slug}`;
 
   return (
-    <AvatarProvider slug={slug}>
+    <AvatarProvider slug={slug} searchParams={searchParam}>
       <Navbar
         slug={popSlug}
         adminMenu={officeMenu}

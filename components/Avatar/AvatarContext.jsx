@@ -8,7 +8,7 @@ import { createContext, useState, useContext, useEffect, useMemo } from "react";
 const AvatarContext = createContext();
 
 // create a provider
-const AvatarProvider = ({ slug, children }) => {
+const AvatarProvider = ({ slug, children, searchParams }) => {
   const [selectedAvatar, setSelectedAvatar] = useState(null); // Don't use localStorage here
   const [isClient, setIsClient] = useState(false); // to ensure client-only logic
 
@@ -40,7 +40,13 @@ const AvatarProvider = ({ slug, children }) => {
 
   return (
     <AvatarContext.Provider
-      value={{ selectedAvatar, setSelectedAvatar, newData: memoData, slug }}
+      value={{
+        selectedAvatar,
+        setSelectedAvatar,
+        newData: memoData,
+        slug,
+        searchParams,
+      }}
     >
       {children}
     </AvatarContext.Provider>

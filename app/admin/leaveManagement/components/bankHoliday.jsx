@@ -5,12 +5,13 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { useBankHoliday } from "@/lib/holiday";
+import { cn } from "@/lib/utils";
 import { format, getYear, isPast } from "date-fns";
 import { StarIcon } from "lucide-react";
 import Image from "next/image";
 import React from "react";
 
-export const BankHoliday = () => {
+export const BankHoliday = ({ className }) => {
   const { isLoading, isError, data } = useBankHoliday();
 
   // find the next bank holiday
@@ -44,7 +45,12 @@ export const BankHoliday = () => {
             >
               Bank Holidays in {year}
             </CardTitle>
-            <ul className="grid grid-cols-4 gap-4">
+            <ul
+              className={cn(
+                "grid xl:grid-cols-4 md:grid-cols-2 gap-4",
+                className
+              )}
+            >
               {dateList &&
                 dateList?.map((holiday, index) => (
                   // make header as year

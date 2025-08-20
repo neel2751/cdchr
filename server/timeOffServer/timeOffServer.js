@@ -468,3 +468,274 @@ export async function fetchOfficeEmployeeClockCount({
     return { success: false, message: "Something went wrong" };
   }
 }
+
+export async function fetchAvgAttendance({
+  employeeId = null,
+  fromDate = null,
+  toDate = null,
+}) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!employeeOid) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+    const date = getUKTime({ format: "date" });
+    const monday = startOfWeek(new Date(date), { weekStartsOn: 1 }); // Start of the week (Monday)
+    const formdate = formatDate(new Date(monday), "yyyy-MM-dd");
+    const toEndDate = new Date(addDays(monday, 7));
+
+    const start = fromDate
+      ? normalizeDateToUTC(new Date(fromDate))
+      : normalizeDateToUTC(new Date(formdate));
+    const end = toDate
+      ? normalizeDateToUTC(new Date(toDate))
+      : normalizeDateToUTC(new Date(toEndDate));
+
+    const matchConditions = {
+      date: {
+        $gte: start,
+        $lte: end,
+      },
+      isDeleted: false,
+      employeeId: createObjectId(employeeOid),
+    };
+
+    const clockRecords = await ClockModel.aggregate([
+      { $match: matchConditions },
+
+      // Convert HH:mm strings to total minutes
+      {
+        $addFields: {
+          clockInMinutes: {
+            $let: {
+              vars: { parts: { $split: ["$clockIn", ":"] } },
+              in: {
+                $add: [
+                  {
+                    $multiply: [
+                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                      60,
+                    ],
+                  },
+                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                ],
+              },
+            },
+          },
+          clockOutMinutes: {
+            $let: {
+              vars: { parts: { $split: ["$clockOut", ":"] } },
+              in: {
+                $add: [
+                  {
+                    $multiply: [
+                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                      60,
+                    ],
+                  },
+                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      // Duration
+      {
+        $addFields: {
+          durationMinutes: {
+            $subtract: ["$clockOutMinutes", "$clockInMinutes"],
+          },
+        },
+      },
+
+      // Group
+      {
+        $group: {
+          _id: null,
+          totalMinutes: { $sum: "$durationMinutes" },
+          count: { $sum: 1 },
+          avgClockInMinutes: { $avg: "$clockInMinutes" }, // ✅ true average
+          avgClockOutMinutes: { $avg: "$clockOutMinutes" }, // ✅ true average
+        },
+      },
+
+      // Project formatted results
+      {
+        $project: {
+          avgMinutes: { $divide: ["$totalMinutes", "$count"] },
+          totalMinutes: 1,
+
+          // Format HH:mm for avgClockIn
+          avgClockIn: {
+            $concat: [
+              {
+                $cond: [
+                  {
+                    $lt: [
+                      { $floor: { $divide: ["$avgClockInMinutes", 60] } },
+                      10,
+                    ],
+                  },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: {
+                          $floor: { $divide: ["$avgClockInMinutes", 60] },
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    $toString: {
+                      $floor: { $divide: ["$avgClockInMinutes", 60] },
+                    },
+                  },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$avgClockInMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$avgClockInMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$avgClockInMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+
+          // Format HH:mm for avgClockOut
+          avgClockOut: {
+            $concat: [
+              {
+                $cond: [
+                  {
+                    $lt: [
+                      { $floor: { $divide: ["$avgClockOutMinutes", 60] } },
+                      10,
+                    ],
+                  },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: {
+                          $floor: { $divide: ["$avgClockOutMinutes", 60] },
+                        },
+                      },
+                    ],
+                  },
+                  {
+                    $toString: {
+                      $floor: { $divide: ["$avgClockOutMinutes", 60] },
+                    },
+                  },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$avgClockOutMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$avgClockOutMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$avgClockOutMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+
+          // Average working hours (duration)
+          avgHours: {
+            $concat: [
+              {
+                $cond: [
+                  { $lt: [{ $floor: { $divide: ["$avgMinutes", 60] } }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: { $floor: { $divide: ["$avgMinutes", 60] } },
+                      },
+                    ],
+                  },
+                  { $toString: { $floor: { $divide: ["$avgMinutes", 60] } } },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$avgMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$avgMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$avgMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+
+          // Total hours
+          totalHours: {
+            $concat: [
+              {
+                $cond: [
+                  { $lt: [{ $floor: { $divide: ["$totalMinutes", 60] } }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: {
+                          $floor: { $divide: ["$totalMinutes", 60] },
+                        },
+                      },
+                    ],
+                  },
+                  { $toString: { $floor: { $divide: ["$totalMinutes", 60] } } },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$totalMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$totalMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$totalMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ]);
+
+    return {
+      success: true,
+      data: JSON.stringify(clockRecords[0] || {}),
+    };
+  } catch (error) {
+    console.error("Error fetching average attendance:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}

@@ -19,11 +19,13 @@ import {
 } from "../ui/card";
 import { format } from "date-fns";
 import { useAttendanceSocket } from "@/hooks/useAttendanceSocket";
+import { useEffect, useState } from "react";
 
 export default function QRCodeSocket() {
   console.log("QRCodeSocket rendered");
   const { data: session } = useSession();
   const employeeId = session?.user?._id;
+  const [avatar, setAvatar] = useState(null);
 
   const {
     attendanceList,
@@ -39,14 +41,38 @@ export default function QRCodeSocket() {
   const newData = attendanceList[0];
   const availableActions = getAvailableActions(newData);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const selectedAvatar =
+        localStorage.getItem("selectedAvatar") ||
+        "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg";
+      setAvatar(selectedAvatar);
+    }
+  }, []);
+
   return (
     <>
       <Card className={"max-w-sm"}>
         <CardHeader className="space-y-3">
-          <CardTitle>Clock In / Out</CardTitle>
-          <CardDescription className="flex items-center gap-2">
+          <CardTitle>
+            <div className="flex items-center gap-2">
+              <img
+                src={
+                  avatar ||
+                  "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                }
+                alt={session?.user?.name || "User Avatar"}
+                width={40}
+                height={40}
+                className="rounded-full"
+              />
+              {session?.user?.name || "User"}'s Attendance
+            </div>
+          </CardTitle>
+          <CardDescription className="flex items-center gap-2 text-indigo-600">
             <Clock4 className="size-4" /> Clock{" "}
-            {format(new Date(), "EEEE, d LLL R")}
+            {/* {format(new Date(), "EEEE, d LLL R")} */}
+            {format(new Date(), "PPPP")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -80,17 +106,17 @@ export default function QRCodeSocket() {
                   ],
                 },
               ].map((clock) => (
-                <div key={clock.name} className="flex gap-6 max-w-full">
-                  {clock.data.map((item) => (
+                <div key={clock?.name} className="flex gap-6 max-w-full">
+                  {clock?.data?.map((item) => (
                     <div
-                      key={item.label}
-                      className="bg-gray-200 p-2 px-4 border border-gray-400 space-y-0.5 flex-1"
+                      key={item?.label}
+                      className="bg-gray-200 p-2 px-4 border border-gray-400 space-y-0.5 flex-1 rounded-md"
                     >
                       <p className="text-sm text-gray-500 font-medium">
-                        {item.label}
+                        {item?.label}
                       </p>
                       <span className="text-base font-medium text-gray-800 tracking-tight">
-                        {item.value || "--"}
+                        {item?.value || "--"}
                       </span>
                     </div>
                   ))}
@@ -100,37 +126,38 @@ export default function QRCodeSocket() {
           )}
           {/* Button */}
           <div className="flex gap-2 flex-wrap max-w-full mt-6">
-            {availableActions.map((action) => (
-              <Button
-                key={action}
-                onClick={() => handleActionClick(action)}
-                className={"flex-1 h-12 text-base"}
-              >
-                {action === "clockIn" && (
-                  <>
-                    <Clock4 className="size-4.5" /> Clock In
-                  </>
-                )}
-                {action === "breakIn" && (
-                  <>
-                    <Coffee className="size-4.5" />
-                    Break In
-                  </>
-                )}
-                {action === "breakOut" && (
-                  <>
-                    <TimerOff className="size-4.5" />
-                    Break Out
-                  </>
-                )}
-                {action === "clockOut" && (
-                  <>
-                    <LogOut className="size-4.5" />
-                    Clock Out
-                  </>
-                )}
-              </Button>
-            ))}
+            {newData &&
+              availableActions.map((action) => (
+                <Button
+                  key={action}
+                  onClick={() => handleActionClick(action)}
+                  className={"flex-1 h-12 text-base"}
+                >
+                  {action === "clockIn" && (
+                    <>
+                      <Clock4 className="size-4.5" /> Clock In
+                    </>
+                  )}
+                  {action === "breakIn" && (
+                    <>
+                      <Coffee className="size-4.5" />
+                      Break In
+                    </>
+                  )}
+                  {action === "breakOut" && (
+                    <>
+                      <TimerOff className="size-4.5" />
+                      Break Out
+                    </>
+                  )}
+                  {action === "clockOut" && (
+                    <>
+                      <LogOut className="size-4.5" />
+                      Clock Out
+                    </>
+                  )}
+                </Button>
+              ))}
           </div>
         </CardContent>
       </Card>

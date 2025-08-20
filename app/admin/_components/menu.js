@@ -13,6 +13,7 @@ import {
   GlobeLockIcon,
   CalendarIcon,
   EditIcon,
+  CableCar,
   ClipboardPlus,
   ScanQrCodeIcon,
   SettingsIcon,
@@ -109,6 +110,12 @@ export const officeMenu = [
     name: "Leave",
     link: "leave",
     icon: CalendarIcon,
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
+  },
+  {
+    name: "Bank Holiday",
+    link: "bankholiday",
+    icon: CableCar,
     role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   {
@@ -274,6 +281,7 @@ export const officeSlugComponentmap = {
   session: SessionManagement,
   leave: EmployeeLeaveDeatails,
   weeklyrota: EmployeeWeeklyRota,
+  bankholiday: () => <BankHoliday className={"xl:grid-cols-2"} />,
 };
 
 export const slugComponentmap = {
