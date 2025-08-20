@@ -23,8 +23,8 @@ export default function OfficeEmployeeAttendance() {
     fetchFn: fetchOfficeEmployeeClockCount,
     params: {
       employeeId: slug[0],
-      fromDate: searchParams.fromDate || null,
-      toDate: searchParams.toDate || null,
+      fromDate: searchParams?.fromDate || null,
+      toDate: searchParams?.toDate || null,
     },
     queryKey: ["officeEmployeeAttendance", slug, searchParams],
   });
@@ -32,8 +32,8 @@ export default function OfficeEmployeeAttendance() {
     fetchFn: fetchAvgAttendance,
     params: {
       employeeId: slug[0],
-      fromDate: searchParams.fromDate || null,
-      toDate: searchParams.toDate || null,
+      fromDate: searchParams?.fromDate || null,
+      toDate: searchParams?.toDate || null,
     },
     queryKey: ["avgAttendance", slug, searchParams],
   });
