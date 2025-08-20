@@ -8,18 +8,22 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout code and deploy
         uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
-            if [ -d "/cdchr" ]; then
-              cd /cdchr && git pull origin main
+            cd /home/ubuntu || exit 1
+            if [ -d "cdchr" ]; then
+              cd cdchr
+              git reset --hard
+              git clean -fd
+              git pull origin main
             else
-              git clone https://github.com/neel2751/cdchr.git /cdchr
-              cd /cdchr
+              git clone https://github.com/neel2751/cdchr.git cdchr
+              cd cdchr
             fi
             npm install
             npm run build
