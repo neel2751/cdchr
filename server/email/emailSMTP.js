@@ -361,7 +361,10 @@ export async function getSMTPForFeature(feature) {
     isActive: true,
   }).lean(); // Use lean() for better performance if you don't need mongoose doc methods
   if (!smtp) {
-    throw new Error(`No primary SMTP configured for feature: ${feature}`);
+    return {
+      success: false,
+      message: `No primary SMTP found for feature: ${feature}`,
+    };
   }
   // Decrypt password before use
   smtp.password = decrypt(smtp.password);

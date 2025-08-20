@@ -300,6 +300,7 @@ export const getOfficeEmpSummaryData = async () => {
 
 // Get Last 3 Month Data for Chart
 export async function getLast90DaysDataForChart() {
+  await connect();
   const startDate = new Date();
   const endDate = new Date();
   let daysToSubtract = 90;

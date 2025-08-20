@@ -6,6 +6,9 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import ClockModel from "@/models/clockModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import { createObjectId } from "@/lib/mongodb";
+import { decrypt } from "@/lib/algo";
+import { addDays, startOfWeek } from "date-fns";
+import { formatDate, getUKTime } from "@/utils/time";
 
 export default async function fetchEmployeeWithHoliday() {
   try {
@@ -268,6 +271,200 @@ export async function fetchLiveOfficeClock({
     };
   } catch (error) {
     console.error("Error fetching live office clock data:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+
+// We have to count total Hour per employee with per week, and Avrage count
+export async function fetchOfficeEmployeeClockCount({
+  employeeId = null,
+  fromDate = null,
+  toDate = null,
+}) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!employeeOid) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+    const date = getUKTime({ format: "date" });
+    const monday = startOfWeek(new Date(date), { weekStartsOn: 1 }); // Start of the week (Monday)
+    const formdate = formatDate(new Date(monday), "yyyy-MM-dd");
+    const toEndDate = new Date(addDays(monday, 7));
+
+    const start = fromDate
+      ? normalizeDateToUTC(new Date(fromDate))
+      : normalizeDateToUTC(new Date(formdate));
+    const end = toDate
+      ? normalizeDateToUTC(new Date(toDate))
+      : normalizeDateToUTC(new Date(toEndDate));
+
+    const matchConditions = {
+      date: {
+        $gte: start,
+        $lte: end,
+      },
+      isDeleted: false,
+    };
+    if (employeeId) {
+      matchConditions.employeeId = createObjectId(employeeOid); // Use employeeOid instead of employeeId
+    }
+
+    const clockRecords = await ClockModel.aggregate([
+      { $match: matchConditions },
+
+      {
+        $addFields: {
+          // Convert "HH:mm" to total minutes since midnight
+          clockInMinutes: {
+            $let: {
+              vars: { parts: { $split: ["$clockIn", ":"] } },
+              in: {
+                $add: [
+                  {
+                    $multiply: [
+                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                      60,
+                    ],
+                  },
+                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                ],
+              },
+            },
+          },
+          clockOutMinutes: {
+            $let: {
+              vars: { parts: { $split: ["$clockOut", ":"] } },
+              in: {
+                $add: [
+                  {
+                    $multiply: [
+                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
+                      60,
+                    ],
+                  },
+                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      {
+        $addFields: {
+          durationMinutes: {
+            $subtract: ["$clockOutMinutes", "$clockInMinutes"],
+          },
+        },
+      },
+
+      {
+        $group: {
+          _id: "$employeeId",
+          clockIn: { $first: "$clockIn" },
+          clockOut: { $last: "$clockOut" },
+          breakIn: { $first: "$breakIn" },
+          breakOut: { $last: "$breakOut" },
+          date: { $first: "$date" },
+          totalMinutes: { $sum: "$durationMinutes" },
+          avgMinutes: { $avg: "$durationMinutes" },
+        },
+      },
+
+      {
+        $lookup: {
+          from: "officeemployes",
+          localField: "_id",
+          foreignField: "_id", // Make sure this matches employeeId if needed
+          as: "employeeDetails",
+        },
+      },
+      { $unwind: "$employeeDetails" },
+
+      {
+        $project: {
+          employeeId: "$_id",
+          name: "$employeeDetails.name",
+          clockIn: 1,
+          clockOut: 1,
+          breakIn: 1,
+          breakOut: 1,
+          date: 1,
+          totalHours: {
+            $concat: [
+              {
+                $cond: [
+                  { $lt: [{ $floor: { $divide: ["$totalMinutes", 60] } }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: {
+                          $floor: { $divide: ["$totalMinutes", 60] },
+                        },
+                      },
+                    ],
+                  },
+                  { $toString: { $floor: { $divide: ["$totalMinutes", 60] } } },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$totalMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$totalMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$totalMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+
+          avgHours: {
+            $concat: [
+              {
+                $cond: [
+                  { $lt: [{ $floor: { $divide: ["$avgMinutes", 60] } }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      {
+                        $toString: { $floor: { $divide: ["$avgMinutes", 60] } },
+                      },
+                    ],
+                  },
+                  { $toString: { $floor: { $divide: ["$avgMinutes", 60] } } },
+                ],
+              },
+              ":",
+              {
+                $cond: [
+                  { $lt: [{ $mod: ["$avgMinutes", 60] }, 10] },
+                  {
+                    $concat: [
+                      "0",
+                      { $toString: { $mod: ["$avgMinutes", 60] } },
+                    ],
+                  },
+                  { $toString: { $mod: ["$avgMinutes", 60] } },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    return { success: true, data: JSON.stringify(clockRecords) };
+  } catch (error) {
+    console.error("Error fetching live office clock count:", error);
     return { success: false, message: "Something went wrong" };
   }
 }

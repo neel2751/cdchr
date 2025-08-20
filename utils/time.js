@@ -27,6 +27,12 @@ export function getUKTime({ format = "HH:mm", asDateObject = false }) {
       timeZone: "Europe/London",
     });
   }
+  if (format === "date") {
+    return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  }
+  if (format === "time") {
+    return `${dateParts.hour}:${dateParts.minute}`;
+  }
 
   // Default: HH:mm
   return `${dateParts.hour}:${dateParts.minute}`;
@@ -38,4 +44,27 @@ export const formatCurrency = (value, currency = "GBP") => {
     style: "currency",
     currency,
   }).format(value);
+};
+
+export const formatDate = (date, formatStr = "dd/MM/yyyy") => {
+  if (!date) return "";
+  // return new Intl.DateTimeFormat("en-GB", {
+  //   day: "2-digit",
+  //   month: "2-digit",
+  //   year: "numeric",
+  // }).format(new Date(date));
+  const options = {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  };
+  if (formatStr === "dd/MM/yyyy") {
+    return new Intl.DateTimeFormat("en-GB", options).format(new Date(date));
+  } else if (formatStr === "MM/dd/yyyy") {
+    return new Intl.DateTimeFormat("en-US", options).format(new Date(date));
+  } else if (formatStr === "yyyy-MM-dd") {
+    return new Intl.DateTimeFormat("en-CA", options).format(new Date(date));
+  } else {
+    return new Intl.DateTimeFormat("en-GB", options).format(new Date(date));
+  }
 };

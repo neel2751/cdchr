@@ -46,6 +46,7 @@ import ScanQrcode from "@/components/2FA/scanQrcode";
 import SiteExpense from "../siteAssign/features/siteExpense";
 import { SiteEmployeeOtherDeatils } from "../employee/components/employeeOtherDeatils";
 import EmployeDocument from "../employee/components/employeDocument";
+import OfficeEmployeeAttendance from "@/components/tabs/employee-attendance";
 
 export const officeMenu = [
   {
@@ -74,6 +75,12 @@ export const officeMenu = [
     name: "Weekly Rota",
     link: "weeklyrota",
     icon: TimerIcon,
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
+  },
+  {
+    name: "Attendance",
+    link: "attendance",
+    icon: ScanQrCodeIcon,
     role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   // {
@@ -260,6 +267,7 @@ export const officeSlugComponentmap = {
   edit: EmployeeEdit,
   // timeoff: EmployeeTimeOff,
   // performance: EmployeePerformance,
+  attendance: OfficeEmployeeAttendance,
   document: EmployeeFiles,
   // onboarding: EmployeeOnboarding,
   password: PasswordChange,

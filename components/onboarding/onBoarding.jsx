@@ -79,7 +79,7 @@ const OnBoardingDialog = ({ open, handleClose }) => {
         "Your feedback is important to us! We encourage you to share your thoughts and suggestions on how we can improve our onboarding process and overall work environment. don't worry your feedback will be anonymous.",
     },
     {
-      title: "Reday, Set, Grow!",
+      title: "Ready, Set, Grow!",
       image: "/images/get-started.svg",
       content:
         "Thank you for completing the onboarding process! We are excited to have you as part of the CDC Group family. If you have any questions or need assistance, please don't hesitate to reach out to your manager or HR.",
