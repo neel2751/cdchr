@@ -553,7 +553,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           )}
         </CardContent>
         <CardFooter className={"border-t"}>
-          {attendanceList?.length > 0 && (
+          {attendanceList?.length > 10 && (
             <PaginationWithLinks
               page={currentPage}
               pageSizeSelectOptions={{

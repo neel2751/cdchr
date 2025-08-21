@@ -20,11 +20,21 @@ export default function ScanQrcode({ siteId }) {
     errorAudioRef.current = new Audio("/audio/error.mp3");
   }, []);
 
+  const stopScanner = () => {
+    if (scannerRef.current) {
+      scannerRef.current.clear().catch(console.error);
+      const el = document.getElementById("qr-reader");
+      if (el) el.innerHTML = "";
+      scannerRef.current = null;
+    }
+  };
+
   const handleScan = async (token) => {
     if (!scanning || alreadyScannedRef.current) {
       toast.warning("⏳ Please wait, processing...");
       return;
     }
+
     alreadyScannedRef.current = true;
     setScanning(false);
 
@@ -32,11 +42,10 @@ export default function ScanQrcode({ siteId }) {
       const response = await storeClockTime(token, siteId);
       if (response.success) {
         toast.success(response.message || "✅ QR Code scanned successfully!");
-
+        // Initialize socket if not connected
         if (!socketRef.current) {
           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
           socketRef.current.on("connect", () => {
-            console.log("Socket connected (scan side):", socketRef.current.id);
             if (response.employeeId) {
               socketRef.current.emit("stop-qr", response.employeeId);
             }
@@ -54,6 +63,9 @@ export default function ScanQrcode({ siteId }) {
         } catch (err) {
           console.warn("Audio play error:", err);
         }
+
+        // Stop scanner immediately after success
+        stopScanner();
       } else {
         toast.error(response.message || "❌ Error scanning QR!");
         try {
@@ -67,6 +79,7 @@ export default function ScanQrcode({ siteId }) {
       toast.error("❌ Error scanning QR!");
     }
 
+    // Reset scanning state after 5s
     setTimeout(() => {
       alreadyScannedRef.current = false;
       setScanning(true);
@@ -81,19 +94,10 @@ export default function ScanQrcode({ siteId }) {
       qrbox: 250,
     });
 
-    scanner.render(
-      (decodedText) => handleScan(decodedText),
-      (error) => {}
-    );
-
+    scanner.render(handleScan, (error) => {});
     scannerRef.current = scanner;
 
-    return () => {
-      scanner.clear().catch(() => {});
-      const el = document.getElementById("qr-reader");
-      if (el) el.innerHTML = ""; // <-- Manually clear the container!
-      scannerRef.current = null;
-    };
+    return () => stopScanner();
   }, []);
 
   return (

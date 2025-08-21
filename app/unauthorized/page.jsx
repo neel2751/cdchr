@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { CardDescription, CardTitle } from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { getServerSideProps } from "@/server/session/session";
 import { DoorOpen } from "lucide-react";
 import Image from "next/image";
@@ -44,6 +44,15 @@ export default async function UnauthPage() {
             className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
           >
             Log In
+          </Link>
+        </Button>
+      ) : role === "reception" ? (
+        <Button asChild>
+          <Link
+            href="/office/"
+            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Go to Reception Dashboard
           </Link>
         </Button>
       ) : (

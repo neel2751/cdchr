@@ -30,6 +30,7 @@ async function checkRoleMiddleware(req) {
     admin: "/admin",
     user: "/admin",
     siteEmployee: "/employee",
+    reception: "/office",
     superAdmin: "*",
   };
 
@@ -49,7 +50,11 @@ async function checkRoleMiddleware(req) {
   if (isCommonMenuItem) return NextResponse.next();
 
   // ✅ Bypass permission checks for `siteEmployee`
-  if (userRole === "siteEmployee" || userRole === "superAdmin") {
+  if (
+    userRole === "siteEmployee" ||
+    userRole === "superAdmin" ||
+    userRole === "reception"
+  ) {
     return NextResponse.next();
   }
 
@@ -108,5 +113,5 @@ export default withAuth(checkRoleMiddleware, {
 
 // Exclude auth routes and public paths from the middleware
 export const config = {
-  matcher: ["/admin/:path*", "/employee/:path*"], // Only match admin routes
+  matcher: ["/admin/:path*", "/employee/:path*", "/office/:path*"], // Only match admin routes
 };

@@ -6,6 +6,7 @@ import UserSession from "@/models/sessionModel";
 import { sendMail } from "../email/email";
 import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
+import OfficeUserModel from "@/models/officeModel";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -105,6 +106,11 @@ export const LoginData = async (email, password) => {
     userType = "site";
   }
 
+  if (!user) {
+    user = await OfficeUserModel.findOne({ email }).lean();
+    userType = "reception";
+  }
+
   // No user found
   if (!user) {
     return { status: false, message: "Email not found" };
@@ -127,7 +133,7 @@ export const LoginData = async (email, password) => {
           message: "Your EndDate has expired. Please contact Admin.",
         };
       }
-    } else {
+    } else if (userType === "site") {
       if (
         new Date(user.endDate) < new Date() ||
         new Date(user.visaEndDate) < new Date()
@@ -162,12 +168,21 @@ export const LoginData = async (email, password) => {
     // if (siteAssignment && siteAssignment.projectSiteID) {
     //   user.siteId = siteAssignment?.projectSiteID;
     // }
-  } else {
+  } else if (userType === "site") {
     user.role = "siteEmployee";
+  } else {
+    user.role = "reception";
   }
 
   delete user.password;
-  user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
+  // Set employeType based on user type
+  user.employeType =
+    userType === "office"
+      ? "OfficeEmployee"
+      : userType === "site"
+      ? "SiteEmployee"
+      : "ReceptionEmployee";
+  // user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
   user.name = user.name || user.firstName || "User";
   return {
     status: true,
