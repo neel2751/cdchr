@@ -91,7 +91,7 @@ export default function ScanQrcode({ siteId }) {
 
     const scanner = new Html5QrcodeScanner("qr-reader", {
       fps: 10,
-      qrbox: 250,
+      qrbox: 350,
     });
 
     scanner.render(handleScan, (error) => {});

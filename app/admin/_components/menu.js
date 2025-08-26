@@ -93,7 +93,7 @@ export const officeMenu = [
     name: "Document",
     link: "document",
     icon: FileLockIcon,
-    role: ["superAdmin", "admin"],
+    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
   // {
   //   name: "OnBoarding",

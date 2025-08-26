@@ -12,7 +12,7 @@ export default function Layout({ children }) {
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
         <div className="flex min-h-screen flex-col px-2 sm:py-0 py-2">
-          <header className="sticky top-0 z-50 w-full border-b bg-white">
+          <header className="sticky top-0 z-50 w-full border-b bg-white flex items-center justify-between">
             <div className="container flex h-16 items-center justify-center mx-auto">
               <div className="flex items-center justify-center gap-2">
                 <Image
