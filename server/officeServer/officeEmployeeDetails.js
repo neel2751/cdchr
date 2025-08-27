@@ -1,7 +1,6 @@
 "use server";
 import { getServerSideProps } from "../session/session";
 import { connect } from "@/db/db";
-import mongoose from "mongoose";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { decrypt } from "@/lib/algo";
@@ -11,14 +10,27 @@ import DocumentModel from "@/models/document/documentModel";
 import { deleteFileFromS3 } from "../aws/upload";
 import EmployeModel from "@/models/employeModel";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
+import RoleBasedModel from "@/models/rolebasedModel";
 
 export async function extractData(params) {
   try {
     const { props } = await getServerSideProps();
     const { role, _id } = props?.session?.user;
     const res = decrypt(params[0]);
-    const employeeId = role === "superAdmin" ? res : _id;
-    return employeeId;
+    // we have to check the role here if they have permission to view other employee data
+    if (role === "superAdmin") return res;
+    const roles = await RoleBasedModel.find({
+      employeeId: _id,
+      isDeleted: false,
+    })
+      .lean()
+      .exec();
+    const permissions = roles.flatMap((r) => r.permissions);
+    if (!permissions.includes("/admin/officeEmployee")) {
+      return _id; // return their own ID if they don't have permission
+    }
+    // if they have permission, return the decrypted ID from params
+    return res;
   } catch (error) {
     console.error(error);
   }
@@ -31,7 +43,7 @@ export async function employeeDeatils(params) {
     const pipeline = [
       {
         $match: {
-          _id: new mongoose.Types.ObjectId(employeeId),
+          _id: createObjectId(employeeId),
         },
       },
       {
@@ -153,7 +165,7 @@ export async function employeeLeaveDetails(params) {
     const pipeline = [
       {
         $match: {
-          employeeId: new mongoose.Types.ObjectId(employeeId),
+          employeeId: createObjectId(employeeId),
           leaveYear: new Date().getFullYear(),
         },
       },

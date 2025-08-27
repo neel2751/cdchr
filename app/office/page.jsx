@@ -4,6 +4,7 @@ import HandleVisitor from "../admin/visitors/handleVisitor";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CardDescription, CardTitle } from "@/components/ui/card";
+import ScannerModal from "./scanner/page";
 
 export default function page() {
   // we have to show two big boxes first one Add visitors and second one Attendance with images
@@ -52,38 +53,44 @@ export default function page() {
 }
 
 function ScanQrcodeComponent() {
-  const openScanner = () => {
-    const width = 400;
-    const height = 600;
-    const left = window.screenX + (window.innerWidth - width) / 2;
-    const top = window.screenY + (window.innerHeight - height) / 2;
+  // const openScanner = () => {
+  //   const width = 400;
+  //   const height = 600;
+  //   const left = window.screenX + (window.innerWidth - width) / 2;
+  //   const top = window.screenY + (window.innerHeight - height) / 2;
 
-    const scannerWindow = window.open(
-      `/office/scanner`,
-      "_blank",
-      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
-    );
+  //   const scannerWindow = window.open(
+  //     `/office/scanner`,
+  //     "_blank",
+  //     `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=yes`
+  //   );
 
-    const handleMessage = (e) => {
-      if (e.data?.type === "QR_SCANNED") {
-        console.log("Scanned token:", e.data.token);
-        console.log("Employee ID:", e.data.employeeId);
-        window.removeEventListener("message", handleMessage);
+  //   const handleMessage = (e) => {
+  //     if (e.data?.type === "QR_SCANNED") {
+  //       console.log("Scanned token:", e.data.token);
+  //       console.log("Employee ID:", e.data.employeeId);
+  //       window.removeEventListener("message", handleMessage);
 
-        // Optional: update UI or toast
-        toast.success("QR Code scanned successfully!");
-      }
-    };
+  //       // Optional: update UI or toast
+  //       toast.success("QR Code scanned successfully!");
+  //     }
+  //   };
 
-    window.addEventListener("message", handleMessage);
-  };
+  //   window.addEventListener("message", handleMessage);
+  // };
+
+  const [open, setOpen] = React.useState(false);
 
   return (
-    <Button
-      onClick={openScanner}
-      className="mt-4 bg-blue-500 text-white rounded hover:bg-blue-600"
-    >
-      Scan QR Code
-    </Button>
+    <div>
+      <Button
+        // onClick={openScanner}
+        onClick={() => setOpen(true)}
+        className="mt-4 bg-blue-500 text-white rounded hover:bg-blue-600"
+      >
+        Scan QR Code
+      </Button>
+      <ScannerModal open={open} onClose={() => setOpen(false)} />
+    </div>
   );
 }
