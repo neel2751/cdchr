@@ -35,6 +35,8 @@ export const handleOfficeEmployee = async (data, id) => {
       if (hasSameEmail || hasSamePhone) {
         throw new Error("This Email or Phone Number is Already In Use");
       }
+      // if the email is changing we have to convert it to lowercase
+      data.email = data.email.toLowerCase();
       Object.assign(updatedEmp, data);
       const updatedData = await updatedEmp.save();
       if (!updatedData)
@@ -55,6 +57,7 @@ export const handleOfficeEmployee = async (data, id) => {
         const newUser = new OfficeEmployeeModel({
           ...data,
           password: hashPass,
+          email: email.toLowerCase(),
         });
 
         const result = await newUser.save();

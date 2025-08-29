@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CardDescription, CardTitle } from "@/components/ui/card";
 import ScannerModal from "./scanner/page";
+import { ConsultationBooking } from "./booking";
 
 export default function page() {
   // we have to show two big boxes first one Add visitors and second one Attendance with images
@@ -48,6 +49,7 @@ export default function page() {
         </div>
       </div>
       <HandleVisitor open={open} onOpenChange={setOpen} />
+      {/* <ConsultationBooking /> */}
     </div>
   );
 }
