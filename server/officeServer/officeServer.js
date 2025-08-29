@@ -57,7 +57,7 @@ export const handleOfficeEmployee = async (data, id) => {
         const newUser = new OfficeEmployeeModel({
           ...data,
           password: hashPass,
-          email: email.toLowerCase(),
+          email: data.email.toLowerCase(),
         });
 
         const result = await newUser.save();
