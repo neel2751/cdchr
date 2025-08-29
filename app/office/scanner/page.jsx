@@ -46,7 +46,7 @@ export default function ScannerModal({ siteId, open, onClose }) {
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             // take 80% of the smaller side
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            return { width: minEdge * 0.8, height: minEdge * 0.8 };
+            return { width: minEdge * 0.9, height: minEdge * 0.9 };
           },
         },
         handleScan,
@@ -66,7 +66,6 @@ export default function ScannerModal({ siteId, open, onClose }) {
   }, [open]);
 
   if (!open) return null;
-
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
       <div className="bg-white p-4 rounded-xl w-full max-w-2xl h-[80vh] relative">
