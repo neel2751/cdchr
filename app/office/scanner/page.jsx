@@ -40,7 +40,7 @@ export default function ScannerModal({ siteId, open, onClose }) {
 
     scanner
       .start(
-        { facingMode: "environment" }, // back camera
+        { facingMode: "user" }, // back camera
         {
           fps: 30, // faster detection
           qrbox: (viewfinderWidth, viewfinderHeight) => {
