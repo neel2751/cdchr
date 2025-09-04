@@ -7,7 +7,7 @@ import CommonLeaveModel from "@/models/commonLeaveModel";
 import { connect } from "@/db/db";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import { validateLeaveData } from "./helper/helper";
-import { createObjectId } from "@/lib/mongodb";
+import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { getCommonSpecificLeave } from "./getLeaveServer";
 
 /**
@@ -180,9 +180,9 @@ export async function generateDefaultLeaves(joinDate, dayPerWeek) {
 
   const unpaidLeave = new Leave({
     leaveType: "Unpaid Leave",
-    total: 0,
+    total: 100,
     used: 0,
-    remaining: 0,
+    remaining: 100,
     type: "days",
     isPaid: false,
     isHide: false,
@@ -233,8 +233,8 @@ export async function countLeaveNewFirstTime(
 
 export async function storeCommonLeaveNew(joinDate, dayPerWeek, employeeId) {
   try {
-    const mongooseId = mongoose.Types.ObjectId.isValid(employeeId)
-      ? new mongoose.Types.ObjectId(employeeId)
+    const mongooseId = isValidObjectId(employeeId)
+      ? createObjectId(employeeId)
       : null;
     if (!mongooseId) return { success: false, message: "Invalid employeeId" };
     // const joinDate = new Date("08-22-2025");
@@ -310,8 +310,8 @@ export async function syncMissingLeaveTypesNew(
   try {
     if (!joinDate || !dayPerWeek || !employeeId)
       return { success: false, message: "Please Provide Valid Data" };
-    const mongooseId = mongoose.Types.ObjectId.isValid(employeeId)
-      ? new mongoose.Types.ObjectId(employeeId)
+    const mongooseId = isValidObjectId(employeeId)
+      ? createObjectId(employeeId)
       : null;
     if (!mongooseId) return { success: false, message: "Invalid employeeId" };
     const currentYear = getLeaveYearString(new Date());

@@ -28,6 +28,18 @@ const leaveRequestSchema = new mongoose.Schema(
     leaveReason: {
       type: String,
     },
+    leaveDates: {
+      type: [Date], // can hold multiple scattered dates
+      required: true,
+    },
+    leaveBreakdown: [
+      {
+        leaveType: String,
+        leaveYear: String,
+        leaveDays: Number,
+      },
+    ],
+
     leaveStartDate: {
       type: Date,
       required: true,

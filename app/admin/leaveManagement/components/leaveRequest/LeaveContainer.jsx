@@ -62,33 +62,33 @@ export default function LeaveContainer() {
     // ✅ Task5 : Count the number of days between the start and end dates
     // ✅ Task6 : Check if the employee has enough leave balance
     // ✅ Task7 : Submit the leave request
-    const { leaveStartDate, leaveEndDate, leaveType } = data;
-    const isBeforeEndDate = isBefore(
-      new Date(leaveEndDate),
-      new Date(leaveStartDate)
-    );
-    if (isBeforeEndDate) {
-      toast.warning("End date should be after start date");
-      return;
-    }
-    const totalCount = differenceInDays(leaveEndDate, leaveStartDate) + 1;
+    const { leaveType, leaveDates } = data;
+    // const isBeforeEndDate = isBefore(
+    //   new Date(leaveEndDate),
+    //   new Date(leaveStartDate)
+    // );
+    // if (isBeforeEndDate) {
+    //   toast.warning("End date should be after start date");
+    //   return;
+    // }
+    // const totalCount = differenceInDays(leaveEndDate, leaveStartDate) + 1;
 
     const result = leaveTypes.find((item) => item.label === leaveType);
     if (!initialValues?._id) {
-      if (result?.total < totalCount)
+      if (result?.total < leaveDates.length)
         return toast.warning(
           `${leaveType} is only available for ${result?.total} days`
         );
       if (
         (!leaveType === "Annual Leave" || !leaveType === "Unpaid Leave") &&
-        totalCount > result?.remaining
+        leaveDates.length > result?.remaining
       )
         return toast.warning(
           `You have only ${result?.remaining} days left for ${leaveType}`
         );
-      submitLeaveRequest({ ...data, totalCount });
+      submitLeaveRequest({ ...data, totalCount: leaveDates.length });
     } else {
-      submitLeaveRequest({ ...data, totalCount });
+      submitLeaveRequest({ ...data, totalCount: leaveDates.length });
     }
   };
 
@@ -99,46 +99,63 @@ export default function LeaveContainer() {
       type: "select",
       options: leaveTypes,
       size: true,
+      disabled: isEdit,
       validationOptions: {
         required: "Please select a leave type",
       },
     },
+    // {
+    //   name: "leaveStartDate",
+    //   labelText: "Start Date",
+    //   type: "date",
+    //   placeholder: "Select Start Date",
+    //   validationOptions: {
+    //     required: "Start Date is required",
+    //     // don't select dates before today
+    //     validate: (value) => {
+    //       if (value) {
+    //         return isBefore(value, new Date())
+    //           ? "Start Date cannot be before today"
+    //           : true;
+    //       }
+    //       return true;
+    //     },
+    //   },
+    //   disabled: (date) => isBefore(date, new Date()),
+    // },
+    // {
+    //   name: "leaveEndDate",
+    //   labelText: "End Date",
+    //   type: "date",
+    //   placeholder: "Select End Date",
+    //   hideIf: {
+    //     field: "leaveType",
+    //     value: "Half Day",
+    //   },
+    //   validationOptions: {
+    //     required: "End Date is required",
+    //     // don't select dates before today
+    //     validate: (value) => {
+    //       if (value) {
+    //         return isBefore(value, new Date())
+    //           ? "End Date cannot be before today"
+    //           : true;
+    //       }
+    //       return true;
+    //     },
+    //   },
+    //   disabled: (date) => isBefore(date, new Date()),
+    // },
     {
-      name: "leaveStartDate",
-      labelText: "Start Date",
-      type: "date",
-      placeholder: "Select Start Date",
+      name: "leaveDates",
+      labelText: "Date Range",
+      type: "multidate",
+      placeholder: "Select Date Range",
       validationOptions: {
-        required: "Start Date is required",
-        // don't select dates before today
+        required: "Date Range is required",
         validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "Start Date cannot be before today"
-              : true;
-          }
-          return true;
-        },
-      },
-      disabled: (date) => isBefore(date, new Date()),
-    },
-    {
-      name: "leaveEndDate",
-      labelText: "End Date",
-      type: "date",
-      placeholder: "Select End Date",
-      hideIf: {
-        field: "leaveType",
-        value: "Half Day",
-      },
-      validationOptions: {
-        required: "End Date is required",
-        // don't select dates before today
-        validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "End Date cannot be before today"
-              : true;
+          if (!value || value.length === 0) {
+            return "Please select at least one date";
           }
           return true;
         },
@@ -176,6 +193,7 @@ export default function LeaveContainer() {
       <LeaveForm
         showDialog={showDialog}
         setShowDialog={handleClose}
+        // fields={fields.filter((f) => !isEdit || f.name !== "leaveType")}
         fields={fields}
         initialValues={initialValues}
         handleSubmit={handleSubmit}

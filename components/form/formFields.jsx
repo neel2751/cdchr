@@ -611,3 +611,47 @@ export const DatePickerWithRange = memo(
     );
   })
 );
+
+export const MultiDatePicker = memo(
+  forwardRef(function MultiDatePicker(
+    { dates, setDates, label, helperText, errorMsg, className, ...props },
+    ref
+  ) {
+    return (
+      <div className={cn("grid gap-2", className)}>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              id="date"
+              variant={"outline"}
+              className={cn(
+                "w-full justify-start text-left font-normal",
+                !dates?.length && "text-muted-foreground"
+              )}
+            >
+              <CalendarIcon />
+              {dates?.length ? (
+                dates.length === 1 ? (
+                  format(dates[0], "LLL dd, y")
+                ) : (
+                  `${dates.length} days selected`
+                )
+              ) : (
+                <span>Pick a date</span>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              initialFocus
+              mode="multiple"
+              selected={dates}
+              onSelect={setDates}
+              numberOfMonths={2}
+            />
+          </PopoverContent>
+        </Popover>
+      </div>
+    );
+  })
+);

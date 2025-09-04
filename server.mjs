@@ -29,8 +29,68 @@ app.prepare().then(() => {
   const tokenInterval = 60000; // 30 seconds
   const tokenExpiration = 60; // token lifetime
 
+  const officeTokens = new Map(); // token -> { action, siteId, expiresAt, usedEmployees: Set() }
+
   io.on("connection", (socket) => {
     console.log("Employee connected", socket.id);
+
+    /** ============================
+     * Office device generates QR
+     * ============================ */
+    socket.on("generate-office-qr", ({ action, siteId }) => {
+      const token = jwt.sign({ action, siteId }, SECRET, { expiresIn: "90s" });
+      const expiresAt = Date.now() + 90000;
+
+      officeTokens.set(token, { action, siteId, expiresAt });
+
+      socket.emit("new-office-qr", token);
+
+      // Automatically delete token after expiration
+      setTimeout(() => {
+        officeTokens.delete(token);
+        io.emit("office-qr-expired", token); // Notify office UI
+        console.log(`Token expired: ${token}`);
+      }, 90000);
+    });
+
+    /** ============================
+     * Employee scans QR
+     * ============================ */
+    socket.on("employee-scan-qr", ({ token, employeeId }) => {
+      const data = officeTokens.get(token);
+
+      if (!data || data.expiresAt < Date.now()) {
+        socket.emit("scan-error", "Token expired or invalid");
+        return;
+      }
+
+      // Remove token immediately after first successful scan
+      officeTokens.delete(token);
+
+      // 🔹 Broadcast to all office UIs → remove QR
+      io.emit("office-qr-used", token);
+
+      // Record attendance
+      console.log(
+        `Employee ${employeeId} performed ${data.action} at site ${data.siteId}`
+      );
+
+      socket.emit("scan-success", { action: data.action });
+      io.emit("refresh-clock-table", employeeId);
+    });
+
+    /** ============================
+     * Employee scans QR successfully
+     * ============================ */
+    socket.on("office-qr-used", (token) => {
+      // 🔹 Delete the token so it can’t be reusedf
+      officeTokens.delete(token);
+      // 🔹 Broadcast to all office devices to hide this QR
+      io.emit("office-qr-used", token);
+      console.log(`QR token used and removed: ${token}`);
+    });
+
+    // ============================ OLD CODE ============================
 
     socket.on("start-token-generation", (employeeId) => {
       if (completedEmployees.has(employeeId)) {

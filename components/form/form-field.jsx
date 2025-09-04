@@ -357,6 +357,90 @@ export const FormDate = ({ field }) => {
   );
 };
 
+export const FormMultiDate = ({ field }) => {
+  const {
+    control,
+    formState: { errors },
+  } = useFormContext();
+
+  const [selectedDates, setSelectedDates] = React.useState([]);
+
+  return (
+    <div className="space-y-2">
+      <FormLabel name={field?.name} labelText={field?.labelText} />
+      <Controller
+        name={field.name}
+        control={control}
+        rules={field.validationOptions}
+        render={({ field: { onChange, value } }) => {
+          const selected = value ? value.map((d) => new Date(d)) : [];
+
+          // Keep local state in sync with field value
+          React.useEffect(() => {
+            setSelectedDates(selected);
+          }, [value]);
+
+          return (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !value?.length && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {value?.length ? (
+                    value.length === 1 ? (
+                      format(new Date(value[0]), "PPP")
+                    ) : (
+                      `${value.length} dates selected`
+                    )
+                  ) : (
+                    <span>{field.placeholder}</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-2 space-y-2 z-50">
+                <Calendar
+                  mode="multiple"
+                  selected={selected}
+                  onSelect={(dates) => {
+                    setSelectedDates(dates);
+                    onChange(dates?.map((d) => formatToDateString(d)) || []);
+                  }}
+                  numberOfMonths={2}
+                  initialFocus
+                  disabled={field.disabled || (() => false)}
+                />
+              </PopoverContent>
+            </Popover>
+          );
+        }}
+      />
+      {errors[field.name] && (
+        <p className="text-sm text-destructive">
+          {errors[field.name]?.message}
+        </p>
+      )}
+      {/* Show selected dates */}
+      {selectedDates.length > 0 && (
+        <div className="flex overflow-x-auto gap-2 border rounded-3xl p-1">
+          {selectedDates.map((date, index) => (
+            <span
+              key={index}
+              className="px-2 py-1 bg-gray-200 rounded-full text-sm w-fit-content flex-shrink-0"
+            >
+              {format(new Date(date), "PPP")}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SearchableSelect = ({ field }) => {
   const [open, setOpen] = React.useState(false);
   const {
@@ -380,6 +464,7 @@ export const SearchableSelect = ({ field }) => {
                 <Button
                   variant="outline"
                   // role="combobox"
+                  disabled={field.disabled}
                   aria-expanded={open}
                   className={`w-full justify-between ${
                     value ? "text-neutral-900" : "text-neutral-500"

@@ -3,7 +3,7 @@
 import { useFetchQuery } from "@/hooks/use-query";
 import { useAvatar } from "../Avatar/AvatarContext";
 import {
-  fetchAvgAttendance,
+  fetchChartData,
   fetchOfficeEmployeeClockCount,
 } from "@/server/timeOffServer/timeOffServer";
 import { DateRangeFilter } from "../filters/filterDate/filterDateRange";
@@ -16,36 +16,44 @@ import {
 } from "../ui/card";
 import { format } from "date-fns";
 import Image from "next/image";
+import { ReusableBarAttendanceChart } from "../charts/charts";
+import { PaginationWithLinks } from "../filters/pagination/pagination-client";
 
 export default function OfficeEmployeeAttendance() {
   const { slug, searchParams } = useAvatar();
+
   const { data } = useFetchQuery({
     fetchFn: fetchOfficeEmployeeClockCount,
     params: {
       employeeId: slug[0],
       fromDate: searchParams?.fromDate || null,
       toDate: searchParams?.toDate || null,
+      page: searchParams?.page || 1,
+      limit: searchParams?.pageSize || 10,
     },
     queryKey: ["officeEmployeeAttendance", slug, searchParams],
   });
-  const { data: avgData } = useFetchQuery({
-    fetchFn: fetchAvgAttendance,
+  const { data: barData } = useFetchQuery({
+    fetchFn: fetchChartData,
     params: {
       employeeId: slug[0],
       fromDate: searchParams?.fromDate || null,
       toDate: searchParams?.toDate || null,
     },
-    queryKey: ["avgAttendance", slug, searchParams],
+    queryKey: ["chartData", slug, searchParams],
   });
+  const { newData: barChartData } = barData || {};
   const { newData: attendanceCount } = data || {};
-  const { newData: avgAttendance } = avgData || {};
   return (
     <div className="">
-      <div className="flex items-center justify-between mb-4">
+      <div className="sm:flex items-center justify-between mb-4">
         <CardTitle className="text-xl font-semibold text-pretty tracking-tight">
           Attendance Records
         </CardTitle>
         <DateRangeFilter />
+      </div>
+      <div className="mb-5">
+        {barChartData && <ReusableBarAttendanceChart data={barChartData} />}
       </div>
       <Card>
         <CardHeader className="flex justify-between">
@@ -56,12 +64,12 @@ export default function OfficeEmployeeAttendance() {
             </CardDescription>
           </div>
         </CardHeader>
-        <CardContent className={"grid grid-cols-4 gap-5"}>
+        <CardContent className={"grid sm:grid-cols-5 grid-cols-2 gap-5"}>
           <Card className="bg-green-50 text-green-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Avg. Clock In</CardTitle>
               <span className="text-2xl font-semibold">
-                {avgAttendance?.avgClockIn || 0.0}
+                {attendanceCount?.avgClockIn || 0.0}
               </span>
             </CardHeader>
           </Card>
@@ -69,7 +77,7 @@ export default function OfficeEmployeeAttendance() {
             <CardHeader>
               <CardTitle>Avg. Clock Out</CardTitle>
               <span className="text-2xl font-semibold">
-                {avgAttendance?.avgClockOut || 0.0}
+                {attendanceCount?.avgClockOut || 0.0}
               </span>
             </CardHeader>
           </Card>
@@ -78,15 +86,23 @@ export default function OfficeEmployeeAttendance() {
             <CardHeader>
               <CardTitle>Total Hours</CardTitle>
               <span className="text-2xl font-semibold">
-                {avgAttendance?.totalHours || 0.0}
+                {attendanceCount?.totalHours || 0.0}
               </span>
             </CardHeader>
           </Card>
           <Card className="bg-purple-50 text-purple-600 border-none shadow-none">
             <CardHeader>
-              <CardTitle>Average Hours</CardTitle>
+              <CardTitle>Avg. Hours</CardTitle>
               <span className="text-2xl font-semibold">
-                {avgAttendance?.avgHours || "0.00"}
+                {attendanceCount?.avgHours || "0.00"}
+              </span>
+            </CardHeader>
+          </Card>
+          <Card className="bg-amber-50 text-amber-600 border-none shadow-none">
+            <CardHeader>
+              <CardTitle>Avg. Break Hours</CardTitle>
+              <span className="text-2xl font-semibold">
+                {attendanceCount?.avgBreakHours || "0.00"}
               </span>
             </CardHeader>
           </Card>
@@ -100,19 +116,23 @@ export default function OfficeEmployeeAttendance() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {attendanceCount?.length > 0 ? (
-            attendanceCount.map((record, index) => (
+          {attendanceCount && attendanceCount?.records?.length > 0 ? (
+            attendanceCount?.records?.map((record, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between border-b last:border-b-0"
+                className="flex items-center justify-between border-b last:border-b-0 pb-2 last:pb-0"
               >
                 <div>
                   <CardTitle className="text-slate-600">
                     {format(record.date, "PPPP")}
                   </CardTitle>
                   <CardDescription>
-                    {record.totalHours.split(":")[0]} hours{" "}
-                    {record.totalHours.split(":")[1]} minutes
+                    {record?.totalHoursPerDay?.split(":")[0]} hours{" "}
+                    {record?.totalHoursPerDay?.split(":")[1]} minutes
+                  </CardDescription>
+                  <CardDescription>
+                    {record?.breakHoursPerDay?.split(":")[0]} hours{" "}
+                    {record?.breakHoursPerDay?.split(":")[1]} minutes
                   </CardDescription>
                 </div>
                 <div className="flex flex-col items-end">
@@ -151,6 +171,9 @@ export default function OfficeEmployeeAttendance() {
                 </CardContent>
               </Card>
             </div>
+          )}
+          {attendanceCount?.totalRecords > 10 && (
+            <PaginationWithLinks totalCount={attendanceCount?.totalRecords} />
           )}
         </CardContent>
       </Card>

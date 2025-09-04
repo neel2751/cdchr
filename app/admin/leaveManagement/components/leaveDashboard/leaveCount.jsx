@@ -22,7 +22,7 @@ const LeaveCount = () => {
   });
   const { newData } = leaveCounts || {};
   return (
-    <div className=" grid grid-cols-5 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
       {newData &&
         newData.map((item, idx) => (
           <LeaveCard key={idx} label={item?.label} value={item?.value} />

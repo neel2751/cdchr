@@ -5,6 +5,7 @@ import {
   FormDate,
   FormImageUpload,
   FormInput,
+  FormMultiDate,
   FormMultiInput,
   FormMultipleSelect,
   FormRadio,
@@ -16,6 +17,7 @@ import { Loader2 } from "lucide-react";
 import { isObjectEmpty } from "@/lib/object";
 import { useEffect, useRef } from "react";
 import useGlobalForm from "@/hooks/useGlobalForm";
+import { MultiDatePicker } from "./formFields";
 
 export function GlobalForm({
   fields,
@@ -178,6 +180,9 @@ export function GlobalForm({
                 )}
                 {field.type === "date" && (
                   <FormDate key={field?.name} field={field} />
+                )}
+                {field.type === "multidate" && (
+                  <FormMultiDate key={field?.name} field={field} />
                 )}
                 {field.type === "image" && (
                   <FormImageUpload key={field?.name} field={field} />

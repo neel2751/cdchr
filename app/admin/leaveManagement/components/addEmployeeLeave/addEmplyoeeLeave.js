@@ -52,47 +52,62 @@ export const AddEmploeeLeave = () => {
         required: "Please select a leave type",
       },
     },
+    // {
+    //   name: "leaveStartDate",
+    //   labelText: "Start Date",
+    //   type: "date",
+    //   placeholder: "Select Start Date",
+    //   validationOptions: {
+    //     required: "Start Date is required",
+    //     // don't select dates before today
+    //     validate: (value) => {
+    //       if (value) {
+    //         return isBefore(value, new Date())
+    //           ? "Start Date cannot be before today"
+    //           : true;
+    //       }
+    //       return true;
+    //     },
+    //   },
+    //   disabled: (date) => isBefore(date, new Date()),
+    // },
+    // {
+    //   name: "leaveEndDate",
+    //   labelText: "End Date",
+    //   type: "date",
+    //   hideIf: {
+    //     field: "leaveType",
+    //     value: "Half Day",
+    //   },
+    //   placeholder: "Select End Date",
+    //   validationOptions: {
+    //     required: "End Date is required",
+    //     // don't select dates before today
+    //     validate: (value) => {
+    //       if (value) {
+    //         return isBefore(value, new Date())
+    //           ? "End Date cannot be before today"
+    //           : true;
+    //       }
+    //       return true;
+    //     },
+    //   },
+    //   disabled: (date) => isBefore(date, new Date()),
+    // },
     {
-      name: "leaveStartDate",
-      labelText: "Start Date",
-      type: "date",
-      placeholder: "Select Start Date",
+      name: "leaveDates",
+      labelText: "Date Range",
+      type: "multidate",
+      placeholder: "Select Date Range",
       validationOptions: {
-        required: "Start Date is required",
-        // don't select dates before today
+        required: "Date Range is required",
         validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "Start Date cannot be before today"
-              : true;
+          if (!value || value.length === 0) {
+            return "Please select at least one date";
           }
           return true;
         },
       },
-      disabled: (date) => isBefore(date, new Date()),
-    },
-    {
-      name: "leaveEndDate",
-      labelText: "End Date",
-      type: "date",
-      hideIf: {
-        field: "leaveType",
-        value: "Half Day",
-      },
-      placeholder: "Select End Date",
-      validationOptions: {
-        required: "End Date is required",
-        // don't select dates before today
-        validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "End Date cannot be before today"
-              : true;
-          }
-          return true;
-        },
-      },
-      disabled: (date) => isBefore(date, new Date()),
     },
     {
       name: "leaveReason",

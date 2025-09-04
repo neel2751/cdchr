@@ -32,7 +32,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useAvatar } from "@/components/Avatar/AvatarContext";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import {
+  getCurrentLeaveYearStart,
+  getLeaveYearString,
+  getLeaveYearStringFilter,
+} from "@/lib/getLeaveYear";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { rejectPastLeaveRequest } from "@/server/leaveServer/getLeaveServer";
 import {
@@ -131,6 +135,8 @@ const EmployeeLeaveDeatails = () => {
   };
   const id = useId();
   const { newData } = data || {};
+  const currentLeaveYear = getCurrentLeaveYearStart();
+  const years = [-1, 0, 1].map((offset) => currentLeaveYear + offset);
   return (
     <>
       <Card>
@@ -167,7 +173,7 @@ const EmployeeLeaveDeatails = () => {
           <div className="space-y-4">
             <LeaveCount />
             <div className="border rounded-xl">
-              <div className="flex items-center justify-between border-b p-4">
+              <div className="sm:flex items-center justify-between border-b p-4 sm:space-y-0 space-y-2">
                 <CardTitle className="text-indigo-600">
                   All Leave Request ({newData?.length})
                 </CardTitle>
@@ -179,7 +185,7 @@ const EmployeeLeaveDeatails = () => {
                         Filter
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-48">
+                    <PopoverContent className="w-48 overflow-scroll">
                       <div className="space-y-4">
                         <Select defaultValue={"All"}>
                           <SelectTrigger
@@ -212,35 +218,28 @@ const EmployeeLeaveDeatails = () => {
                               <SelectValue placeholder="Select a year" />
                             </span>
                           </SelectTrigger>
-                          <SelectContent>
-                            {/* show last 5 years */}
-                            {Array.from({ length: 2 }, (_, k) => k).map(
-                              (year) => {
-                                const yearValue =
-                                  new Date().getFullYear() + year;
-                                const leaveYear = getLeaveYearString(
-                                  new Date(yearValue, 0, 1)
-                                );
-                                const isCurrentYear =
-                                  yearValue === getYear(new Date());
-                                if (isCurrentYear) {
-                                  return (
-                                    <SelectItem
-                                      key={yearValue}
-                                      value={leaveYear}
-                                      disabled
-                                    >
-                                      {leaveYear} (Current Year)
-                                    </SelectItem>
-                                  );
-                                }
+                          <SelectContent className="max-h-60 overflow-y-auto max-w-max">
+                            {years.map((year) => {
+                              const leaveYear = getLeaveYearStringFilter(year);
+
+                              const isCurrent = year === getYear(new Date());
+                              if (isCurrent) {
                                 return (
-                                  <SelectItem key={yearValue} value={leaveYear}>
-                                    {leaveYear}
+                                  <SelectItem
+                                    key={leaveYear}
+                                    value={leaveYear}
+                                    className="font-semibold"
+                                  >
+                                    {leaveYear} (Current)
                                   </SelectItem>
                                 );
                               }
-                            )}
+                              return (
+                                <SelectItem key={leaveYear} value={leaveYear}>
+                                  {leaveYear}
+                                </SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                       </div>

@@ -334,7 +334,7 @@ export default function EmployeDocument() {
         </div>
       </div>
       <div className="border rounded-xl">
-        <div className="flex items-center justify-between border-b p-4">
+        <div className="flex sm:flex-row flex-col sm:items-center justify-between border-b p-4 space-y-2 sm:space-y-0">
           <CardTitle className="text-indigo-600 ">
             All Document ({(newData && newData[0]?.documentsFiles?.length) || 0}
             )
@@ -470,7 +470,7 @@ export default function EmployeDocument() {
                   </div>
                 ))
               ) : (
-                <div className="h-96 col-span-2 flex flex-col items-center justify-center bg-gray-50 rounded-lg space-y-1">
+                <div className="h-96 col-span-2 flex flex-col items-center justify-center bg-gray-50 rounded-lg space-y-1 text-center">
                   <Image
                     src="/images/emptyFile.svg"
                     alt="No Data"

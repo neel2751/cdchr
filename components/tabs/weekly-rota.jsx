@@ -120,7 +120,7 @@ export default function EmployeeWeeklyRota() {
             <ChevronLeft className="h-4 w-4 mr-1" />
           </Button>
           <div className="flex items-center gap-2">
-            <CalendarIcon className="w-4 h-4" />
+            <CalendarIcon className="w-4 h-4 sm:block hidden" />
             Week of {format(weekStart, "MMMM d, yyyy")}
           </div>
           <Button

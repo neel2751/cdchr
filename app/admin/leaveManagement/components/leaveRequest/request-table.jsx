@@ -261,10 +261,11 @@ const DetailsRow = ({ item, queryKey, onEdit }) => {
           {format(item?.leaveSubmitDate || new Date(), "PPP")}
         </TableCell>
         <TableCell>
+          {/* We have to set the before and after if negative days we have to show  */}
           {differenceInDays(
             item?.leaveStartDate || new Date(),
             item?.leaveSubmitDate || new Date()
-          ) + 1}
+          ) + 1}{" "}
           days
         </TableCell>
         <TableCell>

@@ -1,11 +1,10 @@
 "use client";
 import React from "react";
 import HandleVisitor from "../admin/visitors/handleVisitor";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CardDescription, CardTitle } from "@/components/ui/card";
 import ScannerModal from "./scanner/page";
-import { ConsultationBooking } from "./booking";
+import OfficeQRCode from "./code/code";
 
 export default function page() {
   // we have to show two big boxes first one Add visitors and second one Attendance with images
@@ -27,7 +26,7 @@ export default function page() {
           </div>
           <Button
             onClick={() => setOpen(true)}
-            className="mt-4 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="mt-4 bg-blue-500 text-white rounded hover:bg-blue-600 flex-1 text-base"
           >
             Add Visitor
           </Button>
@@ -38,17 +37,19 @@ export default function page() {
             alt="Attendance"
             className="w-full object-cover rounded-lg mb-4"
           />
-          <div className="space-y-2">
+          <div className="space-y-2 mb-4">
             <CardTitle>Attendance</CardTitle>
             <CardDescription>
               Scan the QR code to mark your attendance. Ensure you are logged in
               to your account.
             </CardDescription>
           </div>
-          <ScanQrcodeComponent />
+          {/* <ScanQrcodeComponent /> */}
+          <OfficeQRCode />
         </div>
       </div>
       <HandleVisitor open={open} onOpenChange={setOpen} />
+      {/* <Calendar mode="multiple" className="w-full md:w-1/2 lg:w-1/3" /> */}
       {/* <ConsultationBooking /> */}
     </div>
   );

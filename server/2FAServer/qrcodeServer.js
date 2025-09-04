@@ -101,7 +101,7 @@ export async function getCurrentTimeAndDateOld() {
   }
 }
 
-export async function storeClockTime(token, codeSiteId) {
+export async function storeClockTimeOld(token, codeSiteId) {
   try {
     const decode = await verifyToken(token);
     if (!decode.success) return decode;
@@ -295,5 +295,179 @@ export async function getQRCode(data) {
   } catch (error) {
     console.error("Error generating QR code:", error);
     return { success: false, message: "Error generating QR code" };
+  }
+}
+
+export async function storeClockTime(token, codeSiteId, action) {
+  try {
+    console.log("Decoded Token:", token, action);
+    const decode = await verifyToken(token);
+    if (!decode.success) return decode;
+    const { props } = await getServerSideProps();
+    await connect();
+    const employeeId = props?.session?.user?._id;
+    const siteId = decode?.siteId;
+
+    if (!employeeId || !action)
+      return { success: false, message: "Invalid token" };
+
+    const { success, date, currentTime } = await getCurrentTimeAndDate();
+    if (!success) return { success: false, message: "Error getting time" };
+
+    const isValidId = isValidObjectId(employeeId);
+    if (!isValidId) return { success: false, message: "Invalid Employee Id" };
+
+    const employeeOid = createObjectId(employeeId);
+    if (siteId) {
+      const mainSiteId = decode(codeSiteId);
+      if (siteId !== mainSiteId)
+        return {
+          success: false,
+          message: " You are not belongs to this site Id",
+        };
+      return await storeSiteEmployeeClockTime(decode);
+    } else {
+      const existing = await OfficeEmployeeModel.findById(employeeOid);
+      if (!existing) return { success: false, message: "Employee not found" };
+
+      const existingAttendance = await ClockModel.findOne({
+        employeeId: employeeOid,
+        date: date,
+      });
+
+      console.log("Existing Attendance:", existingAttendance);
+
+      const MIN_BREAK_DURATION_MINUTES = 30;
+      const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
+      const MIN_BREAK_TIME_HOURS = 2;
+
+      if (!existingAttendance && action !== "clockIn") {
+        return { success: false, message: "You must clock in first." };
+      }
+
+      if (!existingAttendance && action === "clockIn") {
+        await new ClockModel({
+          employeeId: employeeOid,
+          date: date,
+          clockIn: currentTime,
+          clockInStatus: true,
+          actions: [
+            {
+              action: "clockIn",
+              time: date,
+              source: "scanner",
+            },
+          ],
+        }).save();
+        return { success: true, message: "Clocked In", employeeId };
+      }
+
+      if (
+        action === "breakIn" &&
+        !existingAttendance.breakIn &&
+        !existingAttendance.clockOut
+      ) {
+        const timeSinceClockIn =
+          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+
+        if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
+          return {
+            success: false,
+            message: `Cannot take break within ${MIN_BREAK_TIME_HOURS} hours of clocking in.`,
+          };
+        }
+        await ClockModel.updateOne(
+          { employeeId: employeeOid, date: date },
+          {
+            $set: { breakIn: currentTime },
+            $push: {
+              actions: {
+                action: "breakIn",
+                time: date,
+                source: "scanner",
+              },
+            },
+          }
+        );
+        return { success: true, message: "Break In", employeeId };
+      }
+
+      if (
+        action === "breakOut" &&
+        existingAttendance.breakIn &&
+        !existingAttendance.breakOut &&
+        !existingAttendance.clockOut
+      ) {
+        const breakDuration =
+          (currentTime - existingAttendance.breakIn) / (1000 * 60); // in minutes
+        if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
+          return {
+            success: false,
+            message: `Break must be at least ${MIN_BREAK_DURATION_MINUTES} minutes.`,
+          };
+        }
+
+        await ClockModel.updateOne(
+          { employeeId: employeeOid, date: date },
+          {
+            $set: { breakOut: currentTime },
+            $push: {
+              actions: {
+                action: "breakOut",
+                time: date,
+                source: "scanner",
+              },
+            },
+          }
+        );
+        return { success: true, message: "Break Out", employeeId };
+      }
+
+      if (action === "clockOut" && !existingAttendance.clockOut) {
+        const hoursSinceClockIn =
+          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+        if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
+          return {
+            success: false,
+            message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
+          };
+        }
+
+        await ClockModel.updateOne(
+          { employeeId: employeeOid, date: date },
+          {
+            $set: { clockOut: currentTime },
+            $push: {
+              actions: {
+                action: "clockOut",
+                time: date,
+                source: "scanner",
+              },
+            },
+          }
+        );
+
+        const autoFlag =
+          !existingAttendance.breakIn || !existingAttendance.breakOut;
+        await ClockModel.updateOne(
+          { employeeId: employeeOid, date: date },
+          { $set: { clockInStatus: autoFlag } }
+        );
+
+        return {
+          success: true,
+          message: autoFlag ? "Clocked Out (No Break)" : "Clocked Out",
+          employeeId,
+        };
+      }
+
+      return {
+        success: false,
+        message: "Already clocked out or invalid action.",
+      };
+    }
+  } catch (error) {
+    console.error("Error storing clock time:", error);
+    return { success: false, message: "Error storing clock time" };
   }
 }

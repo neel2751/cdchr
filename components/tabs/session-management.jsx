@@ -6,6 +6,15 @@ import { useFetchQuery } from "@/hooks/use-query";
 import { getSessionData } from "@/server/authServer/authServer";
 import { Badge } from "../ui/badge";
 import { ScrollArea } from "../ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
 
 export default function SessionManagement() {
   const { data } = useFetchQuery({
@@ -110,10 +119,11 @@ export default function SessionManagement() {
                       </ul>
                       {/* <!-- End List Group --> */}
                       <div className="flex items-center mt-4 space-x-3 max-w-max">
-                        <Button type="button" variant="outline">
+                        {/* <Button type="button" variant="outline">
                           <InfoIcon className="w-4 h-4 shrink-0" />
                           Don’t recognize something?
-                        </Button>
+                        </Button> */}
+                        <RecogniseModelInstruction />
                         {idx !== 0 && (
                           <Button
                             variant="outline"
@@ -136,5 +146,35 @@ export default function SessionManagement() {
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+function RecogniseModelInstruction() {
+  return (
+    // We have give instruction to contact to the IT team
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size={"sm"}>
+          <InfoIcon className="w-4 h-4 shrink-0" />
+          Don’t recognize something?
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className={"tracking-tight text-base"}>
+            Don’t recognize something?
+          </DialogTitle>
+          <DialogDescription className={"tracking-tight"}>
+            If you don’t recognize this activity, please contact our IT support
+            team immediately to secure your account.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size={"sm"}>
+            Contact IT Support
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

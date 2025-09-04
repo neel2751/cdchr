@@ -31,7 +31,7 @@ export async function validateLeaveData({
   return { commonLeave, leaveData };
 }
 
-async function isLeaveOverlapping({
+async function isLeaveOverlappingold({
   employeeId,
   leaveStartDate,
   leaveEndDate,
@@ -57,10 +57,67 @@ async function isLeaveOverlapping({
   }
 }
 
-export async function validateOverlap(entries, excludeId) {
+export async function validateOverlapold(entries, excludeId) {
   for (const entry of entries) {
     const overlap = await isLeaveOverlapping({
       ...entry,
+      ...(excludeId ? { excludeId } : {}),
+    });
+    if (overlap) throw new Error("Overlapping dates found.");
+  }
+}
+
+async function isLeaveOverlapping({
+  employeeId,
+  leaveDates, // <-- now array of dates
+  leaveYear,
+  excludeId = null,
+}) {
+  const filter = {
+    employeeId: createObjectId(employeeId),
+    leaveStatus: { $in: ["Pending", "Approved"] },
+    leaveYear,
+  };
+
+  if (excludeId) {
+    if (!isValidObjectId(excludeId)) return true;
+    filter._id = { $ne: createObjectId(excludeId) };
+  }
+
+  try {
+    // Fetch all existing leave requests for that year
+    const existingLeaves = await LeaveRequestModel.find(filter);
+
+    console.log(existingLeaves);
+
+    // Flatten existing leaveDates for quick lookup
+    const existingDates = new Set(
+      existingLeaves.flatMap((req) =>
+        (req.leaveDates || []).map((d) =>
+          new Date(d).toISOString().slice(0, 10)
+        )
+      )
+    );
+
+    // Check if any requested date already exists
+    for (const d of leaveDates) {
+      const dateStr = new Date(d).toISOString().slice(0, 10);
+      if (existingDates.has(dateStr)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    return true; // fallback safe
+  }
+}
+
+export async function validateOverlap(entries, excludeId) {
+  for (const entry of entries) {
+    const overlap = await isLeaveOverlapping({
+      employeeId: entry.employeeId,
+      leaveDates: entry.leaveDates, // <-- pass full array
+      leaveYear: entry.leaveYear,
       ...(excludeId ? { excludeId } : {}),
     });
     if (overlap) throw new Error("Overlapping dates found.");
@@ -161,7 +218,7 @@ export async function splitLeaveWithYearRules(
   return entries;
 }
 
-export function splitHalfDayLeaveIntoAnnualOrUnpaid({
+export function splitHalfDayLeaveIntoAnnualOrUnpaidOld({
   halfDaysRequested,
   annualLeaveRemaining,
 }) {
@@ -204,7 +261,56 @@ export function splitHalfDayLeaveIntoAnnualOrUnpaid({
   };
 }
 
+export function splitHalfDayLeaveIntoAnnualOrUnpaid({
+  halfDaysRequested,
+  annualLeaveRemaining,
+  dates, // array of selected dates, possibly duplicates if they picked AM/PM
+}) {
+  const result = [];
+  let annualUsed = 0;
+  let unpaidUsed = 0;
+
+  // Each date = one half-day request
+  dates.forEach((dateStr) => {
+    const date = new Date(dateStr);
+
+    if (annualLeaveRemaining >= 0.5) {
+      annualUsed += 0.5;
+      annualLeaveRemaining -= 0.5;
+      result.push({ type: "Annual Leave", days: 0.5, date });
+    } else {
+      unpaidUsed += 0.5;
+      result.push({ type: "Unpaid Leave", days: 0.5, date });
+    }
+  });
+
+  return {
+    breakdown: result, // [{type, days: 0.5, date}, ...]
+    annualUsed,
+    unpaidUsed,
+  };
+}
+
 export function splitHalfDayLeaveWithYearRules({
+  breakdown,
+  employeeId,
+  adminId,
+}) {
+  return breakdown.map(({ type, days, date }) => ({
+    leaveYear: getLeaveYearString(date),
+    leaveType: type,
+    leaveDays: days, // always 0.5 here
+    leaveStartDate: date,
+    leaveEndDate: date,
+    leaveDates: [date],
+    employeeId,
+    leaveStatus: adminId ? "Approved" : "Pending",
+    adminId: adminId || null,
+    isHalfDay: true,
+  }));
+}
+
+export function splitHalfDayLeaveWithYearRulesOld({
   breakdown,
   startDate,
   employeeId,
@@ -338,4 +444,192 @@ export function adjustLeaveData(leaveDataItem, rawDays, unit = "days") {
   leaveDataItem.isLock = unit !== "days"; // Lock only if not full-day leave
 
   return ["leaveData"]; // For nested arrays, better to mark the whole field
+}
+
+export async function splitLeaveWithYearRulesByDates(
+  leaveDates,
+  currentYearRemaining,
+  employeeId,
+  selectedLeaveType,
+  leaveStatus,
+  adminId,
+  nextYearRemaining = 28
+) {
+  const entries = [];
+
+  // Case 1: Requested type is Annual Leave
+  if (selectedLeaveType === "Annual Leave") {
+    const annualPart = leaveDates.slice(0, currentYearRemaining);
+    const unpaidPart = leaveDates.slice(currentYearRemaining);
+
+    if (annualPart.length > 0) {
+      entries.push({
+        employeeId,
+        leaveYear: getLeaveYearString(new Date(annualPart[0])),
+        leaveType: "Annual Leave",
+        leaveStatus,
+        leaveStartDate: new Date(annualPart[0]),
+        leaveEndDate: new Date(annualPart[annualPart.length - 1]),
+        leaveDays: annualPart.length,
+        leaveDates: annualPart,
+        submittedBy: adminId ?? employeeId,
+      });
+    }
+
+    if (unpaidPart.length > 0) {
+      entries.push({
+        employeeId,
+        leaveYear: getLeaveYearString(new Date(unpaidPart[0])),
+        leaveType: "Unpaid Leave",
+        leaveStatus,
+        leaveStartDate: new Date(unpaidPart[0]),
+        leaveEndDate: new Date(unpaidPart[unpaidPart.length - 1]),
+        leaveDays: unpaidPart.length,
+        leaveDates: unpaidPart,
+        submittedBy: adminId ?? employeeId,
+      });
+    }
+  }
+
+  // Case 2: Other leave types (e.g. Sick Leave, Study Leave)
+  else {
+    const availablePart = leaveDates.slice(0, currentYearRemaining);
+    const unpaidPart = leaveDates.slice(currentYearRemaining);
+
+    if (availablePart.length > 0) {
+      entries.push({
+        employeeId,
+        leaveYear: getLeaveYearString(new Date(availablePart[0])),
+        leaveType: selectedLeaveType,
+        leaveStatus,
+        leaveStartDate: new Date(availablePart[0]),
+        leaveEndDate: new Date(availablePart[availablePart.length - 1]),
+        leaveDays: availablePart.length,
+        leaveDates: availablePart,
+        submittedBy: adminId ?? employeeId,
+      });
+    }
+
+    if (unpaidPart.length > 0) {
+      entries.push({
+        employeeId,
+        leaveYear: getLeaveYearString(new Date(unpaidPart[0])),
+        leaveType: "Unpaid Leave",
+        leaveStatus,
+        leaveStartDate: new Date(unpaidPart[0]),
+        leaveEndDate: new Date(unpaidPart[unpaidPart.length - 1]),
+        leaveDays: unpaidPart.length,
+        leaveDates: unpaidPart,
+        submittedBy: adminId ?? employeeId,
+      });
+    }
+  }
+
+  return entries;
+}
+
+export function generateLeaveDates(from, to, rules) {
+  const dates = [];
+  const current = new Date(from);
+
+  while (current <= to) {
+    const day = current.getUTCDay();
+    if (day === 0) {
+      // always skip Sunday
+      current.setUTCDate(current.getUTCDate() + 1);
+      continue;
+    }
+    if (day === 6 && !rules.includeSaturday) {
+      // skip Saturday if needed
+      current.setUTCDate(current.getUTCDate() + 1);
+      continue;
+    }
+    dates.push(new Date(current));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return dates;
+}
+
+export function getDatesInRange(from, to) {
+  const dates = [];
+  let current = new Date(from);
+  while (current <= to) {
+    dates.push(new Date(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
+export async function updateLeaveBalance({
+  employeeId,
+  leaveYear,
+  leaveType,
+  leaveDays,
+  session,
+  allowNegative = false, // For unpaid/half-day we allow "unlimited"
+}) {
+  let leaveDoc = await CommonLeaveModel.findOne({
+    employeeId: createObjectId(employeeId),
+    leaveYear,
+    "leaveData.leaveType": leaveType,
+  }).session(session);
+
+  if (leaveDoc) {
+    const idx = leaveDoc.leaveData.findIndex((l) => l.leaveType === leaveType);
+
+    if (idx !== -1) {
+      // Check if annual leave has enough balance
+      if (
+        leaveType === "Annual Leave" &&
+        leaveDoc.leaveData[idx].remaining < leaveDays
+      ) {
+        return false; // ❌ not enough annual balance
+      }
+
+      leaveDoc.leaveData[idx].used += leaveDays;
+      if (leaveType === "Annual Leave") {
+        leaveDoc.leaveData[idx].remaining -= leaveDays;
+      }
+
+      leaveDoc.markModified(`leaveData.${idx}`);
+      await leaveDoc.save({ session });
+      return true;
+    }
+  }
+
+  // Create record if not exists or leaveType missing
+  await CommonLeaveModel.updateOne(
+    { employeeId: createObjectId(employeeId), leaveYear },
+    {
+      $push: {
+        leaveData: {
+          leaveType,
+          used: leaveDays,
+          remaining: leaveType === "Annual Leave" ? 0 : 0, // unlimited for Unpaid/Half Day
+        },
+      },
+    },
+    { upsert: true, session }
+  );
+
+  return leaveType !== "Annual Leave" || allowNegative;
+}
+
+export async function getRemainingBalance(
+  employeeId,
+  leaveYear,
+  leaveType,
+  session
+) {
+  const leaveDoc = await CommonLeaveModel.findOne({
+    employeeId: createObjectId(employeeId),
+    leaveYear,
+    "leaveData.leaveType": leaveType,
+  }).session(session);
+
+  if (!leaveDoc) return 0;
+
+  const leaveEntry = leaveDoc.leaveData.find((l) => l.leaveType === leaveType);
+  return leaveEntry?.remaining || 0;
 }

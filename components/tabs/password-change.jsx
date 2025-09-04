@@ -88,7 +88,9 @@ export default function PasswordChange() {
 
         <TwoFactorAuthCard className={"max-w-max"} />
         <Card
-          className={"text-neutral-700 border- shadow-none p-2 max-w-max mt-4"}
+          className={
+            "text-neutral-700 border- shadow-none p-2 sm:max-w-max w-full mt-4"
+          }
         >
           <CardContent className={"flex items-center justify-between"}>
             <ul className="list-disc text-sm">
@@ -99,7 +101,7 @@ export default function PasswordChange() {
               <li>Contain special characters</li>
             </ul>
             <img
-              className="w-40 h-40"
+              className="w-40 h-40 sm:block hidden"
               src="https://notioly.com/wp-content/uploads/2023/11/307.Writing.png"
             />
           </CardContent>

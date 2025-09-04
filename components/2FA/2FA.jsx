@@ -109,11 +109,11 @@ export function TwoFactorAuthCard({ className }) {
           className
         )}
       >
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardHeader className="flex flex-row sm:items-center justify-between space-y-0 pb-2">
           <div className="flex flex-row items-center space-x-2">
             <Shield
               className={cn(
-                "h-5 w-5",
+                "h-5 w-5 sm:block hidden",
                 enabled ? "text-primary" : "text-muted-foreground"
               )}
             />

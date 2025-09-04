@@ -8,6 +8,12 @@ import { toast } from "sonner";
 export default function ScannerModal({ siteId, open, onClose }) {
   const scannerRef = useRef(null);
   const socketRef = useRef(null);
+  const audioRef = useRef(null);
+  const errorAudioRef = React.useRef(null);
+  React.useEffect(() => {
+    audioRef.current = new Audio("/audio/beep.mp3");
+    errorAudioRef.current = new Audio("/audio/error.mp3");
+  }, []);
 
   const handleScan = async (decodedText) => {
     try {
@@ -15,6 +21,11 @@ export default function ScannerModal({ siteId, open, onClose }) {
 
       if (response.success) {
         toast.success("✅ Scan success");
+        try {
+          await audioRef.current?.play();
+        } catch (err) {
+          console.warn("Audio play error:", err);
+        }
 
         if (!socketRef.current) {
           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
@@ -29,6 +40,11 @@ export default function ScannerModal({ siteId, open, onClose }) {
     } catch (err) {
       console.error(err);
       toast.error("❌ Scan failed");
+      try {
+        await errorAudioRef.current?.play();
+      } catch (err) {
+        console.warn("Audio play error:", err);
+      }
     }
   };
 
@@ -42,12 +58,13 @@ export default function ScannerModal({ siteId, open, onClose }) {
       .start(
         { facingMode: "user" }, // back camera
         {
-          fps: 30, // faster detection
+          fps: 60, // faster detection
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             // take 80% of the smaller side
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
             return { width: minEdge * 0.9, height: minEdge * 0.9 };
           },
+          aspectRatio: 1.0,
         },
         handleScan,
         () => {}

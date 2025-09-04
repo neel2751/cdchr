@@ -11,7 +11,9 @@ import {
   Cell,
   Legend,
   CartesianGrid,
+  Line,
 } from "recharts";
+import { ChartContainer } from "../ui/chart";
 
 const COLORS = [
   "#8884d8",
@@ -81,3 +83,53 @@ export function ReusableDonutChart({ data }) {
 // import { ReusableBarChart, ReusableDonutChart } from "./AppUsageCharts";
 // <ReusableBarChart data={data} />
 // <ReusableDonutChart data={data} />
+
+const timeStringToHours = (timeStr) => {
+  if (!timeStr) return 0;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h + m / 60;
+};
+
+export function ReusableBarAttendanceChart({ data }) {
+  // Convert data for chart
+  const chartData = data.map((rec) => {
+    const [th, tm] = rec.totalHours.split(":").map(Number);
+    const [bh, bm] = rec.avgBreakHours.split(":").map(Number);
+
+    return {
+      date: new Date(rec.date).toLocaleDateString(), // or keep as YYYY-MM-DD
+      totalHours: th + tm / 60, // Convert to decimal hours
+      avgBreakHours: bh + bm / 60, // Convert to decimal hours
+    };
+  });
+  return (
+    <Card className={"sm:block hidden"}>
+      <CardContent className="h-[350px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            accessibilityLayer
+            data={chartData}
+            margin={{ top: 20, right: 20, bottom: 20 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+            <YAxis />
+            <Tooltip
+              formatter={(value) => `${value.toFixed(2)} hrs`}
+              labelFormatter={(label) => `Date: ${label}`}
+            />
+            <Legend layout="horizontal" verticalAlign="bottom" align="center" />
+            <Bar dataKey="totalHours" fill="#8884d8" name="Total Hours" />
+            <Line
+              type="monotone"
+              dataKey="avgBreakHours"
+              stroke="#FF8042"
+              strokeWidth={2}
+              name="Avg Break Hours"
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
