@@ -276,25 +276,61 @@ export async function fetchLiveOfficeClockOld({
 }
 
 // We have to count total Hour per employee with per week, and Avrage count
+
+function convertTimeToMinutes(fieldName) {
+  return {
+    $let: {
+      vars: {
+        parts: {
+          $split: [
+            {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: [`$${fieldName}`, ""] },
+                    { $eq: [`$${fieldName}`, null] },
+                  ],
+                },
+                "0:0",
+                `$${fieldName}`,
+              ],
+            },
+            ":",
+          ],
+        },
+      },
+      in: {
+        $add: [
+          { $multiply: [{ $toInt: { $arrayElemAt: ["$$parts", 0] } }, 60] },
+          { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+        ],
+      },
+    },
+  };
+}
+
 export async function fetchOfficeEmployeeClockCount({
   employeeId = null,
   fromDate = null,
   toDate = null,
-  page,
-  limit,
+  page = 1,
+  limit = 10,
 }) {
   try {
     const { props } = await getServerSideProps();
     const { user } = props?.session || {};
     const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
     const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
-    console.log("Employee OID:", employeeOid);
+    console.log("employeeOid", employeeOid);
+
     if (!employeeOid) {
       return { success: false, message: "Invalid employee ID" };
     }
+
     await connect();
+
     const date = getUKTime({ format: "date" });
-    const monday = startOfWeek(new Date(date), { weekStartsOn: 1 }); // Start of the week (Monday)
+    const monday = startOfWeek(new Date(date), { weekStartsOn: 1 });
     const formdate = formatDate(new Date(monday), "yyyy-MM-dd");
     const toEndDate = new Date(addDays(monday, 7));
 
@@ -306,102 +342,30 @@ export async function fetchOfficeEmployeeClockCount({
       : normalizeDateToUTC(new Date(toEndDate));
 
     const matchConditions = {
-      date: {
-        $gte: start,
-        $lt: end,
-      },
+      date: { $gte: start, $lt: end },
       isDeleted: false,
     };
+
     if (employeeId) {
-      matchConditions.employeeId = createObjectId(employeeOid); // Use employeeOid instead of employeeId
+      matchConditions.employeeId = createObjectId(employeeOid);
     }
+
     const skip = (page - 1) * limit;
+
     const clockRecords = await ClockModel.aggregate([
       { $match: matchConditions },
 
-      // 1. Convert HH:mm to minutes
+      // 1️⃣ Convert HH:mm to minutes safely
       {
         $addFields: {
-          clockInMinutes: {
-            $let: {
-              vars: { parts: { $split: ["$clockIn", ":"] } },
-              in: {
-                $add: [
-                  {
-                    $multiply: [
-                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                      60,
-                    ],
-                  },
-                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                ],
-              },
-            },
-          },
-          clockOutMinutes: {
-            $let: {
-              vars: { parts: { $split: ["$clockOut", ":"] } },
-              in: {
-                $add: [
-                  {
-                    $multiply: [
-                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                      60,
-                    ],
-                  },
-                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                ],
-              },
-            },
-          },
-          breakInMinutes: {
-            $cond: [
-              { $ifNull: ["$breakIn", false] },
-              {
-                $let: {
-                  vars: { parts: { $split: ["$breakIn", ":"] } },
-                  in: {
-                    $add: [
-                      {
-                        $multiply: [
-                          { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                          60,
-                        ],
-                      },
-                      { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                    ],
-                  },
-                },
-              },
-              0,
-            ],
-          },
-          breakOutMinutes: {
-            $cond: [
-              { $ifNull: ["$breakOut", false] },
-              {
-                $let: {
-                  vars: { parts: { $split: ["$breakOut", ":"] } },
-                  in: {
-                    $add: [
-                      {
-                        $multiply: [
-                          { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                          60,
-                        ],
-                      },
-                      { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                    ],
-                  },
-                },
-              },
-              0,
-            ],
-          },
+          clockInMinutes: convertTimeToMinutes("clockIn"),
+          clockOutMinutes: convertTimeToMinutes("clockOut"),
+          breakInMinutes: convertTimeToMinutes("breakIn"),
+          breakOutMinutes: convertTimeToMinutes("breakOut"),
         },
       },
 
-      // 2. Compute durations
+      // 2️⃣ Compute durations
       {
         $addFields: {
           totalMinutesPerDay: {
@@ -413,7 +377,7 @@ export async function fetchOfficeEmployeeClockCount({
         },
       },
 
-      // 3. Project formatted times
+      // 3️⃣ Format per-day hours
       {
         $addFields: {
           totalHoursPerDay: {
@@ -459,7 +423,7 @@ export async function fetchOfficeEmployeeClockCount({
         },
       },
 
-      // 4. Group by employee for weekly summary
+      // 4️⃣ Group by employee
       {
         $group: {
           _id: "$employeeId",
@@ -472,7 +436,7 @@ export async function fetchOfficeEmployeeClockCount({
         },
       },
 
-      // 5. Lookup employee details
+      // 5️⃣ Lookup employee details
       {
         $lookup: {
           from: "officeemployes",
@@ -483,16 +447,15 @@ export async function fetchOfficeEmployeeClockCount({
       },
       { $unwind: "$employeeDetails" },
 
-      // 6. Project final formatted summary
+      // 6️⃣ Project final summary
       {
         $project: {
           employeeId: "$_id",
           name: "$employeeDetails.name",
           startDate: start,
           endDate: end,
-          records: { $slice: ["$records", skip, limit] }, // paginate only records
-          // records: 1, // per day records with totalHoursPerDay and breakHoursPerDay
-          totalRecords: { $size: "$records" }, // total records before slicing
+          records: { $slice: ["$records", skip, limit] },
+          totalRecords: { $size: "$records" },
           totalHours: {
             $concat: [
               { $toString: { $floor: { $divide: ["$totalMinutes", 60] } } },
@@ -513,9 +476,7 @@ export async function fetchOfficeEmployeeClockCount({
           },
           avgHours: {
             $concat: [
-              {
-                $toString: { $floor: { $divide: ["$avgMinutes", 60] } }, // hours
-              },
+              { $toString: { $floor: { $divide: ["$avgMinutes", 60] } } },
               ":",
               {
                 $cond: [
@@ -534,16 +495,14 @@ export async function fetchOfficeEmployeeClockCount({
           avgClockIn: {
             $concat: [
               {
-                $toString: {
-                  $floor: { $divide: ["$avgClockInMinutes", 60] }, // hours
-                },
+                $toString: { $floor: { $divide: ["$avgClockInMinutes", 60] } },
               },
               ":",
               {
                 $let: {
                   vars: {
                     roundedMinutes: {
-                      $round: [{ $mod: ["$avgClockInMinutes", 60] }, 0], // round to whole minutes
+                      $round: [{ $mod: ["$avgClockInMinutes", 60] }, 0],
                     },
                   },
                   in: {
@@ -564,29 +523,20 @@ export async function fetchOfficeEmployeeClockCount({
               },
               ":",
               {
-                $cond: [
-                  {
-                    $lt: [
-                      { $floor: { $mod: ["$avgClockOutMinutes", 60] } },
-                      10,
-                    ],
-                  },
-                  {
-                    $concat: [
-                      "0",
-                      {
-                        $toString: {
-                          $floor: { $mod: ["$avgClockOutMinutes", 60] },
-                        },
-                      },
-                    ],
-                  },
-                  {
-                    $toString: {
-                      $floor: { $mod: ["$avgClockOutMinutes", 60] },
+                $let: {
+                  vars: {
+                    roundedMinutes: {
+                      $round: [{ $mod: ["$avgClockOutMinutes", 60] }, 0],
                     },
                   },
-                ],
+                  in: {
+                    $cond: [
+                      { $lt: ["$$roundedMinutes", 10] },
+                      { $concat: ["0", { $toString: "$$roundedMinutes" }] },
+                      { $toString: "$$roundedMinutes" },
+                    ],
+                  },
+                },
               },
             ],
           },
@@ -611,6 +561,7 @@ export async function fetchOfficeEmployeeClockCount({
         },
       },
     ]);
+
     return { success: true, data: JSON.stringify(clockRecords[0]) || null };
   } catch (error) {
     console.error("Error fetching live office clock count:", error);

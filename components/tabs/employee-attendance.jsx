@@ -21,7 +21,6 @@ import { PaginationWithLinks } from "../filters/pagination/pagination-client";
 
 export default function OfficeEmployeeAttendance() {
   const { slug, searchParams } = useAvatar();
-  console.log("slug in attendance", slug);
   const { data } = useFetchQuery({
     fetchFn: fetchOfficeEmployeeClockCount,
     params: {
@@ -33,16 +32,16 @@ export default function OfficeEmployeeAttendance() {
     },
     queryKey: ["officeEmployeeAttendance", slug, searchParams],
   });
-  const { data: barData } = useFetchQuery({
-    fetchFn: fetchChartData,
-    params: {
-      employeeId: slug[0],
-      fromDate: searchParams?.fromDate || null,
-      toDate: searchParams?.toDate || null,
-    },
-    queryKey: ["chartData", slug, searchParams],
-  });
-  const { newData: barChartData } = barData || {};
+  // const { data: barData } = useFetchQuery({
+  //   fetchFn: fetchChartData,
+  //   params: {
+  //     employeeId: slug[0],
+  //     fromDate: searchParams?.fromDate || null,
+  //     toDate: searchParams?.toDate || null,
+  //   },
+  //   queryKey: ["chartData", slug, searchParams],
+  // });
+  // const { newData: barChartData } = barData || {};
   const { newData: attendanceCount } = data || {};
   return (
     <div className="">
@@ -52,9 +51,9 @@ export default function OfficeEmployeeAttendance() {
         </CardTitle>
         <DateRangeFilter />
       </div>
-      <div className="mb-5">
+      {/* <div className="mb-5">
         {barChartData && <ReusableBarAttendanceChart data={barChartData} />}
-      </div>
+      </div> */}
       <Card>
         <CardHeader className="flex justify-between">
           <div>
