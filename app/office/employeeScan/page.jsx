@@ -229,11 +229,123 @@ export default function EmployeeClockScanner({ siteId }) {
 /** =====================
  * Scanner Dialog
  * ===================== */
+// function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
+//   const scannerRef = useRef(null);
+//   const audioRef = useRef(null);
+//   const errorAudioRef = useRef(null);
+//   const socketRef = useRef(null);
+
+//   useEffect(() => {
+//     audioRef.current = new Audio("/audio/beep.mp3");
+//     errorAudioRef.current = new Audio("/audio/error.mp3");
+//   }, []);
+
+//   const stopScanner = () => {
+//     if (scannerRef.current) {
+//       scannerRef.current
+//         .stop()
+//         .then(() => {
+//           scannerRef.current.clear();
+//           scannerRef.current = null;
+//         })
+//         .catch(() => {});
+//     }
+//   };
+
+//   const handleScan = async (decodedText) => {
+//     try {
+//       const response = await storeClockTime(decodedText, siteId, action);
+
+//       if (response.success) {
+//         toast.success(`✅ ${action.replace(/([A-Z])/g, " $1")} success`);
+//         try {
+//           await audioRef.current.play();
+//         } catch {}
+
+//         if (!socketRef.current) {
+//           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+//         }
+
+//         socketRef.current.emit("employee-scan-qr", {
+//           token: decodedText,
+//           employeeId,
+//           action,
+//         });
+
+//         stopScanner();
+//         onOpenChange(false);
+//       } else {
+//         toast.error(response.message || "❌ Scan failed");
+//         try {
+//           await errorAudioRef.current.play();
+//         } catch {}
+//       }
+//     } catch (err) {
+//       console.error(err);
+//       toast.error("❌ Scan failed");
+//     }
+//   };
+
+//   useEffect(() => {
+//     if (!open) return;
+
+//     const timer = setTimeout(() => {
+//       const scanner = new Html5Qrcode("qr-reader");
+//       scannerRef.current = scanner;
+//       scanner
+//         .start(
+//           { facingMode: "environment" },
+//           { fps: 10, qrbox: 250 },
+//           handleScan
+//         )
+//         .catch((err) => console.error("Scanner start failed:", err));
+//     }, 100);
+
+//     return () => {
+//       clearTimeout(timer);
+//       stopScanner();
+//     };
+//   }, [open]);
+
+//   return (
+//     <Dialog open={open} onOpenChange={onOpenChange}>
+//       <DialogContent className="w-full max-w-md h-[70vh] bg-white rounded-lg shadow-lg p-4 flex flex-col items-center justify-center">
+//         <DialogHeader>
+//           <DialogTitle>
+//             Scan QR for {action.replace(/([A-Z])/g, " $1")}
+//           </DialogTitle>
+//           <DialogDescription>
+//             Hold your camera over the QR code to continue.
+//           </DialogDescription>
+//         </DialogHeader>
+
+//         <div
+//           id="qr-reader"
+//           className="w-full h-full bg-gray-100 rounded-md mt-4"
+//         />
+
+//         <Button
+//           className="mt-4 w-full bg-red-500 hover:bg-red-600"
+//           onClick={() => {
+//             stopScanner();
+//             onOpenChange(false);
+//           }}
+//         >
+//           Cancel
+//         </Button>
+//       </DialogContent>
+//     </Dialog>
+//   );
+// }
+
 function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
   const scannerRef = useRef(null);
   const audioRef = useRef(null);
   const errorAudioRef = useRef(null);
   const socketRef = useRef(null);
+
+  const [cameras, setCameras] = useState([]);
+  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
 
   useEffect(() => {
     audioRef.current = new Audio("/audio/beep.mp3");
@@ -249,6 +361,26 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
           scannerRef.current = null;
         })
         .catch(() => {});
+    }
+  };
+
+  const startScanner = async (cameraId = null) => {
+    try {
+      const scanner = new Html5Qrcode("qr-reader");
+      scannerRef.current = scanner;
+
+      const config = { fps: 10, qrbox: 250 };
+      if (cameraId) {
+        await scanner.start(
+          { deviceId: { exact: cameraId } },
+          config,
+          handleScan
+        );
+      } else {
+        await scanner.start({ facingMode: "environment" }, config, handleScan);
+      }
+    } catch (err) {
+      console.error("Scanner start failed:", err);
     }
   };
 
@@ -286,26 +418,41 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
     }
   };
 
+  // Load available cameras and start default one
   useEffect(() => {
     if (!open) return;
 
-    const timer = setTimeout(() => {
-      const scanner = new Html5Qrcode("qr-reader");
-      scannerRef.current = scanner;
-      scanner
-        .start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: 250 },
-          handleScan
-        )
-        .catch((err) => console.error("Scanner start failed:", err));
-    }, 100);
+    const initScanner = async () => {
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          setCameras(devices);
+          setCurrentCameraIndex(0);
+          await startScanner(devices[0].id);
+        }
+      } catch (err) {
+        console.error("Error fetching cameras:", err);
+        // fallback to facingMode
+        await startScanner();
+      }
+    };
+
+    initScanner();
 
     return () => {
-      clearTimeout(timer);
       stopScanner();
     };
   }, [open]);
+
+  // Handle camera switching
+  const switchCamera = async () => {
+    if (cameras.length < 2) return;
+    const newIndex = (currentCameraIndex + 1) % cameras.length;
+    setCurrentCameraIndex(newIndex);
+
+    stopScanner();
+    await startScanner(cameras[newIndex].id);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -324,15 +471,25 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
           className="w-full h-full bg-gray-100 rounded-md mt-4"
         />
 
-        <Button
-          className="mt-4 w-full bg-red-500 hover:bg-red-600"
-          onClick={() => {
-            stopScanner();
-            onOpenChange(false);
-          }}
-        >
-          Cancel
-        </Button>
+        <div className="flex gap-2 w-full mt-4">
+          {cameras.length > 1 && (
+            <Button
+              onClick={switchCamera}
+              className="flex-1 bg-indigo-500 hover:bg-indigo-600"
+            >
+              Switch Camera
+            </Button>
+          )}
+          <Button
+            className="flex-1 bg-red-500 hover:bg-red-600"
+            onClick={() => {
+              stopScanner();
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
