@@ -21,7 +21,7 @@ import { PaginationWithLinks } from "../filters/pagination/pagination-client";
 
 export default function OfficeEmployeeAttendance() {
   const { slug, searchParams } = useAvatar();
-
+  console.log("slug in attendance", slug);
   const { data } = useFetchQuery({
     fetchFn: fetchOfficeEmployeeClockCount,
     params: {

@@ -33,7 +33,6 @@ export function DateRangeFilter() {
   });
 
   const setDateRange = (newDate) => {
-    console.log("newDate", newDate);
     startTransition(() => {
       setDate(newDate);
       setFromDate(format(newDate.from, "yyyy-MM-dd"));

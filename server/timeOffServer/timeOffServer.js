@@ -288,6 +288,7 @@ export async function fetchOfficeEmployeeClockCount({
     const { user } = props?.session || {};
     const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
     const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
+    console.log("Employee OID:", employeeOid);
     if (!employeeOid) {
       return { success: false, message: "Invalid employee ID" };
     }
@@ -533,20 +534,26 @@ export async function fetchOfficeEmployeeClockCount({
           avgClockIn: {
             $concat: [
               {
-                $toString: { $floor: { $divide: ["$avgClockInMinutes", 60] } },
+                $toString: {
+                  $floor: { $divide: ["$avgClockInMinutes", 60] }, // hours
+                },
               },
               ":",
               {
-                $cond: [
-                  { $lt: [{ $mod: ["$avgClockInMinutes", 60] }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $mod: ["$avgClockInMinutes", 60] } },
+                $let: {
+                  vars: {
+                    roundedMinutes: {
+                      $round: [{ $mod: ["$avgClockInMinutes", 60] }, 0], // round to whole minutes
+                    },
+                  },
+                  in: {
+                    $cond: [
+                      { $lt: ["$$roundedMinutes", 10] },
+                      { $concat: ["0", { $toString: "$$roundedMinutes" }] },
+                      { $toString: "$$roundedMinutes" },
                     ],
                   },
-                  { $toString: { $mod: ["$avgClockInMinutes", 60] } },
-                ],
+                },
               },
             ],
           },
