@@ -1,8 +1,5 @@
 "use client";
 import CardName from "../../_components/name";
-import QRCodeSocket from "@/components/2FA/qrcodesocket";
-import ClockData from "./clockData";
-import HowQRWork from "@/components/onboarding/how-qr-work";
 import EmployeeClockScanner from "@/app/office/employeeScan/page";
 
 export default function EmployeCard({ param }) {
@@ -13,7 +10,7 @@ export default function EmployeCard({ param }) {
       <div className="max-w-xl mx-auto mt-20">
         {/* <QRCodeSocket /> */}
         <EmployeeClockScanner />
-        <HowQRWork />
+        {/* <HowQRWork /> */}
       </div>
     </div>
   );

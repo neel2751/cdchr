@@ -22,7 +22,7 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/ui/card";
-import { Clock4, Coffee, LogOut, TimerOff } from "lucide-react";
+import { Clock4, Coffee, LogOut, TimerOff, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 
 export default function EmployeeClockScanner({ siteId }) {
@@ -338,7 +338,170 @@ export default function EmployeeClockScanner({ siteId }) {
 //   );
 // }
 
-function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
+// function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
+//   const scannerRef = useRef(null);
+//   const audioRef = useRef(null);
+//   const errorAudioRef = useRef(null);
+//   const socketRef = useRef(null);
+
+//   const [cameras, setCameras] = useState([]);
+//   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+
+//   useEffect(() => {
+//     audioRef.current = new Audio("/audio/beep.mp3");
+//     errorAudioRef.current = new Audio("/audio/error.mp3");
+//   }, []);
+
+//   const stopScanner = () => {
+//     if (scannerRef.current) {
+//       scannerRef.current
+//         .stop()
+//         .then(() => {
+//           scannerRef.current.clear();
+//           scannerRef.current = null;
+//         })
+//         .catch(() => {});
+//     }
+//   };
+
+//   const startScanner = async (cameraId = null) => {
+//     try {
+//       const scanner = new Html5Qrcode("qr-reader");
+//       scannerRef.current = scanner;
+
+//       const config = { fps: 10, qrbox: 250 };
+//       if (cameraId) {
+//         await scanner.start(
+//           { deviceId: { exact: cameraId } },
+//           config,
+//           handleScan
+//         );
+//       } else {
+//         await scanner.start({ facingMode: "environment" }, config, handleScan);
+//       }
+//     } catch (err) {
+//       console.error("Scanner start failed:", err);
+//     }
+//   };
+
+//   const handleScan = async (decodedText) => {
+//     try {
+//       const response = await storeClockTime(decodedText, siteId, action);
+
+//       if (response.success) {
+//         toast.success(`✅ ${action.replace(/([A-Z])/g, " $1")} success`);
+//         try {
+//           await audioRef.current.play();
+//         } catch {}
+
+//         if (!socketRef.current) {
+//           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+//         }
+
+//         socketRef.current.emit("employee-scan-qr", {
+//           token: decodedText,
+//           employeeId,
+//           action,
+//         });
+
+//         stopScanner();
+//         onOpenChange(false);
+//       } else {
+//         toast.error(response.message || "❌ Scan failed");
+//         try {
+//           await errorAudioRef.current.play();
+//         } catch {}
+//       }
+//     } catch (err) {
+//       console.error(err);
+//       toast.error("❌ Scan failed");
+//     }
+//   };
+
+//   // Load available cameras and start default one
+//   useEffect(() => {
+//     if (!open) return;
+
+//     const initScanner = async () => {
+//       try {
+//         const devices = await Html5Qrcode.getCameras();
+//         if (devices && devices.length > 0) {
+//           setCameras(devices);
+//           setCurrentCameraIndex(0);
+//           await startScanner(devices[0].id);
+//         }
+//       } catch (err) {
+//         console.error("Error fetching cameras:", err);
+//         // fallback to facingMode
+//         await startScanner();
+//       }
+//     };
+
+//     initScanner();
+
+//     return () => {
+//       stopScanner();
+//     };
+//   }, [open]);
+
+//   // Handle camera switching
+//   const switchCamera = async () => {
+//     if (cameras.length < 2) return;
+//     const newIndex = (currentCameraIndex + 1) % cameras.length;
+//     setCurrentCameraIndex(newIndex);
+
+//     stopScanner();
+//     await startScanner(cameras[newIndex].id);
+//   };
+
+//   return (
+//     <Dialog open={open} onOpenChange={onOpenChange}>
+//       <DialogContent className="w-full max-w-md h-[70vh] bg-white rounded-lg shadow-lg p-4 flex flex-col items-center justify-center">
+//         <DialogHeader>
+//           <DialogTitle>
+//             Scan QR for {action.replace(/([A-Z])/g, " $1")}
+//           </DialogTitle>
+//           <DialogDescription>
+//             Hold your camera over the QR code to continue.
+//           </DialogDescription>
+//         </DialogHeader>
+
+//         <div
+//           id="qr-reader"
+//           className="w-full h-full bg-gray-100 rounded-md mt-4"
+//         />
+
+//         <div className="flex gap-2 w-full mt-4">
+//           {cameras.length > 1 && (
+//             <Button
+//               onClick={switchCamera}
+//               className="flex-1 bg-indigo-500 hover:bg-indigo-600"
+//             >
+//               Switch Camera
+//             </Button>
+//           )}
+//           <Button
+//             className="flex-1 bg-red-500 hover:bg-red-600"
+//             onClick={() => {
+//               stopScanner();
+//               onOpenChange(false);
+//             }}
+//           >
+//             Cancel
+//           </Button>
+//         </div>
+//       </DialogContent>
+//     </Dialog>
+//   );
+// }
+
+export function ScannerDialog({
+  siteId,
+  action,
+  open,
+  onOpenChange,
+  employeeId,
+}) {
   const scannerRef = useRef(null);
   const audioRef = useRef(null);
   const errorAudioRef = useRef(null);
@@ -346,6 +509,9 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
 
   const [cameras, setCameras] = useState([]);
   const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+  const [activeCameraLabel, setActiveCameraLabel] = useState("");
+  const [permissionError, setPermissionError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     audioRef.current = new Audio("/audio/beep.mp3");
@@ -364,23 +530,43 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
     }
   };
 
-  const startScanner = async (cameraId = null) => {
+  const startScanner = async (cameraId = null, label = "") => {
+    setLoading(true);
     try {
       const scanner = new Html5Qrcode("qr-reader");
       scannerRef.current = scanner;
 
       const config = { fps: 10, qrbox: 250 };
+
       if (cameraId) {
         await scanner.start(
           { deviceId: { exact: cameraId } },
           config,
           handleScan
         );
+        setActiveCameraLabel(label || "Unknown Camera");
+
+        // ✅ Add notification here
+        toast.success(`Switched to ${label || "camera"}`);
       } else {
         await scanner.start({ facingMode: "environment" }, config, handleScan);
+        setActiveCameraLabel("Back Camera");
+
+        // ✅ Add notification here too
+        toast.success("Switched to Back Camera");
       }
+
+      setPermissionError(false);
     } catch (err) {
       console.error("Scanner start failed:", err);
+      if (
+        err?.name === "NotAllowedError" ||
+        err?.message?.includes("permission")
+      ) {
+        setPermissionError(true);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -426,14 +612,23 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
       try {
         const devices = await Html5Qrcode.getCameras();
         if (devices && devices.length > 0) {
+          // start with the back camera if available
+          let backCamera = devices.find((device) =>
+            /back|rear|environment/gi.test(device.label)
+          );
+          if (!backCamera) {
+            backCamera = devices[devices.length - 1]; // fallback to last camera
+          }
           setCameras(devices);
-          setCurrentCameraIndex(0);
-          await startScanner(devices[0].id);
+          const backCameraIndex = devices.findIndex(
+            (device) => device.id === backCamera.id
+          );
+          setCurrentCameraIndex(backCameraIndex);
+          await startScanner(backCamera.id, backCamera.label);
         }
       } catch (err) {
         console.error("Error fetching cameras:", err);
-        // fallback to facingMode
-        await startScanner();
+        await startScanner(); // fallback
       }
     };
 
@@ -444,6 +639,26 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
     };
   }, [open]);
 
+  // Auto-retry when permission is granted
+  useEffect(() => {
+    if (permissionError) {
+      const retry = setInterval(async () => {
+        try {
+          const devices = await Html5Qrcode.getCameras();
+          if (devices.length > 0) {
+            clearInterval(retry);
+            setPermissionError(false);
+            await startScanner(devices[0].id, devices[0].label);
+          }
+        } catch {
+          // keep retrying silently
+        }
+      }, 2000);
+
+      return () => clearInterval(retry);
+    }
+  }, [permissionError]);
+
   // Handle camera switching
   const switchCamera = async () => {
     if (cameras.length < 2) return;
@@ -451,31 +666,57 @@ function ScannerDialog({ siteId, action, open, onOpenChange, employeeId }) {
     setCurrentCameraIndex(newIndex);
 
     stopScanner();
-    await startScanner(cameras[newIndex].id);
+    await startScanner(cameras[newIndex].id, cameras[newIndex].label);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full max-w-md h-[70vh] bg-white rounded-lg shadow-lg p-4 flex flex-col items-center justify-center">
+      <DialogContent className="w-full max-w-md h-[75vh] bg-white rounded-lg shadow-lg p-4 flex flex-col">
         <DialogHeader>
           <DialogTitle>
-            Scan QR for {action.replace(/([A-Z])/g, " $1")}
+            Scan QR for
+            {action && action.replace(/([A-Z])/g, " $1")}
           </DialogTitle>
           <DialogDescription>
             Hold your camera over the QR code to continue.
           </DialogDescription>
         </DialogHeader>
 
-        <div
-          id="qr-reader"
-          className="w-full h-full bg-gray-100 rounded-md mt-4"
-        />
+        <div className="relative flex-1 w-full mt-4">
+          <div
+            id="qr-reader"
+            className="w-full h-full bg-gray-100 rounded-md"
+          />
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-md">
+              <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
+              <span className="ml-2 text-gray-700">Switching camera...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Show which camera is active */}
+        {activeCameraLabel && (
+          <p className="text-sm text-gray-600 mt-2 text-center">
+            📷 Active Camera:{" "}
+            <span className="font-medium">{activeCameraLabel}</span>
+          </p>
+        )}
+
+        {/* Permission error message */}
+        {permissionError && (
+          <div className="text-red-600 text-sm text-center mt-3 bg-red-50 border border-red-300 p-2 rounded">
+            🚫 Camera access denied. Please allow camera permissions in your
+            browser settings.
+          </div>
+        )}
 
         <div className="flex gap-2 w-full mt-4">
           {cameras.length > 1 && (
             <Button
               onClick={switchCamera}
               className="flex-1 bg-indigo-500 hover:bg-indigo-600"
+              disabled={loading}
             >
               Switch Camera
             </Button>

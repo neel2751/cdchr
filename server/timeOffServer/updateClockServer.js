@@ -38,7 +38,6 @@ export const updateClockManuallyById = async ({
     };
   }
   const model = type === "site" ? SiteClockModel : ClockModel;
-
   try {
     const updateFields = {};
     if (clockIn !== undefined) updateFields.clockIn = clockIn;
@@ -50,11 +49,11 @@ export const updateClockManuallyById = async ({
     const updateQuery = {
       $set: updateFields,
     };
-    if (actions.length > 0) {
-      updateQuery.$push = {
-        actions: { $each: actions }, // append all actions at once
-      };
-    }
+    // if (actions.length > 0) {
+    //   updateQuery.$push = {
+    //     actions: { $each: actions }, // append all actions at once
+    //   };
+    // }
     let updated;
 
     if (id) {
@@ -91,7 +90,7 @@ export const updateClockManuallyById = async ({
       message: id ? "Clock updated successfully" : "Clock created successfully",
     };
   } catch (err) {
-    console.error("updateClockManuallyById error:", err);
+    console.log("Error in updateClockManuallyById:", err);
     return { success: false, message: "Failed to update or create clock" };
   }
 };

@@ -306,6 +306,8 @@ const WeekRotaTable = ({
                       schedule.schedule.find((entry) => entry.date === date) ||
                       {};
                     const isHoliday = daySchedule.category === "Holiday";
+                    const isPendingLeaveDay =
+                      schedule.pendingLeaveDates?.includes(date);
                     const isOff =
                       dayLabel === "Sunday" || daySchedule.category === "OFF";
                     const isOfficeSite = daySchedule.category === "OFFICE/SITE";
@@ -321,6 +323,14 @@ const WeekRotaTable = ({
 
                     return (
                       <TableCell key={date}>
+                        {isPendingLeaveDay && (
+                          <Badge
+                            variant="outline"
+                            className="border-none text-yellow-600 w-max flex items-center gap-1 mb-1"
+                          >
+                            Pending Leave
+                          </Badge>
+                        )}
                         <div className="space-y-2">
                           <Select
                             disabled={dayLabel === "Sunday" || isHoliday}

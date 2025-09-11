@@ -62,12 +62,14 @@ import { decrypt } from "@/lib/algo";
 import Link from "next/link";
 import AddSiteAssignment from "./addSiteAssignment";
 import Pagination from "@/lib/pagination";
+import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 
 const EmployeeSiteManagement = () => {
   const { filter: searchParams, searchParams: siteId } = useCommonContext();
   const queryClient = useQueryClient();
   const [showEditForm, setShowEditForm] = useState({});
   const query = searchParams?.query;
+  const date = searchParams?.assignDate;
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
 
@@ -80,6 +82,8 @@ const EmployeeSiteManagement = () => {
     currentPage,
     pagePerData,
     query,
+    fromDate: date,
+    toDate: date,
   });
 
   const { data: sites = [] } = useFetchSelectQuery({
@@ -132,17 +136,22 @@ const EmployeeSiteManagement = () => {
 
   const handleSave = async () => {
     const {
-      _id: id,
       clockIn,
       clockOut,
       breakIn,
       breakOut,
-      employee,
+      employeeId,
+      siteId,
+      clockRecordId,
     } = showEditForm;
-    const employeeId = employee.employeeId;
+    if (!employeeId || !siteId || !clockRecordId) {
+      toast.error("Invalid clock record");
+      return;
+    }
     const result = await handleTimeAction({
-      clockId: id,
+      clockId: clockRecordId,
       type: "site",
+      siteId,
       manualTimes: {
         clockIn,
         clockOut,
@@ -290,6 +299,7 @@ const EmployeeSiteManagement = () => {
           </div>
           <div className="flex items-center gap-2">
             <SearchDebounce />
+            <DateFilter name={"assignDate"} />
             {role === "superAdmin" || role === "admin" ? (
               <SelectFilter
                 value={filter.siteId}

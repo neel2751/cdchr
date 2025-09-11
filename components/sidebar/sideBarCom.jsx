@@ -38,6 +38,7 @@ import { getEmployeeMenu } from "@/server/selectServer/selectServer";
 import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import { encrypt } from "@/lib/algo";
+import { useMemo } from "react";
 
 const SideBarHeaderCom = () => {
   return (
@@ -79,32 +80,47 @@ const SideBarHeaderCom = () => {
 
 const SideBarMenu = () => {
   const pathName = usePathname();
-  const path = pathName.split("/", 3).join("/");
-  const currentMenu = getMenu(path);
-  const { data } = useSession();
+  const { data: sessionData } = useSession();
+
+  // Memoize the path to avoid recalculation
+  const path = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
+
+  // Fetch employee menu (React Query / SWR style)
   const { data: menuItems = [], isLoading } = useFetchSelectQuery({
     fetchFn: getEmployeeMenu,
-    queryKey: ["employeeMenu", data?.user?._id],
+    queryKey: ["employeeMenu", sessionData?.user?._id],
   });
 
-  const menu = mergeAndFilterMenus(COMMONMENUITEMS, menuItems);
+  // Merge menus and memoize to prevent recalculation on re-render
+  const menu = useMemo(
+    () => mergeAndFilterMenus(COMMONMENUITEMS, menuItems),
+    [menuItems]
+  );
 
-  const currentReport = getReportMenu(path);
+  // Determine current menus and reports
+  const currentMenu = useMemo(() => getMenu(path), [path]);
+  const currentReport = useMemo(() => getReportMenu(path), [path]);
 
   return (
     <SidebarContent>
-      {/* <SidebarGroup>
-        <SideBarMenuCom menuItems={COMMONMENUITEMS} path={path} />
-      </SidebarGroup> */}
       {isLoading ? (
-        <div>Loading...</div>
+        // Skeleton loader while menu is fetching
+        <SidebarGroup>
+          {[...Array(5)].map((_, i) => (
+            <div
+              key={i}
+              className="h-6 bg-gray-200 rounded mb-2 animate-pulse"
+            />
+          ))}
+        </SidebarGroup>
       ) : (
         <SidebarGroup>
           <SideBarMenuCom menuItems={menu} path={path} />
         </SidebarGroup>
       )}
 
-      {(data?.user?.role === "superAdmin" || data?.user?.role === "admin") && (
+      {(sessionData?.user?.role === "superAdmin" ||
+        sessionData?.user?.role === "admin") && (
         <SidebarGroup>
           <SidebarGroupLabel>More</SidebarGroupLabel>
           <SidebarMenu className="gap-4">
@@ -136,17 +152,9 @@ const SideBarMenu = () => {
           </SidebarMenu>
         </SidebarGroup>
       )}
-      {/* <SidebarMenu className="gap-4">
-          <Collapsible asChild className="group/collapsible">
-            <SidebarMenuItem>
-              <IssueForm />
-            </SidebarMenuItem>
-          </Collapsible>
-        </SidebarMenu> */}
     </SidebarContent>
   );
 };
-
 const SideBarFooterCom = () => {
   const { data: session } = useSession();
 

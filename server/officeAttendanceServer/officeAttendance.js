@@ -102,6 +102,161 @@ export async function getOfficeEmployeeAttendance(weekStartDate) {
   }
 }
 
+// export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
+//   const { date } = weekStartDate;
+
+//   try {
+//     await connect();
+//     const { props } = await getServerSideProps();
+//     const loginId = props?.session?.user?._id;
+//     const weekDates = Array.from({ length: 7 }, (_, i) => addDays(date, i));
+//     const existingRota = await WeeklyRotaModel.findOne({
+//       weekStartDate: date,
+//     }).lean();
+//     const now = getUKTime({ format: "iso" });
+
+//     const allEmployees = await OfficeEmployeeModel.find({
+//       isActive: true,
+//       delete: false,
+//       $or: [
+//         { visaEndDate: { $gt: now } },
+//         { visaEndDate: { $exists: false } },
+//         { visaEndDate: null },
+//         { endDate: { $gte: now } },
+//         { endDate: { $exists: false } },
+//         { endDate: null },
+//       ],
+//     });
+
+//     const leaveRequests = await LeaveRequestModel.find({
+//       leaveStatus: "Approved",
+//       leaveStartDate: { $lte: weekDates[6] },
+//       leaveEndDate: { $gte: weekDates[0] },
+//     });
+
+//     // 2️⃣ Fetch pending leave requests
+// const pendingLeaveRequests = await LeaveRequestModel.find({
+//   leaveStatus: "Pending",
+//   leaveStartDate: { $lte: weekDates[6] },
+//   leaveEndDate: { $gte: weekDates[0] },
+// });
+
+//     // // 🗺️ Map leaves by employeeId
+//     // const leaveMap = new Map();
+//     // leaveRequests.forEach((leave) => {
+//     //   const days = [];
+//     //   weekDates.forEach((date) => {
+//     //     if (leave.leaveStartDate <= date && leave.leaveEndDate >= date) {
+//     //       days.push(date.toISOString().split("T")[0]);
+//     //     }
+//     //   });
+
+//     //   if (!leaveMap.has(leave.employeeId.toString())) {
+//     //     leaveMap.set(leave.employeeId.toString(), new Set());
+//     //   }
+//     //   days.forEach((d) => leaveMap.get(leave.employeeId.toString()).add(d));
+//     // });
+
+//     // 🗺️ Map leaves by employeeId
+//     const leaveMap = new Map();
+//     leaveRequests.forEach((leave) => {
+//       if (!leave.leaveDates || leave.leaveDates.length === 0) return;
+
+//       if (!leaveMap.has(leave.employeeId.toString())) {
+//         leaveMap.set(leave.employeeId.toString(), new Set());
+//       }
+
+//       leave.leaveDates.forEach((d) => {
+//         const leaveDay = new Date(d).toISOString().split("T")[0];
+//         // Only add if within the week
+//         if (
+//           leaveDay >= weekDates[0].toISOString().split("T")[0] &&
+//           leaveDay <= weekDates[6].toISOString().split("T")[0]
+//         ) {
+//           leaveMap.get(leave.employeeId.toString()).add(leaveDay);
+//         }
+//       });
+//     });
+//     console.log("Leave Map:", leaveMap);
+
+//     const existingAttendanceMap = new Map();
+//     existingRota?.attendanceData?.forEach((att) =>
+//       existingAttendanceMap.set(att.employeeId.toString(), att)
+//     );
+
+//     const attendanceData = allEmployees.map((employee) => {
+//       const idStr = employee._id.toString();
+
+//       if (existingAttendanceMap.has(idStr)) {
+//         return existingAttendanceMap.get(idStr);
+//       }
+
+//       const leaveDays = leaveMap.get(idStr) || new Set();
+
+//       const schedule = weekDates.map((date) => {
+//         const formattedDate = date.toISOString().split("T")[0];
+//         const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+//         // If it's Sunday
+//         if (dayName === "Sunday") {
+//           return {
+//             date: formattedDate,
+//             day: dayName,
+//             category: "OFF",
+//             startTime: "00:00",
+//             endTime: "00:00",
+//           };
+//         }
+//         if (leaveDays.has(formattedDate)) {
+//           return {
+//             date: formattedDate,
+//             day: date.toLocaleDateString("en-US", { weekday: "long" }),
+//             category: "Holiday",
+//           };
+//         }
+//         return {
+//           date: formattedDate,
+//           day: date.toLocaleDateString("en-US", { weekday: "long" }),
+//           // category: "OFFICE",
+//           // startTime: "09:00",
+//           // endTime: "17:00",
+//         };
+//       });
+
+//       return {
+//         employeeId: employee._id,
+//         employeeName: employee.name,
+//         schedule,
+//       };
+//     });
+
+//     const approvedById = existingRota?.approvedBy
+//       ? await OfficeEmployeeModel.findById(existingRota?.approvedBy, {
+//           name: 1,
+//         })
+//       : null;
+
+//     const withIdData = {
+//       attendanceData,
+//       weekId: existingRota?._id || null,
+//       approvedStatus: existingRota?.approvedStatus || null,
+//       approvedDate: existingRota?.approvedDate || null,
+//       approvedBy:
+//         approvedById?._id?.toString() === props?.session?.user?._id
+//           ? "You"
+//           : approvedById?.name || null,
+//       rejectReason: existingRota?.rejectedReason || null,
+//     };
+
+//     return {
+//       data: JSON.stringify(withIdData),
+//       totalCount: attendanceData.length,
+//     };
+//   } catch (error) {
+//     console.error("Error fetching attendance:", error);
+//     return [];
+//   }
+// }
+
 export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
   const { date } = weekStartDate;
 
@@ -109,12 +264,18 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     await connect();
     const { props } = await getServerSideProps();
     const loginId = props?.session?.user?._id;
+
     const weekDates = Array.from({ length: 7 }, (_, i) => addDays(date, i));
+    const weekStart = weekDates[0];
+    const weekEnd = weekDates[6];
+    const now = getUKTime({ format: "iso" });
+
+    // 🔹 Fetch existing rota
     const existingRota = await WeeklyRotaModel.findOne({
       weekStartDate: date,
     }).lean();
-    const now = getUKTime({ format: "iso" });
 
+    // 🔹 Fetch all active employees
     const allEmployees = await OfficeEmployeeModel.find({
       isActive: true,
       delete: false,
@@ -128,33 +289,43 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
       ],
     });
 
+    // 🔹 Fetch Approved + Pending leave requests in this week
     const leaveRequests = await LeaveRequestModel.find({
-      leaveStatus: "Approved",
-      leaveStartDate: { $lte: weekDates[6] },
-      leaveEndDate: { $gte: weekDates[0] },
-    });
+      leaveStatus: { $in: ["Approved", "Pending"] },
+      leaveStartDate: { $lte: weekEnd },
+      leaveEndDate: { $gte: weekStart },
+    }).lean();
 
     // 🗺️ Map leaves by employeeId
     const leaveMap = new Map();
     leaveRequests.forEach((leave) => {
-      const days = [];
-      weekDates.forEach((date) => {
-        if (leave.leaveStartDate <= date && leave.leaveEndDate >= date) {
-          days.push(date.toISOString().split("T")[0]);
-        }
-      });
+      if (!leave.leaveDates || leave.leaveDates.length === 0) return;
 
       if (!leaveMap.has(leave.employeeId.toString())) {
-        leaveMap.set(leave.employeeId.toString(), new Set());
+        leaveMap.set(leave.employeeId.toString(), []);
       }
-      days.forEach((d) => leaveMap.get(leave.employeeId.toString()).add(d));
+
+      leave.leaveDates.forEach((d) => {
+        const leaveDay = new Date(d).toISOString().split("T")[0];
+        if (
+          leaveDay >= weekStart.toISOString().split("T")[0] &&
+          leaveDay <= weekEnd.toISOString().split("T")[0]
+        ) {
+          leaveMap.get(leave.employeeId.toString()).push({
+            date: leaveDay,
+            status: leave.leaveStatus, // only used for frontend warning
+          });
+        }
+      });
     });
 
+    // 🗺️ Existing rota data
     const existingAttendanceMap = new Map();
     existingRota?.attendanceData?.forEach((att) =>
       existingAttendanceMap.set(att.employeeId.toString(), att)
     );
 
+    // 🔹 Build attendance data
     const attendanceData = allEmployees.map((employee) => {
       const idStr = employee._id.toString();
 
@@ -162,12 +333,15 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
         return existingAttendanceMap.get(idStr);
       }
 
-      const leaveDays = leaveMap.get(idStr) || new Set();
+      const leaveDays = leaveMap.get(idStr) || [];
+      const pendingLeaveDates = leaveDays
+        .filter((l) => l.status === "Pending")
+        .map((l) => l.date); // frontend can use this to show warning badge
 
       const schedule = weekDates.map((date) => {
         const formattedDate = date.toISOString().split("T")[0];
         const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
-        // If it's Sunday
+
         if (dayName === "Sunday") {
           return {
             date: formattedDate,
@@ -177,19 +351,14 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
             endTime: "00:00",
           };
         }
-        if (leaveDays.has(formattedDate)) {
-          return {
-            date: formattedDate,
-            day: date.toLocaleDateString("en-US", { weekday: "long" }),
-            category: "Holiday",
-          };
-        }
+
+        // Keep normal categories as-is, do NOT mark pending here
         return {
           date: formattedDate,
-          day: date.toLocaleDateString("en-US", { weekday: "long" }),
-          // category: "OFFICE",
-          // startTime: "09:00",
-          // endTime: "17:00",
+          day: dayName,
+          category: "OFFICE", // default if no rota yet
+          startTime: "09:00",
+          endTime: "17:00",
         };
       });
 
@@ -197,9 +366,11 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
         employeeId: employee._id,
         employeeName: employee.name,
         schedule,
+        pendingLeaveDates, // frontend can show a small warning badge
       };
     });
 
+    // 🔹 ApprovedBy info
     const approvedById = existingRota?.approvedBy
       ? await OfficeEmployeeModel.findById(existingRota?.approvedBy, {
           name: 1,
@@ -212,7 +383,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
       approvedStatus: existingRota?.approvedStatus || null,
       approvedDate: existingRota?.approvedDate || null,
       approvedBy:
-        approvedById?._id?.toString() === props?.session?.user?._id
+        approvedById?._id?.toString() === loginId
           ? "You"
           : approvedById?.name || null,
       rejectReason: existingRota?.rejectedReason || null,

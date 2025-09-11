@@ -92,7 +92,7 @@ const employeSchema = new mongoose.Schema(
     },
     payType: {
       type: String,
-      enum: ["Hourly", "Daily", "Weekly", "Monthly", "Yearly"],
+      enum: ["Hourly", "Daily", "Weekly", "Fortnightly", "Monthly", "Yearly"],
       required: true,
     },
     payRate: {

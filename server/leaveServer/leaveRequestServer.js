@@ -155,6 +155,14 @@ export async function addLeaveRequest({ data, employeeId, adminId }) {
         leaveDates,
       } = entry;
 
+      // Ensure Correct Order of Leave Dates
+      const sortedDates = [...leaveDates].sort(
+        (a, b) => new Date(a) - new Date(b)
+      );
+      entry.leaveDates = sortedDates;
+      entry.leaveStartDate = sortedDates[0];
+      entry.leaveEndDate = sortedDates[sortedDates.length - 1];
+
       // 🔹 Update balances in CommonLeaveModel
       const existingLeave = await CommonLeaveModel.findOne({
         employeeId: createObjectId(employeeId),
@@ -746,13 +754,14 @@ export async function editLeaveRequest({ data, requestId, adminId }) {
     const leaveType = originalRequest.leaveType; // Fixed for full-day
     const leaveYear = getLeaveYearString(new Date());
 
-    // 2️⃣ Rollback only this request's allocation
-    for (const segment of originalRequest.leaveBreakdown || []) {
+    // 2️⃣ Restore old balance based on leaveDates
+    if (originalRequest.leaveDates && originalRequest.leaveDates.length > 0) {
+      const oldLeaveDays = originalRequest.leaveDates.length;
       await updateLeaveBalance({
         employeeId,
-        leaveYear: segment.leaveYear,
-        leaveType: segment.leaveType,
-        leaveDays: -segment.leaveDays,
+        leaveYear: originalRequest.leaveYear,
+        leaveType: originalRequest.leaveType,
+        leaveDays: -oldLeaveDays,
         session,
         allowNegative: true,
       });
@@ -778,10 +787,8 @@ export async function editLeaveRequest({ data, requestId, adminId }) {
       adminId ? "Approved" : "Pending",
       adminId
     );
-
     // 5️⃣ Validate overlaps
     await validateOverlap(entries, requestId);
-
     // 6️⃣ Apply new allocation
     for (const entry of entries) {
       await updateLeaveBalance({
@@ -794,12 +801,17 @@ export async function editLeaveRequest({ data, requestId, adminId }) {
       });
     }
 
+    const sortedDates = [...leaveDates].sort(
+      (a, b) => new Date(a) - new Date(b)
+    );
+    // Ensure Correct Order of Leave Dates
+
     // 7️⃣ Update main request
     const mainEntry = entries[0];
-    originalRequest.leaveStartDate = mainEntry.leaveStartDate;
-    originalRequest.leaveEndDate = mainEntry.leaveEndDate;
+    originalRequest.leaveStartDate = sortedDates[0];
+    originalRequest.leaveEndDate = sortedDates[sortedDates.length - 1];
     originalRequest.leaveReason = leaveReason;
-    originalRequest.leaveDates = leaveDates;
+    originalRequest.leaveDates = sortedDates;
     originalRequest.leaveDays = entries.reduce(
       (sum, e) => sum + e.leaveDays,
       0

@@ -38,8 +38,8 @@ app.prepare().then(() => {
      * Office device generates QR
      * ============================ */
     socket.on("generate-office-qr", ({ action, siteId }) => {
-      const token = jwt.sign({ action, siteId }, SECRET, { expiresIn: "90s" });
-      const expiresAt = Date.now() + 90000;
+      const token = jwt.sign({ action, siteId }, SECRET, { expiresIn: "30s" });
+      const expiresAt = Date.now() + 30000;
 
       officeTokens.set(token, { action, siteId, expiresAt });
 
@@ -50,7 +50,7 @@ app.prepare().then(() => {
         officeTokens.delete(token);
         io.emit("office-qr-expired", token); // Notify office UI
         console.log(`Token expired: ${token}`);
-      }, 90000);
+      }, 30000);
     });
 
     /** ============================

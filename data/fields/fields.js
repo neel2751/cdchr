@@ -459,17 +459,19 @@ export const EMPLOYEFIELD = [
   },
   {
     name: "payType",
-    labelText: "Pay Type",
+    labelText: "Pay Frequency",
     type: "select",
     options: [
       { value: "Hourly", label: "Hourly" },
       { value: "Daily", label: "Daily" },
       { value: "Weekly", label: "Weekly" },
+      { value: "Fortnightly", label: "Fortnightly" },
       { value: "Monthly", label: "Monthly" },
+      { value: "Annually", label: "Annually" },
     ],
-    placeholder: "Select Pay Type",
+    placeholder: "Select Pay Frequency",
     validationOptions: {
-      required: "Pay Type is required",
+      required: "Pay Frequency is required",
     },
   },
   {
@@ -478,21 +480,35 @@ export const EMPLOYEFIELD = [
     type: "text",
     inputMode: "numeric",
     placeholder: "Enter Pay Rate",
-    helperText: "*Minimum Pay Rate is £10.42(UK Minimum Wage)*",
+    // helperText: "*Minimum Pay Rate is £10.42(UK Minimum Wage)*",
     validationOptions: {
       required: "Pay rate is required",
+      minLength: {
+        value: 1,
+        message: "Minimum length should be 1 characters",
+      },
+      maxLength: {
+        value: 8,
+        message: "Maximum length should be 8 characters",
+      },
       pattern: {
-        // first 3 digit decimal two  places is optional
-        value: /^\d{1,2}(\.\d{1,2})?$/,
-        message: "Must be a number with optional decimal places",
-        //   value: /^\d{1,2}\.\d{2}$/i,
-        //   value: /^\d+(\.\d{1,2})?$/i,
+        // we have payment frequency hourly, daily, weekly, monthly, annually so we have to allow max 6 digit with two decimal places
+        value: /^\d{1,6}(\.\d{1,2})?$/,
+        message: "Must be a number with up to two decimal places",
       },
+
+      // pattern: {
+      //   // first 3 digit decimal two  places is optional
+      //   value: /^\d{1,2}(\.\d{1,2})?$/,
+      //   message: "Must be a number with optional decimal places",
+      //   //   value: /^\d{1,2}\.\d{2}$/i,
+      //   //   value: /^\d+(\.\d{1,2})?$/i,
+      // },
       // we have to set min pay rate start ok UK minimum wage
-      min: {
-        value: 10.42,
-        message: "Minimum pay rate is £10.42",
-      },
+      // min: {
+      //   value: 10.42,
+      //   message: "Minimum pay rate is £10.42",
+      // },
     },
   },
   {

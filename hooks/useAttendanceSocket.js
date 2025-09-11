@@ -168,7 +168,15 @@ export function useAttendanceSocket({
   const [total, setTotal] = useState();
 
   const loadData = useCallback(
-    async ({ siteId, employeeId, currentPage, pagePerData, query }) => {
+    async ({
+      siteId,
+      employeeId,
+      currentPage,
+      pagePerData,
+      query,
+      fromDate,
+      toDate,
+    }) => {
       try {
         const res = await fetchLiveOfficeClock({
           siteId,
@@ -325,7 +333,14 @@ export function useSiteAttendanceSocket({
   const [total, setTotal] = useState();
   // Load attendance data based on passed params (siteId or employeeId)
   const loadData = useCallback(
-    async ({ employeeId, currentPage, pagePerData, query }) => {
+    async ({
+      employeeId,
+      currentPage,
+      pagePerData,
+      query,
+      fromDate,
+      toDate,
+    }) => {
       try {
         const res = await fetchAssignedWithClocks({
           siteId: siteOId,

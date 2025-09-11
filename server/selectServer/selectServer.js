@@ -63,8 +63,13 @@ export const getSelectProjects = async () => {
   const { props } = await getServerSideProps();
   const role = props?.session?.user?.role;
   const employeeId = props?.session?.user?._id;
+  const roles = await RoleBasedModel.findOne({
+    employeeId: employeeId,
+  });
+  const permissions = roles?.permissions || [];
+  const canViewAllProjects = permissions.includes("/admin/employee");
 
-  if (role === "superAdmin" || role === "admin") {
+  if (role === "superAdmin" || role === "admin" || canViewAllProjects) {
     return getAllProjects();
   } else {
     return getEmployeeAssignedProjects(employeeId);

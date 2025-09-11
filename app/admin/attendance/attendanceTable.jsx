@@ -47,6 +47,7 @@ import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { useSession } from "next-auth/react";
 import { handleTimeAction } from "../_components/handleTimeAction";
 import Link from "next/link";
+import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 
 const EmployeeSiteManagement = ({ searchParams }) => {
   const queryClient = useQueryClient();
@@ -54,12 +55,15 @@ const EmployeeSiteManagement = ({ searchParams }) => {
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page) || 1;
   const pageSize = parseInt(searchParams?.pageSize) || 10;
+  const dateParam = searchParams?.date || "";
 
   const { attendanceList, socket, total } = useAttendanceSocket({
     siteId: null,
     employeeId: null,
     currentPage,
     pagePerData: pageSize,
+    fromDate: dateParam,
+    toDate: dateParam,
     query,
   });
 
@@ -177,12 +181,15 @@ const EmployeeSiteManagement = ({ searchParams }) => {
               View and manage employee attendance and time tracking records
             </CardDescription>
           </div>
-          <Button asChild size={"sm"} variant={"outline"}>
-            <Link href={"/admin/scan"}>
-              <QrCodeIcon />
-              Open Scan
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size={"sm"} variant={"outline"}>
+              <Link href={"/admin/scan"}>
+                <QrCodeIcon />
+                Open Scan
+              </Link>
+            </Button>
+            <DateFilter name={"date"} />
+          </div>
         </CardHeader>
         <CardContent className={"grid grid-cols-5 gap-5"}>
           <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
@@ -392,10 +399,12 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                             assignment?.breakOut
                           ) || "-"}
                         </TableCell>
+                        <TableCell>{assignment?._id}</TableCell>
                         {(role === "superAdmin" || role === "admin") &&
                           assignment?.clockOut && (
                             <TableCell>
-                              {assignment?._id === showEditForm._id ? (
+                              {assignment?.clockRecordId ===
+                              showEditForm?.clockRecordId ? (
                                 <div className="flex gap-2 items-center">
                                   <Button
                                     onClick={handleSave}

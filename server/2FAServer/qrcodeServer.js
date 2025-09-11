@@ -306,7 +306,6 @@ export async function storeClockTime(token, codeSiteId, action) {
     const { props } = await getServerSideProps();
     await connect();
     const employeeId = props?.session?.user?._id;
-    const siteId = decode?.siteId;
 
     if (!employeeId || !action)
       return { success: false, message: "Invalid token" };
@@ -318,13 +317,17 @@ export async function storeClockTime(token, codeSiteId, action) {
     if (!isValidId) return { success: false, message: "Invalid Employee Id" };
 
     const employeeOid = createObjectId(employeeId);
-    if (siteId) {
-      const mainSiteId = decode(codeSiteId);
-      if (siteId !== mainSiteId)
-        return {
-          success: false,
-          message: " You are not belongs to this site Id",
-        };
+    if (codeSiteId) {
+      console.log("Site ID Present:", codeSiteId);
+      // const mainSiteId = decode(codeSiteId);
+      // if (siteId !== mainSiteId)
+      //   return {
+      //     success: false,
+      //     message: " You are not belongs to this site Id",
+      //   };
+      decode.siteId = codeSiteId;
+      decode.action = action;
+      decode.employeeId = employeeId;
       return await storeSiteEmployeeClockTime(decode);
     } else {
       const existing = await OfficeEmployeeModel.findById(employeeOid);
@@ -334,8 +337,6 @@ export async function storeClockTime(token, codeSiteId, action) {
         employeeId: employeeOid,
         date: date,
       });
-
-      console.log("Existing Attendance:", existingAttendance);
 
       const MIN_BREAK_DURATION_MINUTES = 30;
       const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
@@ -351,13 +352,6 @@ export async function storeClockTime(token, codeSiteId, action) {
           date: date,
           clockIn: currentTime,
           clockInStatus: true,
-          actions: [
-            {
-              action: "clockIn",
-              time: date,
-              source: "scanner",
-            },
-          ],
         }).save();
         return { success: true, message: "Clocked In", employeeId };
       }
@@ -380,13 +374,6 @@ export async function storeClockTime(token, codeSiteId, action) {
           { employeeId: employeeOid, date: date },
           {
             $set: { breakIn: currentTime },
-            $push: {
-              actions: {
-                action: "breakIn",
-                time: date,
-                source: "scanner",
-              },
-            },
           }
         );
         return { success: true, message: "Break In", employeeId };
@@ -411,13 +398,6 @@ export async function storeClockTime(token, codeSiteId, action) {
           { employeeId: employeeOid, date: date },
           {
             $set: { breakOut: currentTime },
-            $push: {
-              actions: {
-                action: "breakOut",
-                time: date,
-                source: "scanner",
-              },
-            },
           }
         );
         return { success: true, message: "Break Out", employeeId };
@@ -437,13 +417,6 @@ export async function storeClockTime(token, codeSiteId, action) {
           { employeeId: employeeOid, date: date },
           {
             $set: { clockOut: currentTime },
-            $push: {
-              actions: {
-                action: "clockOut",
-                time: date,
-                source: "scanner",
-              },
-            },
           }
         );
 

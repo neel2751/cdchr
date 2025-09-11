@@ -88,8 +88,6 @@ async function isLeaveOverlapping({
     // Fetch all existing leave requests for that year
     const existingLeaves = await LeaveRequestModel.find(filter);
 
-    console.log(existingLeaves);
-
     // Flatten existing leaveDates for quick lookup
     const existingDates = new Set(
       existingLeaves.flatMap((req) =>
@@ -588,9 +586,9 @@ export async function updateLeaveBalance({
       }
 
       leaveDoc.leaveData[idx].used += leaveDays;
-      if (leaveType === "Annual Leave") {
-        leaveDoc.leaveData[idx].remaining -= leaveDays;
-      }
+      // if (leaveType === "Annual Leave") {
+      leaveDoc.leaveData[idx].remaining -= leaveDays;
+      // }
 
       leaveDoc.markModified(`leaveData.${idx}`);
       await leaveDoc.save({ session });

@@ -619,13 +619,13 @@ export async function storeSiteEmployeeClockTime(decode) {
         status: "checked-in",
         isLocked: true,
         clockInStatus: true,
-        actions: [
-          {
-            action: "clockIn",
-            time: currentTime,
-            source: "scanner",
-          },
-        ],
+        // actions: [
+        //   {
+        //     action: "clockIn",
+        //     time: currentTime,
+        //     source: "scanner",
+        //   },
+        // ],
       }).save();
       return { success: true, message: "Clocked In", employeeId };
     }
@@ -648,13 +648,13 @@ export async function storeSiteEmployeeClockTime(decode) {
         { employeeId: employeeOid, date: date },
         {
           $set: { breakIn: currentTime, status: "break-in" },
-          $push: {
-            actions: {
-              action: "breakIn",
-              time: currentTime,
-              source: "scanner",
-            },
-          },
+          // $push: {
+          //   actions: {
+          //     action: "breakIn",
+          //     time: currentTime,
+          //     source: "scanner",
+          //   },
+          // },
         }
       );
       return { success: true, message: "Break In", employeeId };
@@ -679,13 +679,13 @@ export async function storeSiteEmployeeClockTime(decode) {
         { employeeId: employeeOid, date: date },
         {
           $set: { breakOut: currentTime, status: "break-out" },
-          $push: {
-            actions: {
-              action: "breakOut",
-              time: currentTime,
-              source: "scanner",
-            },
-          },
+          // $push: {
+          //   actions: {
+          //     action: "breakOut",
+          //     time: currentTime,
+          //     source: "scanner",
+          //   },
+          // },
         }
       );
       return { success: true, message: "Break Out", employeeId };
@@ -705,13 +705,13 @@ export async function storeSiteEmployeeClockTime(decode) {
         { employeeId: employeeOid, date: date },
         {
           $set: { clockOut: currentTime, status: "clocked-out" },
-          $push: {
-            actions: {
-              action: "clockOut",
-              time: currentTime,
-              source: "scanner",
-            },
-          },
+          // $push: {
+          //   actions: {
+          //     action: "clockOut",
+          //     time: currentTime,
+          //     source: "scanner",
+          //   },
+          // },
         }
       );
 

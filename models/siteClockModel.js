@@ -46,13 +46,13 @@ const siteClockSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
-    actions: [
-      {
-        action: String,
-        time: Date,
-        source: String,
-      },
-    ],
+    // actions: [
+    //   {
+    //     action: String,
+    //     time: Date,
+    //     source: String,
+    //   },
+    // ],
     isLocked: {
       type: Boolean,
       default: false,

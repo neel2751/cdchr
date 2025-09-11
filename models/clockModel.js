@@ -46,13 +46,13 @@ const clockSchema = new Schema(
       type: String,
       // enum: ["checked-in", "break-in", "break-out", "checked-out"],
     },
-    actions: [
-      {
-        action: String,
-        time: Date,
-        source: String,
-      },
-    ],
+    // actions: [
+    //   {
+    //     action: String,
+    //     time: Date,
+    //     source: String,
+    //   },
+    // ],
     isDeleted: {
       type: Boolean,
       default: false,
