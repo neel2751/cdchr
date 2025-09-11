@@ -30,7 +30,7 @@ async function checkRoleMiddleware(req) {
     admin: "/admin",
     user: "/admin",
     siteEmployee: "/employee",
-    reception: "/office",
+    reception: "/hr",
     superAdmin: "*",
   };
 
@@ -113,5 +113,5 @@ export default withAuth(checkRoleMiddleware, {
 
 // Exclude auth routes and public paths from the middleware
 export const config = {
-  matcher: ["/admin/:path*", "/employee/:path*", "/office/:path*"], // Only match admin routes
+  matcher: ["/admin/:path*", "/employee/:path*", "/hr/:path*"], // Only match admin routes
 };

@@ -1,6 +1,6 @@
 "use client";
 import CardName from "../../_components/name";
-import EmployeeClockScanner from "@/app/office/employeeScan/page";
+import EmployeeClockScanner from "@/app/hr/employeeScan/page";
 
 export default function EmployeCard({ param }) {
   return (

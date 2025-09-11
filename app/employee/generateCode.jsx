@@ -246,7 +246,7 @@ import {
   canEmployeeClockToday,
   fetchAssignedWithClocks,
 } from "@/server/siteAssignmentServer/siteAssignmentServer";
-import { ScannerDialog } from "../office/employeeScan/page";
+import { ScannerDialog } from "../hr/employeeScan/page";
 import { io } from "socket.io-client";
 import Image from "next/image";
 

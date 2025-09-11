@@ -425,8 +425,8 @@ export const EMPLOYEFIELD = [
     labelText: "CIS Deduction",
     type: "select",
     options: [
-      { value: "20", label: "20%" },
-      { value: "30", label: "30%" },
+      { value: 20, label: "20%" },
+      { value: 30, label: "30%" },
       // { value: "0", label: "0%" },
     ],
     placeholder: "Select CIS Deduction",
