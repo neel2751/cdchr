@@ -337,6 +337,9 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
       const pendingLeaveDates = leaveDays
         .filter((l) => l.status === "Pending")
         .map((l) => l.date); // frontend can use this to show warning badge
+      const approvedLeaveDates = leaveDays
+        .filter((l) => l.status === "Approved")
+        .map((l) => l.date);
 
       const schedule = weekDates.map((date) => {
         const formattedDate = date.toISOString().split("T")[0];
@@ -356,7 +359,10 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
         return {
           date: formattedDate,
           day: dayName,
-          category: "OFFICE", // default if no rota yet
+          // if on approved leave, mark as Holiday
+          category: approvedLeaveDates.includes(formattedDate)
+            ? "Holiday"
+            : "OFFICE",
           startTime: "09:00",
           endTime: "17:00",
         };
@@ -367,6 +373,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
         employeeName: employee.name,
         schedule,
         pendingLeaveDates, // frontend can show a small warning badge
+        approvedLeaveDates, // to quickly check if a date is on approved leave
       };
     });
 

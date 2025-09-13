@@ -349,3 +349,26 @@ export async function checkPassword(password) {
     };
   }
 }
+
+// fetch user by email
+export async function getReceptionUserByEmail(email) {
+  try {
+    await connect();
+    const userData = await OfficeUserModel.findOne({
+      email: email.toLowerCase(),
+      delete: false,
+    }).select("-password -delete -createdBy -updatedBy");
+    const isActive = !!(userData && userData.isActive !== false);
+    return {
+      success: true,
+      isActive,
+    };
+  } catch (error) {
+    console.log("Error fetching reception user by email:", error);
+    return {
+      success: false,
+      message: "Error fetching reception user",
+      error: error.message || "Unknown error",
+    };
+  }
+}

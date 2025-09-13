@@ -5,8 +5,10 @@ import { DoorOpen } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import React from "react";
+import Logout from "../employee/logout";
 
-export default async function UnauthPage() {
+export default async function UnauthPage({ searchParams }) {
+  const { action } = await searchParams;
   const { props } = await getServerSideProps();
   const { user } = props?.session || {};
   const role = user?.role;
@@ -22,7 +24,8 @@ export default async function UnauthPage() {
         />
       </div>
       <CardTitle className="text-2xl font-bold text-gray-900 mb-4 mt-6">
-        Unauthorized Access
+        Unauthorized Access{" "}
+        {action === "logout" ? " - You have been logged out" : ""}
       </CardTitle>
       <p className="text-gray-700 mb-6 max-w-md text-center">
         You do not have permission to view this page. {/* on new Line */}
@@ -47,14 +50,21 @@ export default async function UnauthPage() {
           </Link>
         </Button>
       ) : role === "reception" ? (
-        <Button asChild>
-          <Link
-            href="/hr"
-            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-          >
-            Go to Reception Dashboard
-          </Link>
-        </Button>
+        action === "logout" ? (
+          <Logout
+            size={"lg"}
+            className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+          />
+        ) : (
+          <Button asChild>
+            <Link
+              href="/hr"
+              className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              Go to Reception Dashboard
+            </Link>
+          </Button>
+        )
       ) : (
         <Button asChild>
           <Link

@@ -34,6 +34,31 @@ async function checkRoleMiddleware(req) {
     superAdmin: "*",
   };
 
+  // we have to check for only hr routes here becuase account is active or not
+  const isHRRoute = requestedPath.startsWith("/hr");
+  if (userRole === "reception" && isHRRoute) {
+    const response = await fetch(
+      "http://localhost:3000/api/reception/check-active",
+      {
+        method: "GET",
+        headers: {
+          Cookie: req.headers.get("cookie") || "",
+        },
+      }
+    );
+    if (!response.ok) {
+      return NextResponse.redirect(
+        new URL("/unauthorized?action=logout", req.url)
+      );
+    }
+    const { isActive } = await response.json();
+    if (!isActive) {
+      return NextResponse.redirect(
+        new URL("/unauthorized?action=logout", req.url)
+      );
+    }
+  }
+
   // Restrict path access by role (route prefix guard)
   if (userRole !== "superAdmin") {
     const allowedPrefix = rolePathMap[userRole];

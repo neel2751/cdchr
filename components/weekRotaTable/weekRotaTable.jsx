@@ -311,15 +311,15 @@ const WeekRotaTable = ({
                     const isOff =
                       dayLabel === "Sunday" || daySchedule.category === "OFF";
                     const isOfficeSite = daySchedule.category === "OFFICE/SITE";
-                    if (isHoliday) {
-                      return (
-                        <TableCell key={date}>
-                          <Badge className={"w-full justify-center bg-red-600"}>
-                            Holiday
-                          </Badge>
-                        </TableCell>
-                      );
-                    }
+                    // if (isHoliday) {
+                    //   return (
+                    //     <TableCell key={date}>
+                    //       <Badge className={"w-full justify-center bg-red-600"}>
+                    //         Holiday
+                    //       </Badge>
+                    //     </TableCell>
+                    //   );
+                    // }
 
                     return (
                       <TableCell key={date}>
@@ -331,9 +331,19 @@ const WeekRotaTable = ({
                             Pending Leave
                           </Badge>
                         )}
+                        {isHoliday && (
+                          <Badge
+                            variant={"outline"}
+                            className={
+                              "border-none text-red-600 w-max flex items-center gap-1 mb-1"
+                            }
+                          >
+                            Holiday
+                          </Badge>
+                        )}
                         <div className="space-y-2">
                           <Select
-                            disabled={dayLabel === "Sunday" || isHoliday}
+                            disabled={dayLabel === "Sunday"}
                             value={daySchedule.category || ""}
                             onValueChange={(value) =>
                               handleScheduleChange(
