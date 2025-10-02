@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { QrCode } from "lucide-react";
 
-export default function OfficeQRCode({ siteId }) {
+export default function OfficeQRCode({ siteId, className }) {
   const [qrData, setQrData] = useState(""); // Data URL for QR
   const [tokenExpired, setTokenExpired] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -64,14 +66,16 @@ export default function OfficeQRCode({ siteId }) {
   return (
     <div>
       {/* Single Button */}
-      <div className="mb-6">
-        <Button
-          onClick={generateQRCode}
-          className="h-12 text-base bg-indigo-600 hover:bg-indigo-700"
-        >
-          Request Code
-        </Button>
-      </div>
+      <Button
+        onClick={generateQRCode}
+        className={cn(
+          "h-12 text-base bg-indigo-600 hover:bg-indigo-700",
+          className
+        )}
+      >
+        <QrCode />
+        Request Code
+      </Button>
 
       {/* QR Display Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

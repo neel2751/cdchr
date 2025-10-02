@@ -63,6 +63,7 @@ import Link from "next/link";
 import AddSiteAssignment from "./addSiteAssignment";
 import Pagination from "@/lib/pagination";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
+import OfficeQRCode from "@/app/hr/code/code";
 
 const EmployeeSiteManagement = () => {
   const { filter: searchParams, searchParams: siteId } = useCommonContext();
@@ -309,18 +310,11 @@ const EmployeeSiteManagement = () => {
                 noData="No Data found"
               />
             ) : (
-              // show only siteName
-              <Button asChild>
-                <Link
-                  href={`scan?siteName=${
-                    sites.find((s) => s.value === decrypt(filter?.siteId))
-                      ?.label
-                  }`}
-                >
-                  <QrCode />
-                  Scan QR
-                </Link>
-              </Button>
+              <OfficeQRCode
+                className={
+                  "h-auto text-sm bg-black hover:bg-black/90 cursor-pointer"
+                }
+              />
             )}
           </div>
         </CardHeader>

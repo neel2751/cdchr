@@ -172,7 +172,7 @@ export const handleEmploye = async (data, isChecked, id) => {
           <p>Email: ${email}</p>
           <p>Password: Cdc@1234</p>
           <p>Please log in to your account using the following link:</p>
-          <p><a href="https://cdchr.onrender.com/employee">Click here to login</a></p>
+          <p><a href="https://hr.cdc.construction/employee">Click here to login</a></p>
           <p>Thank you for joining us!</p>
           <p>Best regards,</p>
           <p>Hr Management</p>`;

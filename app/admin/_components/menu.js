@@ -232,11 +232,11 @@ export const siteMenu = [
     icon: HomeIcon,
     link: "overview",
   },
-  {
-    name: "Scan QR",
-    icon: ScanQrCodeIcon,
-    link: "scan",
-  },
+  // {
+  //   name: "Scan QR",
+  //   icon: ScanQrCodeIcon,
+  //   link: "scan",
+  // },
   // {
   //   name: "Employee",
   //   icon: TimerIcon,

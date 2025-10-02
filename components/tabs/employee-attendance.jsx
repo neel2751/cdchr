@@ -4,7 +4,9 @@ import { useFetchQuery } from "@/hooks/use-query";
 import { useAvatar } from "../Avatar/AvatarContext";
 import {
   fetchChartData,
+  fetchKpiMetrics,
   fetchOfficeEmployeeClockCount,
+  fetchPunctualityRate,
 } from "@/server/timeOffServer/timeOffServer";
 import { DateRangeFilter } from "../filters/filterDate/filterDateRange";
 import {
@@ -32,16 +34,17 @@ export default function OfficeEmployeeAttendance() {
     },
     queryKey: ["officeEmployeeAttendance", slug, searchParams],
   });
-  // const { data: barData } = useFetchQuery({
-  //   fetchFn: fetchChartData,
-  //   params: {
-  //     employeeId: slug[0],
-  //     fromDate: searchParams?.fromDate || null,
-  //     toDate: searchParams?.toDate || null,
-  //   },
-  //   queryKey: ["chartData", slug, searchParams],
-  // });
-  // const { newData: barChartData } = barData || {};
+  const { data: barData } = useFetchQuery({
+    fetchFn: fetchPunctualityRate,
+    params: {
+      employeeId: slug[0],
+      fromDate: searchParams?.fromDate || null,
+      toDate: searchParams?.toDate || null,
+    },
+    queryKey: ["chartData", slug, searchParams],
+  });
+  const { newData: barChartData } = barData || {};
+  console.log("barChartData", barChartData);
   const { newData: attendanceCount } = data || {};
   return (
     <div className="">

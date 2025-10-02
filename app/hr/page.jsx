@@ -53,7 +53,9 @@ export default function page() {
             </CardDescription>
           </div>
           {/* <ScanQrcodeComponent /> */}
-          <OfficeQRCode />
+          <div className="mb-6">
+            <OfficeQRCode />
+          </div>
         </div>
       </div>
       <HandleVisitor open={open} onOpenChange={setOpen} />

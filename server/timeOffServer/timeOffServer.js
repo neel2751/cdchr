@@ -879,3 +879,631 @@ export async function fetchLiveOfficeClock({
     return { success: false, message: "Something went wrong" };
   }
 }
+
+// KPI Metrics
+export async function fetchKpiMetrics({ employeeId = null }) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const empId = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!empId) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
+    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
+
+    // 1️⃣ Fetch total work hours for the year
+    const [workHoursResult] = await ClockModel.aggregate([
+      {
+        $match: {
+          employeeId: createObjectId(empId),
+          date: { $gte: startOfYear, $lte: endOfYear },
+          isDeleted: false,
+        },
+      },
+      {
+        $addFields: {
+          clockInMinutes: convertTimeToMinutes("clockIn"),
+          clockOutMinutes: convertTimeToMinutes("clockOut"),
+          breakInMinutes: convertTimeToMinutes("breakIn"),
+          breakOutMinutes: convertTimeToMinutes("breakOut"),
+        },
+      },
+      {
+        $addFields: {
+          dailyWorkMinutes: {
+            $subtract: [
+              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
+              {
+                $cond: [
+                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
+                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
+                  0,
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWorkMinutes: { $sum: "$dailyWorkMinutes" },
+        },
+      },
+    ]);
+
+    const totalWorkHours = workHoursResult
+      ? Math.floor(workHoursResult.totalWorkMinutes / 60) +
+        ":" +
+        String(workHoursResult.totalWorkMinutes % 60).padStart(2, "0")
+      : "0:00";
+
+    // 2️⃣ Fetch total leave days taken this year
+    const leaveCount = await OfficeEmployeeModel.aggregate([
+      { $match: { _id: createObjectId(empId) } },
+      {
+        $lookup: {
+          from: "leaverequests",
+          let: { eid: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$eid"] },
+                    { $in: ["$leaveStatus", ["Approved"]] },
+                    {
+                      $or: [
+                        {
+                          $and: [
+                            {
+                              $gte: [
+                                { $toDate: "$leaveStartDate" },
+                                startOfYear,
+                              ],
+                            },
+                            {
+                              $lte: [{ $toDate: "$leaveStartDate" }, endOfYear],
+                            },
+                          ],
+                        },
+                        {
+                          $and: [
+                            {
+                              $gte: [{ $toDate: "$leaveEndDate" }, startOfYear],
+                            },
+                            { $lte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
+                          ],
+                        },
+                        {
+                          $and: [
+                            {
+                              $lte: [
+                                { $toDate: "$leaveStartDate" },
+                                startOfYear,
+                              ],
+                            },
+                            { $gte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                leaveStartDate: { $toDate: "$leaveStartDate" },
+                leaveEndDate: { $toDate: "$leaveEndDate" },
+              },
+            },
+          ],
+          as: "leaves",
+        },
+      },
+      { $unwind: "$leaves" },
+      {
+        $addFields: {
+          adjustedStartDate: {
+            $cond: [
+              { $lt: ["$leaves.leaveStartDate", startOfYear] },
+              startOfYear,
+              "$leaves.leaveStartDate",
+            ],
+          },
+          adjustedEndDate: {
+            $cond: [
+              { $gt: ["$leaves.leaveEndDate", endOfYear] },
+              endOfYear,
+              "$leaves.leaveEndDate",
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          leaveDaysCount: {
+            $add: [
+              {
+                $dateDiff: {
+                  startDate: "$adjustedStartDate",
+                  endDate: "$adjustedEndDate",
+                  unit: "day",
+                },
+              },
+              1,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalLeaveDays: { $sum: "$leaveDaysCount" },
+        },
+      },
+    ]);
+    const totalLeaveDays = leaveCount[0]?.totalLeaveDays || 0;
+    return {
+      success: true,
+      data: JSON.stringify({
+        totalWorkHours,
+        totalLeaveDays,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching KPI metrics:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+
+// Punctuality Rate KPI
+export async function fetchPunctualityRate({ employeeId = null }) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const empId = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!empId) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
+    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
+    const gracePeriodMinutes = 5; // 15 minutes grace period
+
+    // Fetch total work days and late days for the year
+    const [punctualityResult] = await ClockModel.aggregate([
+      {
+        $match: {
+          employeeId: createObjectId(empId),
+          date: { $gte: startOfYear, $lte: endOfYear },
+          isDeleted: false,
+        },
+      },
+      {
+        $addFields: {
+          // Convert the "HH:mm" clockIn string to minutes from midnight
+          // Assumes a start time of 9:00 AM (540 minutes from midnight)
+          clockInMinutes: {
+            $add: [
+              { $multiply: [{ $toInt: { $substr: ["$clockIn", 0, 2] } }, 60] },
+              { $toInt: { $substr: ["$clockIn", 3, 2] } },
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          // Compare the clockIn time in minutes to the scheduled start time (e.g., 9:00 AM) plus a grace period
+          isLate: {
+            $gt: [
+              "$clockInMinutes",
+              540 + gracePeriodMinutes, // 9:00 AM is 540 minutes from midnight
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWorkDays: { $sum: 1 },
+          totalLateDays: { $sum: { $cond: ["$isLate", 1, 0] } },
+        },
+      },
+    ]);
+
+    const totalWorkDays = punctualityResult?.totalWorkDays || 0;
+    const totalLateDays = punctualityResult?.totalLateDays || 0;
+
+    const punctualityRate =
+      totalWorkDays === 0
+        ? 0
+        : Math.round(((totalWorkDays - totalLateDays) / totalWorkDays) * 100);
+
+    console.log("Punctuality Rate Calculation:", {
+      totalWorkDays,
+      totalLateDays,
+      punctualityRate,
+    });
+
+    return {
+      success: true,
+      data: JSON.stringify({
+        totalWorkDays,
+        totalLateDays,
+        punctualityRate,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching punctuality rate:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+
+// Average Daily Hours KPI
+export async function fetchAverageDailyHours({ employeeId = null }) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const empId = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!empId) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
+    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
+
+    // Fetch total work minutes and work days for the year
+    const [averageResult] = await ClockModel.aggregate([
+      {
+        $match: {
+          employeeId: createObjectId(empId),
+          date: { $gte: startOfYear, $lte: endOfYear },
+          isDeleted: false,
+        },
+      },
+      {
+        $addFields: {
+          clockInMinutes: convertTimeToMinutes("clockIn"),
+          clockOutMinutes: convertTimeToMinutes("clockOut"),
+          breakInMinutes: convertTimeToMinutes("breakIn"),
+          breakOutMinutes: convertTimeToMinutes("breakOut"),
+        },
+      },
+      {
+        $addFields: {
+          dailyWorkMinutes: {
+            $subtract: [
+              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
+              {
+                $cond: [
+                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
+                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
+                  0,
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWorkMinutes: { $sum: "$dailyWorkMinutes" },
+          totalWorkDays: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const totalWorkMinutes = averageResult?.totalWorkMinutes || 0;
+    const totalWorkDays = averageResult?.totalWorkDays || 0;
+
+    const avgDailyMinutes =
+      totalWorkDays === 0 ? 0 : Math.round(totalWorkMinutes / totalWorkDays);
+
+    const avgDailyHours = Math.floor(avgDailyMinutes / 60);
+    const avgDailyRemainingMinutes = avgDailyMinutes % 60;
+    const avgDailyMinutesStr = String(avgDailyRemainingMinutes).padStart(
+      2,
+      "0"
+    );
+    // const avgDailyMinutes = `${avgDailyHours}:${avgDailyMinutesStr}`;
+
+    console.log("Average Daily Hours Calculation:", {
+      totalWorkMinutes,
+      totalWorkDays,
+      avgDailyHours,
+      avgDailyMinutes,
+      avgDailyMinutesStr,
+    });
+    return {
+      success: true,
+      data: JSON.stringify({
+        totalWorkDays,
+        totalWorkMinutes,
+        avgDailyHours,
+        avgDailyMinutes,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching average daily hours:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+
+// Attendance Rate KPI
+export async function fetchAttendanceRate({ employeeId = null }) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const empId = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!empId) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
+    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
+
+    // Fetch total work days from ClockModel
+    const [workDaysResult] = await ClockModel.aggregate([
+      {
+        $match: {
+          employeeId: createObjectId(empId),
+          date: { $gte: startOfYear, $lte: endOfYear },
+          isDeleted: false,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWorkDays: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const totalWorkDays = workDaysResult?.totalWorkDays || 0;
+
+    // Fetch total leave days from OfficeEmployeeModel
+    const leaveCount = await OfficeEmployeeModel.aggregate([
+      { $match: { _id: createObjectId(empId) } },
+      {
+        $lookup: {
+          from: "leaverequests",
+          let: { eid: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$eid"] },
+                    { $in: ["$leaveStatus", ["Approved"]] },
+                    {
+                      $or: [
+                        {
+                          $and: [
+                            {
+                              $gte: [
+                                { $toDate: "$leaveStartDate" },
+                                startOfYear,
+                              ],
+                            },
+                            {
+                              $lte: [{ $toDate: "$leaveStartDate" }, endOfYear],
+                            },
+                          ],
+                        },
+                        {
+                          $and: [
+                            {
+                              $gte: [{ $toDate: "$leaveEndDate" }, startOfYear],
+                            },
+                            { $lte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
+                          ],
+                        },
+                        {
+                          $and: [
+                            {
+                              $lte: [
+                                { $toDate: "$leaveStartDate" },
+                                startOfYear,
+                              ],
+                            },
+                            { $gte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                leaveStartDate: { $toDate: "$leaveStartDate" },
+                leaveEndDate: { $toDate: "$leaveEndDate" },
+              },
+            },
+          ],
+          as: "leaves",
+        },
+      },
+      { $unwind: "$leaves" },
+      {
+        $addFields: {
+          adjustedStartDate: {
+            $cond: [
+              { $lt: ["$leaves.leaveStartDate", startOfYear] },
+              startOfYear,
+              "$leaves.leaveStartDate",
+            ],
+          },
+          adjustedEndDate: {
+            $cond: [
+              { $gt: ["$leaves.leaveEndDate", endOfYear] },
+              endOfYear,
+              "$leaves.leaveEndDate",
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          leaveDaysCount: {
+            $add: [
+              {
+                $dateDiff: {
+                  startDate: "$adjustedStartDate",
+                  endDate: "$adjustedEndDate",
+                  unit: "day",
+                },
+              },
+              1,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalLeaveDays: { $sum: "$leaveDaysCount" },
+        },
+      },
+    ]);
+    const totalLeaveDays = leaveCount[0]?.totalLeaveDays || 0;
+    const totalPossibleDays = totalWorkDays + totalLeaveDays;
+    const attendanceRate =
+      totalPossibleDays === 0
+        ? 0
+        : Math.round((totalWorkDays / totalPossibleDays) * 100);
+    console.log("Attendance Rate Calculation:", {
+      totalWorkDays,
+      totalLeaveDays,
+      totalPossibleDays,
+      attendanceRate,
+    });
+    return {
+      success: true,
+      data: JSON.stringify({
+        totalWorkDays,
+        totalLeaveDays,
+        totalPossibleDays,
+        attendanceRate,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching attendance rate:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+// Overtime Hours KPI - Assuming any hours worked beyond 8 hours a day is considered overtime but we remove break time also
+export async function fetchOvertimeHours({ employeeId = null }) {
+  try {
+    const { props } = await getServerSideProps();
+    const { user } = props?.session || {};
+    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
+    const empId = isAdmin ? decrypt(employeeId) : user?._id;
+    if (!empId) {
+      return { success: false, message: "Invalid employee ID" };
+    }
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
+    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
+
+    // Fetch total overtime minutes for the year
+    const [overtimeResult] = await ClockModel.aggregate([
+      {
+        $match: {
+          employeeId: createObjectId(empId),
+          date: { $gte: startOfYear, $lte: endOfYear },
+          isDeleted: false,
+        },
+      },
+      {
+        $addFields: {
+          clockInMinutes: convertTimeToMinutes("clockIn"),
+          clockOutMinutes: convertTimeToMinutes("clockOut"),
+          breakInMinutes: convertTimeToMinutes("breakIn"),
+          breakOutMinutes: convertTimeToMinutes("breakOut"),
+        },
+      },
+      {
+        $addFields: {
+          dailyWorkMinutes: {
+            $subtract: [
+              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
+              {
+                $cond: [
+                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
+                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
+                  0,
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          overtimeMinutes: {
+            $cond: [
+              { $gt: ["$dailyWorkMinutes", 480] }, // 8 hours = 480 minutes
+              { $subtract: ["$dailyWorkMinutes", 480] },
+              0,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalOvertimeMinutes: { $sum: "$overtimeMinutes" },
+        },
+      },
+    ]);
+
+    const totalOvertimeMinutes = overtimeResult?.totalOvertime
+      ? overtimeResult.totalOvertimeMinutes
+      : 0;
+    const overtimeHours = Math.floor(totalOvertimeMinutes / 60);
+    const overtimeRemainingMinutes = totalOvertimeMinutes % 60;
+    const overtimeMinutesStr = String(overtimeRemainingMinutes).padStart(
+      2,
+      "0"
+    );
+    // const totalOvertime = `${overtimeHours}:${overtimeMinutesStr}`;
+    console.log("Overtime Hours Calculation:", {
+      totalOvertimeMinutes,
+      overtimeHours,
+      overtimeRemainingMinutes,
+      overtimeMinutesStr,
+    });
+    return {
+      success: true,
+      data: JSON.stringify({
+        totalOvertimeMinutes,
+        overtimeHours,
+        overtimeRemainingMinutes,
+      }),
+    };
+  } catch (error) {
+    console.error("Error fetching overtime hours:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}

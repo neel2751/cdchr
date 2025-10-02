@@ -29,8 +29,11 @@ import EmployeeForm from "../officeEmployee/employeeForm";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import Pagination from "@/lib/pagination";
 import Alert from "@/components/alert/alert";
+import { useSession } from "next-auth/react";
 
 const SiteAssign = ({ searchParams }) => {
+  const { data: session } = useSession();
+
   const query = searchParams?.query;
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
@@ -155,10 +158,14 @@ const SiteAssign = ({ searchParams }) => {
             <div className="flex items-center justify-between">
               <SearchDebounce />
               <div>
-                <Button onClick={handleOpen}>
-                  <Plus />
-                  Add
-                </Button>
+                {/* Only SuperAdmin can do  */}
+                {session?.user?.role === "superAdmin" && (
+                  <Button onClick={handleOpen}>
+                    <Plus />
+                    Add
+                  </Button>
+                )}
+
                 <Dialog
                   open={open}
                   onOpenChange={handleClose}
