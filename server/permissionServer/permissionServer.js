@@ -2,6 +2,7 @@
 
 import { connect } from "@/db/db";
 import RoleBasedModel from "@/models/rolebasedModel";
+import { getServerSideProps } from "../session/session";
 
 export async function assignPermission(data, id) {
   try {
@@ -115,5 +116,33 @@ export async function getAllPermission(filterData) {
   } catch (error) {
     console.log(" Error in getAllPermission function", error);
     return { sucess: false, message: "Error fetching permission" };
+  }
+}
+
+export async function checkPermission(data) {
+  try {
+    const permission = data?.permission; // The specific permission to check
+    const { props } = await getServerSideProps();
+    const employeeId = props?.session?.user?._id;
+    const role = props?.session?.user?.role;
+    if (role === "superAdmin") {
+      return {
+        suess: true,
+        message: "Permission fetched successfully",
+        data: true,
+      };
+    }
+    await connect();
+    const user = await RoleBasedModel.findOne({
+      employeeId: employeeId,
+    });
+    return {
+      suess: true,
+      message: "Permission fetched successfully",
+      data: user.permissions.includes(permission),
+    };
+  } catch (error) {
+    console.log(" Error in checkPermission function", error);
+    return { suess: false, message: "Error fetching permission" };
   }
 }

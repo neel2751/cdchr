@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import TableHeaderCom from "@/components/tableStatus/tableHeader";
-import { useFetchSelectQuery } from "@/hooks/use-query";
+import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
 import { useSiteAttendanceSocket } from "@/hooks/useAttendanceSocket";
 import { calculateDuration, calculateTotalPay } from "@/lib/utils";
@@ -64,6 +64,7 @@ import AddSiteAssignment from "./addSiteAssignment";
 import Pagination from "@/lib/pagination";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import OfficeQRCode from "@/app/hr/code/code";
+import { checkPermission } from "@/server/permissionServer/permissionServer";
 
 const EmployeeSiteManagement = () => {
   const { filter: searchParams, searchParams: siteId } = useCommonContext();
@@ -214,6 +215,17 @@ const EmployeeSiteManagement = () => {
     "Total Hour",
     "Break Hour",
   ];
+  // Add conditional headers based on role
+  const { data } = useFetchQuery({
+    fetchFn: checkPermission,
+    params: {
+      permission: "/admin/siteAssignEmployee",
+    },
+    queryKey: ["checkPermission", session?.user?.email],
+  });
+
+  const hasPermission = data?.newData;
+
   if (role === "superAdmin" || role === "admin") {
     commonHeaders.push("Pay", "Move");
     commonHeaders.push("Actions");
@@ -231,9 +243,7 @@ const EmployeeSiteManagement = () => {
             <CardTitle>Time Tracking Dashboard</CardTitle>
             <CardDescription>Current Time</CardDescription>
           </div>
-          {(role === "superAdmin" || role === "admin") && (
-            <AddSiteAssignment queryKey={queryKey} />
-          )}
+          {hasPermission && <AddSiteAssignment queryKey={queryKey} />}
         </CardHeader>
         <CardContent className={"grid grid-cols-5 gap-5"}>
           <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
