@@ -343,9 +343,10 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
 
       const schedule = weekDates.map((date) => {
         const formattedDate = date.toISOString().split("T")[0];
-        const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+        // const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+        const dayName = date.toLocaleDateString("en-GB", { weekday: "short" }); // UK format
 
-        if (dayName === "Sunday") {
+        if (dayName === "Sun") {
           return {
             date: formattedDate,
             day: dayName,
@@ -364,7 +365,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
             ? "Holiday"
             : "OFFICE",
           startTime: "09:00",
-          endTime: "17:00",
+          endTime: "18:00",
         };
       });
 

@@ -9,6 +9,8 @@ import { createObjectId } from "@/lib/mongodb";
 import { decrypt } from "@/lib/algo";
 import { addDays, startOfWeek } from "date-fns";
 import { formatDate, getUKTime } from "@/utils/time";
+import EmployeModel from "@/models/employeModel";
+import ClockRecordModel from "@/models/clockInModel";
 
 export default async function fetchEmployeeWithHoliday() {
   try {
@@ -876,6 +878,188 @@ export async function fetchLiveOfficeClock({
     };
   } catch (error) {
     console.error("Error fetching live office clock data:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+}
+
+/* New FetchLiveOfficeClock function to handle both Employee types After Holiday I have to Start from Here onwards
+  - If employeeId is provided, check which collection they belong to (OfficeEmployee or Employee)
+  - Fetch that single employee with their latest ClockRecord
+  - If no employeeId, fetch all employees from both collections, attach latest ClockRecord, merge results, and paginate in JS
+ */
+export async function fetchLiveClockRecords({
+  siteId = null,
+  employeeId = null,
+  fromDate = null,
+  toDate = null,
+  query = "",
+  page = 1,
+  pageSize = 10,
+}) {
+  try {
+    await connect();
+
+    const today = normalizeDateToUTC(new Date());
+    const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
+    const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
+
+    // helper to build common projection shape
+    const projectClockShape = (employeeTypeLiteral) => ({
+      _id: 0,
+      employeeId: "$_id",
+      name: 1,
+      email: 1,
+      employeeType: employeeTypeLiteral,
+      clockRecordId: { $ifNull: ["$clockRecords._id", null] },
+      clockIn: "$clockRecords.clockIn",
+      clockOut: "$clockRecords.clockOut",
+      breaks: "$clockRecords.breaks",
+      status: "$clockRecords.status",
+      date: "$clockRecords.date",
+      locationType: "$clockRecords.locationType",
+      siteId: "$clockRecords.siteId",
+      overtime: "$clockRecords.overtime",
+      clockInStatus: "$clockRecords.clockInStatus",
+    });
+
+    // If single employee requested -> detect which employee collection contains them
+    if (employeeId) {
+      // try Office first, then Site
+      let employeeModel = null;
+      let employeeType = null;
+
+      const office = await OfficeEmployeeModel.findById(employeeId)
+        .select("_id name email")
+        .lean();
+      if (office) {
+        employeeModel = OfficeEmployeeModel;
+        employeeType = "OfficeEmployee";
+      } else {
+        const site = await EmployeModel.findById(employeeId)
+          .select("_id name email")
+          .lean();
+        if (site) {
+          employeeModel = EmployeModel;
+          employeeType = "Employee";
+        }
+      }
+
+      if (!employeeModel)
+        return { success: false, message: "Employee not found" };
+
+      // aggregate that employee and lookup latest clock record from ClockRecordModel
+      const [record] = await employeeModel.aggregate([
+        { $match: { _id: createObjectId(employeeId) } },
+        {
+          $lookup: {
+            from: ClockRecordModel.collection.name, // unified collection name
+            let: { eid: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$employeeId", "$$eid"] },
+                      { $eq: ["$isDeleted", false] },
+                      { $gte: ["$date", start] },
+                      { $lte: ["$date", end] },
+                      // optional: if siteId provided and you want to filter by site where the clock happened:
+                      ...(siteId
+                        ? [{ $eq: ["$siteId", createObjectId(siteId)] }]
+                        : []),
+                    ],
+                  },
+                },
+              },
+              { $sort: { date: -1, createdAt: -1 } }, // ensure latest
+              { $limit: 1 },
+            ],
+            as: "clockRecords",
+          },
+        },
+        {
+          $unwind: { path: "$clockRecords", preserveNullAndEmptyArrays: true },
+        },
+        { $project: projectClockShape(employeeType) },
+      ]);
+
+      return {
+        success: true,
+        data: JSON.stringify(record || {}),
+        totalCount: record ? 1 : 0,
+      };
+    }
+
+    // Admin view: need to return combined employees of both types with their latest ClockRecord.
+    // Approach: run two pipelines (office + site) then merge in JS and page the result.
+    // This is simpler and safe for small->medium orgs. For huge orgs, consider server-side union & DB-side pagination.
+
+    const queryObj = {};
+    if (query) {
+      queryObj.$or = [
+        { name: { $regex: query, $options: "i" } },
+        { email: { $regex: query, $options: "i" } },
+      ];
+    }
+
+    // pipeline factory to attach latest clock record to each employee doc
+    const buildPipeline = (employeeTypeLiteral) => [
+      { $match: queryObj },
+      {
+        $lookup: {
+          from: ClockRecordModel.collection.name,
+          let: { eid: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$eid"] },
+                    { $eq: ["$isDeleted", false] },
+                    { $gte: ["$date", start] },
+                    { $lte: ["$date", end] },
+                    // optionally filter by siteId if provided
+                    ...(siteId
+                      ? [{ $eq: ["$siteId", createObjectId(siteId)] }]
+                      : []),
+                  ],
+                },
+              },
+            },
+            { $sort: { date: -1, createdAt: -1 } },
+            { $limit: 1 },
+          ],
+          as: "clockRecords",
+        },
+      },
+      { $unwind: { path: "$clockRecords", preserveNullAndEmptyArrays: true } },
+      { $project: projectClockShape(employeeTypeLiteral) },
+    ];
+
+    const [officeRows, siteRows] = await Promise.all([
+      OfficeEmployeeModel.aggregate(buildPipeline("OfficeEmployee")),
+      EmployeModel.aggregate(buildPipeline("SiteEmployee")),
+    ]);
+
+    // Merge both arrays, sort by date (latest record first), but keep employees without clocks at the end
+    const merged = [...officeRows, ...siteRows].sort((a, b) => {
+      const ad = a.date ? new Date(a.date).getTime() : 0;
+      const bd = b.date ? new Date(b.date).getTime() : 0;
+      return bd - ad;
+    });
+
+    const totalCount = merged.length;
+    // apply pagination in JS
+    const skip = (page - 1) * pageSize;
+    const paged = merged.slice(skip, skip + pageSize);
+
+    return {
+      success: true,
+      data: JSON.stringify(paged || []),
+      totalCount,
+    };
+  } catch (error) {
+    console.error("Error fetching live clock records:", error);
     return { success: false, message: "Something went wrong" };
   }
 }

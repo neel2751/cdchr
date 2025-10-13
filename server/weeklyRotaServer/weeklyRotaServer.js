@@ -294,3 +294,61 @@ export async function getWeeklyRotaByWeekStartDate(params) {
     };
   }
 }
+
+// for autofill the we need last week rota so they don't need to fill again and again
+export async function getLastWeekRotaForEmployee(params) {
+  try {
+    if (!params || !params.employeeId) {
+      return { success: false, message: "Employee ID is required" };
+    }
+    const { employeeId } = params;
+    let employee;
+    // Connect to MongoDB
+    await connect();
+    // Fetch the last weekly rota for the employee
+    const pipeline = [
+      {
+        $match: {
+          "attendanceData.employeeId": createObjectId(employeeId),
+          isDeleted: false,
+        },
+      },
+      {
+        $project: {
+          weekStartDate: 1,
+          attendanceData: {
+            $filter: {
+              input: "$attendanceData",
+              as: "attendance",
+              cond: {
+                $eq: ["$$attendance.employeeId", createObjectId(employeeId)],
+              },
+            },
+          },
+        },
+      },
+      {
+        $sort: { weekStartDate: -1 }, // Sort by weekStartDate in descending order
+      },
+      {
+        $limit: 1, // Limit to the most recent document
+      },
+    ];
+    const lastWeekRota = await WeeklyRotaModel.aggregate(pipeline).then(
+      (result) => result[0] // Get the first matching document
+    );
+    if (!lastWeekRota) {
+      return { success: false, message: "No weekly rota found" };
+    }
+    return {
+      success: true,
+      data: JSON.stringify(lastWeekRota),
+    };
+  } catch (error) {
+    console.error("Error in getLastWeekRotaForEmployee:", error);
+    return {
+      success: false,
+      message: "An error occurred while fetching data.",
+    };
+  }
+}

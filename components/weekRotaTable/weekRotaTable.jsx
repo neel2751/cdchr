@@ -23,7 +23,10 @@ import {
   getSelectAttendanceCategory,
   getSelectProjects,
 } from "@/server/selectServer/selectServer";
-import { handleWeeklyRotaWithStatus } from "@/server/weeklyRotaServer/weeklyRotaServer";
+import {
+  getLastWeekRotaForEmployee,
+  handleWeeklyRotaWithStatus,
+} from "@/server/weeklyRotaServer/weeklyRotaServer";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import { Input } from "../ui/input";
@@ -103,62 +106,103 @@ const WeekRotaTable = ({
     );
   };
 
-  const autoFillSchedule = (employeeId) => {
-    setSchedules((prevSchedules) =>
-      prevSchedules.map((schedule) => {
-        if (schedule.employeeId !== employeeId) return schedule;
+  const autoFillSchedule = async (employeeId) => {
+    // we have to call the data from the previous week to get the most common category
+    const response = await getLastWeekRotaForEmployee({
+      employeeId,
+      date: format(currentWeek, "yyyy-MM-dd"),
+    });
+    const data = JSON.parse(response?.data || "{}");
 
-        // Convert the schedule array to a map for easier access by day
-        const scheduleMap = new Map(
-          schedule.schedule.map((entry) => [entry.day, entry])
-        );
-
-        // const mostCommonCategory = findMostCommonCategory(schedule.schedule);
-        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-        const updatedSchedule = days.map((day) => {
-          const existingDay = scheduleMap.get(day);
-          console.log(existingDay);
-
-          // If it's Sunday, always return OFF
-          if (day === "Sun") {
+    const parsedData = data?.attendanceData?.[0]?.schedule || [];
+    console.log("Auto-fill data:", parsedData);
+    if (parsedData.length) {
+      setSchedules((prevSchedules) =>
+        prevSchedules.map((schedule) => {
+          if (schedule.employeeId === employeeId) {
             return {
+              ...schedule,
+              schedule: parsedData.map((entry) => ({
+                ...entry,
+                date: format(
+                  addDays(
+                    currentWeek,
+                    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(
+                      entry.day
+                    )
+                  ),
+                  "yyyy-MM-dd"
+                ),
+                // Ensure Sunday is always OFF
+                category: entry.day === "Sun" ? "OFF" : entry.category,
+                startTime: entry.day === "Sun" ? "00:00" : entry.startTime,
+                endTime: entry.day === "Sun" ? "00:00" : entry.endTime,
+              })),
+            };
+          }
+          return schedule;
+        })
+      );
+      return;
+    } else {
+      setSchedules((prevSchedules) =>
+        prevSchedules.map((schedule) => {
+          if (schedule.employeeId !== employeeId) return schedule;
+
+          // Convert the schedule array to a map for easier access by day
+          const scheduleMap = new Map(
+            schedule.schedule.map((entry) => [entry.day, entry])
+          );
+
+          // const mostCommonCategory = findMostCommonCategory(schedule.schedule);
+          const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+          const updatedSchedule = days.map((day) => {
+            const existingDay = scheduleMap.get(day);
+
+            // If it's Sunday, always return OFF
+            if (day === "Sun") {
+              return {
+                day,
+                category: "OFF",
+                startTime: "00:00",
+                endTime: "00:00",
+                date: format(
+                  addDays(currentWeek, days.indexOf(day)),
+                  "yyyy-MM-dd"
+                ),
+              };
+            }
+
+            // If the day already exists and is OFF or HOLIDAY, return as is
+            if (
+              existingDay?.category === "OFF" ||
+              existingDay?.category === "Holiday"
+            ) {
+              return existingDay;
+            }
+
+            // Otherwise, create a new entry with default values
+            return {
+              ...existingDay,
               day,
-              category: "OFF",
-              startTime: "00:00",
-              endTime: "00:00",
               date: format(
                 addDays(currentWeek, days.indexOf(day)),
                 "yyyy-MM-dd"
               ),
+              category: "OFFICE",
+              startTime: "09:00",
+              endTime: "18:00",
             };
-          }
+          });
 
-          // If the day already exists and is OFF or HOLIDAY, return as is
-          if (
-            existingDay?.category === "OFF" ||
-            existingDay?.category === "Holiday"
-          ) {
-            return existingDay;
-          }
-
-          // Otherwise, create a new entry with default values
           return {
-            ...existingDay,
-            day,
-            date: format(addDays(currentWeek, days.indexOf(day)), "yyyy-MM-dd"),
-            category: "OFFICE",
-            startTime: "09:00",
-            endTime: "17:00",
+            ...schedule,
+            schedule: updatedSchedule,
           };
-        });
-
-        return {
-          ...schedule,
-          schedule: updatedSchedule,
-        };
-      })
-    );
+        })
+      );
+    }
   };
 
   const { mutate: handleSubmit, isPending } = useSubmitMutation({
