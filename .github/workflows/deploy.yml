@@ -1,37 +1,4 @@
-# name: Deploy to Production
-# on:
-#   push:
-#     branches:
-#       - main
-
-# jobs:
-#   deploy:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Checkout code and deploy
-#         uses: appleboy/ssh-action@v0.1.6
-#         with:
-#           host: ${{ secrets.EC2_HOST }}
-#           username: ubuntu
-#           key: ${{ secrets.EC2_KEY }}
-#           script: |
-#             cd /home/ubuntu || exit 1
-#             if [ -d "cdchr" ]; then
-#               cd cdchr
-#               git reset --hard
-#               git clean -fd
-#               git pull origin main
-#             else
-#               git clone https://github.com/neel2751/cdchr.git cdchr
-#               cd cdchr
-#             fi
-#             npm install
-#             npm run build
-#             pm2 restart next-app || pm2 start npm --name "next-app" -- start
-#             pm2 save
-
 name: Deploy to Production
-
 on:
   push:
     branches:
@@ -40,12 +7,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Deploy via SSH
+      - name: Checkout code and deploy
         uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -53,47 +16,84 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             cd /home/ubuntu || exit 1
-
-            # Pull latest code safely
             if [ -d "cdchr" ]; then
               cd cdchr
               git reset --hard
-              git clean -fd -e .env       # Keep .env safe
+              git clean -fd
               git pull origin main
             else
               git clone https://github.com/neel2751/cdchr.git cdchr
               cd cdchr
             fi
-
-            # Aggressive system cleanup to save space
-            sudo apt autoremove --purge -y
-            sudo apt clean
-            sudo rm -rf /tmp/* /var/tmp/*
-            sudo journalctl --vacuum-size=50M
-            sudo truncate -s 0 /var/log/*.log
-
-            # Remove old builds and node_modules
-            rm -rf node_modules .next
-
-            # Install production-only dependencies
             npm install
-
-            # Build project
             npm run build
-
-            # PM2 app management
             pm2 restart next-app || pm2 start npm --name "next-app" -- start
-
-            # Flush PM2 logs to free disk space
-            pm2 flush
-
-            # Ensure PM2 log rotation is installed
-            pm2 install pm2-logrotate || true
-            pm2 set pm2-logrotate:max_size 10M
-            pm2 set pm2-logrotate:retain 5
-
-            # Save PM2 state
             pm2 save
 
-            # Check free space after deploy
-            df -h /
+# name: Deploy to Production
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v3
+
+#       - name: Deploy via SSH
+#         uses: appleboy/ssh-action@v0.1.6
+#         with:
+#           host: ${{ secrets.EC2_HOST }}
+#           username: ubuntu
+#           key: ${{ secrets.EC2_KEY }}
+#           script: |
+#             cd /home/ubuntu || exit 1
+
+#             # Pull latest code safely
+#             if [ -d "cdchr" ]; then
+#               cd cdchr
+#               git reset --hard
+#               git clean -fd -e .env       # Keep .env safe
+#               git pull origin main
+#             else
+#               git clone https://github.com/neel2751/cdchr.git cdchr
+#               cd cdchr
+#             fi
+
+#             # Aggressive system cleanup to save space
+#             sudo apt autoremove --purge -y
+#             sudo apt clean
+#             sudo rm -rf /tmp/* /var/tmp/*
+#             sudo journalctl --vacuum-size=50M
+#             sudo truncate -s 0 /var/log/*.log
+
+#             # Remove old builds and node_modules
+#             rm -rf node_modules .next
+
+#             # Install production-only dependencies
+#             npm install
+
+#             # Build project
+#             npm run build
+
+#             # PM2 app management
+#             pm2 restart next-app || pm2 start npm --name "next-app" -- start
+
+#             # Flush PM2 logs to free disk space
+#             pm2 flush
+
+#             # Ensure PM2 log rotation is installed
+#             pm2 install pm2-logrotate || true
+#             pm2 set pm2-logrotate:max_size 10M
+#             pm2 set pm2-logrotate:retain 5
+
+#             # Save PM2 state
+#             pm2 save
+
+#             # Check free space after deploy
+#             df -h /
