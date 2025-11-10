@@ -1,9 +1,15 @@
 "use server";
-import { createObjectId, withTransaction } from "@/lib/mongodb";
+import {
+  createObjectId,
+  isValidObjectId,
+  withTransaction,
+} from "@/lib/mongodb";
 import ClockModel from "@/models/clockModel";
 import SiteAssignmentModel from "@/models/siteAssignmentModel";
 import SiteClockModel from "@/models/siteClockModel";
 import { getServerSideProps } from "../session/session";
+import ClockRecordModel from "@/models/clockInModel";
+import { connect } from "@/db/db";
 
 export const updateClockManuallyById = async ({
   id = null,
@@ -92,6 +98,96 @@ export const updateClockManuallyById = async ({
   } catch (err) {
     console.log("Error in updateClockManuallyById:", err);
     return { success: false, message: "Failed to update or create clock" };
+  }
+};
+
+export const updateClockManuallyByIdNew = async ({
+  id = null,
+  employeeId,
+  siteId = null,
+  date,
+  clockIn,
+  clockOut,
+  breaks = [], // now supports multiple breaks
+  status,
+  actions = [],
+  employeeType = "site", // 'site' or 'office'
+}) => {
+  try {
+    await connect();
+
+    if (!id && (!employeeId || !date)) {
+      return {
+        success: false,
+        message: "Either Clock ID or (employeeId + date) is required",
+      };
+    }
+
+    if (siteId && !isValidObjectId(siteId)) {
+      return { success: false, message: "Invalid siteId" };
+    }
+
+    const updateFields = {};
+
+    // set individual fields if provided
+    if (clockIn !== undefined) updateFields.clockIn = clockIn;
+    if (clockOut !== undefined) updateFields.clockOut = clockOut;
+    if (status !== undefined) updateFields.status = status;
+    if (breaks?.length > 0) updateFields.breaks = breaks; // full array replace
+
+    if (employeeType) updateFields.employeeType = employeeType;
+
+    const updateQuery = { $set: updateFields };
+    if (actions?.length > 0) {
+      updateQuery.$push = { actions: { $each: actions } };
+    }
+
+    let updatedDoc;
+
+    if (id) {
+      // update by ID directly
+      updatedDoc = await ClockRecordModel.findByIdAndUpdate(
+        createObjectId(id),
+        updateQuery,
+        { new: true }
+      );
+    } else {
+      // update or insert by employeeId + date (+ optional siteId)
+      const normalizedDate = new Date(date);
+      const query = {
+        employeeId: createObjectId(employeeId),
+        date: normalizedDate,
+        ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
+      };
+
+      updatedDoc = await ClockRecordModel.findOneAndUpdate(
+        query,
+        {
+          ...updateQuery,
+          $setOnInsert: {
+            employeeId: createObjectId(employeeId),
+            date: normalizedDate,
+            ...(siteId ? { siteId: createObjectId(siteId) } : {}),
+          },
+        },
+        { new: true, upsert: true }
+      );
+    }
+
+    if (!updatedDoc) {
+      return { success: false, message: "Failed to update or create record" };
+    }
+
+    return {
+      success: true,
+      message: id
+        ? "Clock record updated successfully"
+        : "Clock record created successfully",
+      // data: updatedDoc,
+    };
+  } catch (err) {
+    console.error("Error in updateClockManuallyById:", err);
+    return { success: false, message: "Error updating or creating clock" };
   }
 };
 

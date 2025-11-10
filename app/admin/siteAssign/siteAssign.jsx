@@ -30,6 +30,7 @@ import { useSubmitMutation } from "@/hooks/use-mutate";
 import Pagination from "@/lib/pagination";
 import Alert from "@/components/alert/alert";
 import { useSession } from "next-auth/react";
+import { checkPermission } from "@/server/permissionServer/permissionServer";
 
 const SiteAssign = ({ searchParams }) => {
   const { data: session } = useSession();
@@ -129,6 +130,14 @@ const SiteAssign = ({ searchParams }) => {
   const onSubmit = (data) => {
     handleSubmit(data);
   };
+  const { data: can } = useFetchQuery({
+    fetchFn: checkPermission,
+    params: {
+      permission: "/admin/siteAssign",
+    },
+    queryKey: ["checkPermission"],
+  });
+  const hasPermission = can?.newData;
 
   return (
     <div className="p-4">
@@ -159,7 +168,7 @@ const SiteAssign = ({ searchParams }) => {
               <SearchDebounce />
               <div>
                 {/* Only SuperAdmin can do  */}
-                {session?.user?.role === "superAdmin" && (
+                {hasPermission && (
                   <Button onClick={handleOpen}>
                     <Plus />
                     Add

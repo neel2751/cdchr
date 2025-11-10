@@ -556,6 +556,231 @@ export async function fetchAssignedWithClocks({
   };
 }
 
+export async function fetchAssignedWithClocksNew({
+  siteId = null,
+  employeeId = null,
+  fromDate = null,
+  toDate = null,
+  page = 1,
+  pageSize = 10,
+  query = null,
+  paymentType = null,
+}) {
+  await connect();
+
+  // ✅ Normalize dates
+  const today = normalizeDateToUTC(new Date());
+  const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
+  const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
+
+  // ✅ Build base filter
+  const filter = {};
+  if (siteId && siteId !== "All") {
+    if (!isValidObjectId(siteId)) {
+      return { success: false, message: "Invalid site ID" };
+    }
+    filter.siteId = createObjectId(siteId);
+  }
+
+  // ✅ Base aggregation pipeline
+  const basePipeline = [
+    { $match: filter },
+    { $unwind: "$assignedEmployees" },
+
+    ...(employeeId
+      ? [
+          {
+            $match: {
+              "assignedEmployees.employeeId": createObjectId(employeeId),
+            },
+          },
+        ]
+      : []),
+
+    {
+      $match: {
+        assignDate: { $gte: start, $lte: end },
+      },
+    },
+
+    // 🔍 Dual lookup for both employee types
+    {
+      $lookup: {
+        from: "employes", // ✅ site employees collection
+        localField: "assignedEmployees.employeeId",
+        foreignField: "_id",
+        as: "siteEmp",
+      },
+    },
+    {
+      $lookup: {
+        from: "officeemployes", // ✅ office employees collection
+        localField: "assignedEmployees.employeeId",
+        foreignField: "_id",
+        as: "officeEmp",
+      },
+    },
+
+    // ✅ Merge whichever matched
+    {
+      $addFields: {
+        employee: {
+          $cond: [
+            { $gt: [{ $size: "$officeEmp" }, 0] },
+            { $arrayElemAt: ["$officeEmp", 0] },
+            { $arrayElemAt: ["$siteEmp", 0] },
+          ],
+        },
+        employeeType: {
+          $cond: [{ $gt: [{ $size: "$officeEmp" }, 0] }, "office", "site"],
+        },
+      },
+    },
+    { $unset: ["officeEmp", "siteEmp"] },
+
+    ...(paymentType && paymentType !== "All"
+      ? [{ $match: { "employee.paymentType": paymentType } }]
+      : []),
+
+    ...(query
+      ? [
+          {
+            $match: {
+              $or: [
+                { "employee.firstName": { $regex: query, $options: "i" } },
+                { "employee.lastName": { $regex: query, $options: "i" } },
+              ],
+            },
+          },
+        ]
+      : []),
+
+    // ✅ Lookup from unified "clocks" collection
+    {
+      $lookup: {
+        from: "clockrecords",
+        let: {
+          eid: "$assignedEmployees.employeeId",
+          sid: "$siteId",
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$employeeId", "$$eid"] },
+                  { $eq: ["$isDeleted", false] },
+                  { $gte: ["$date", start] },
+                  { $lte: ["$date", end] },
+                  {
+                    $or: [
+                      { $eq: ["$siteId", "$$sid"] },
+                      {
+                        $and: [
+                          { $eq: ["$$sid", null] },
+                          { $eq: ["$siteId", null] },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $sort: { date: -1 } },
+          { $limit: 1 },
+        ],
+        as: "clockRecord",
+      },
+    },
+    { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
+
+    // ✅ Join site info
+    {
+      $lookup: {
+        from: "projectsites",
+        localField: "siteId",
+        foreignField: "_id",
+        as: "site",
+      },
+    },
+    { $unwind: "$site" },
+
+    // ✅ Final projection
+    {
+      $project: {
+        _id: 1,
+        assignDate: 1,
+        siteId: "$site._id",
+        siteName: "$site.siteName",
+
+        employeeId: "$assignedEmployees.employeeId",
+        employeeType: 1,
+        firstName: {
+          $cond: [
+            { $eq: ["$employeeType", "office"] },
+            "$employee.name",
+            "$employee.firstName",
+          ],
+        },
+        lastName: {
+          $cond: [
+            { $eq: ["$employeeType", "office"] },
+            "", // office employees don't have lastName
+            "$employee.lastName",
+          ],
+        },
+        payRate: "$employee.payRate",
+        paymentType: "$employee.paymentType",
+
+        isLocked: "$assignedEmployees.isLocked",
+        assignedAt: "$assignedEmployees.assignedAt",
+
+        // ✅ Clock data
+        clockRecordId: { $ifNull: ["$clockRecord._id", null] },
+        date: { $ifNull: ["$clockRecord.date", null] },
+        clockIn: { $ifNull: ["$clockRecord.clockIn", null] },
+        clockOut: { $ifNull: ["$clockRecord.clockOut", null] },
+        breaks: { $ifNull: ["$clockRecord.breaks", []] },
+      },
+    },
+  ];
+
+  // ✅ Pagination facet
+  const pipeline = [
+    {
+      $facet: {
+        data: [
+          ...basePipeline,
+          { $skip: (page - 1) * pageSize },
+          { $limit: pageSize },
+        ],
+        totalCount: [...basePipeline, { $count: "count" }],
+      },
+    },
+    {
+      $addFields: {
+        total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
+      },
+    },
+    {
+      $project: {
+        data: 1,
+        total: 1,
+      },
+    },
+  ];
+
+  // ✅ Run aggregation
+  const [result] = await SiteAssignmentModel.aggregate(pipeline);
+
+  return {
+    success: true,
+    data: JSON.stringify(result?.data || []),
+    totalCount: result?.total || 0,
+  };
+}
+
 export const canEmployeeClockToday = async () => {
   try {
     const { props } = await getServerSideProps();

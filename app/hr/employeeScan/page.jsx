@@ -2,7 +2,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
-import { storeClockTime } from "@/server/2FAServer/qrcodeServer";
+import {
+  storeClockTime,
+  storeClockTimeNew,
+} from "@/server/2FAServer/qrcodeServer";
 import { io } from "socket.io-client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";

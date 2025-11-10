@@ -67,7 +67,10 @@ export const getSelectProjects = async () => {
     employeeId: employeeId,
   });
   const permissions = roles?.permissions || [];
-  const canViewAllProjects = permissions.includes("/admin/employee");
+  const permissionsStatic = ["/admin/employee", "/admin/siteAssign"];
+  const canViewAllProjects = permissions.some((permission) =>
+    permissionsStatic.includes(permission)
+  );
 
   if (role === "superAdmin" || role === "admin" || canViewAllProjects) {
     return getAllProjects();
@@ -212,7 +215,7 @@ export const getSelectOfficeEmployee = async () => {
 export const getSelectEmployee = async () => {
   try {
     // await connect();
-    const roles = await EmployeModel.aggregate(
+    const employee = await EmployeModel.aggregate(
       [
         {
           $match: { delete: false, isActive: true },
@@ -232,6 +235,29 @@ export const getSelectEmployee = async () => {
       ]
       // { allowDiskUse: true }
     ).exec();
+
+    const officeEmployee = await OfficeEmployeeModel.aggregate(
+      [
+        {
+          $match: { delete: false, isActive: true },
+        },
+        {
+          $project: {
+            _id: 0,
+            value: "$_id",
+            label: "$name",
+          },
+        },
+        {
+          $sort: {
+            label: 1,
+          },
+        },
+      ]
+      // { allowDiskUse: true }
+    ).exec();
+    const roles = [...employee, ...officeEmployee];
+
     if (!roles || roles.length === 0) {
       return { success: false, message: "No Data Found" };
     } else {

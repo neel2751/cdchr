@@ -1,5 +1,8 @@
 import { normalizeDateToUTC } from "@/lib/formatDate";
-import { updateClockManuallyById } from "@/server/timeOffServer/updateClockServer";
+import {
+  updateClockManuallyById,
+  updateClockManuallyByIdNew,
+} from "@/server/timeOffServer/updateClockServer";
 import { getUKTime } from "@/utils/time";
 import { toast } from "sonner";
 
@@ -94,5 +97,115 @@ export const handleTimeAction = async ({
     payload.actions = actions;
   }
   const result = await updateClockManuallyById(payload);
+  return result;
+};
+
+export const handleTimeActionNew = async ({
+  clockId = null,
+  employeeId,
+  siteId = null,
+  actionType = null,
+  manualTimes = null,
+  employeeType,
+  currentBreaks = [], // pass current breaks from UI if needed
+}) => {
+  const now = getUKTime({ format: "HH:mm" });
+  const fullDate = new Date();
+  const date = normalizeDateToUTC(new Date());
+
+  const payload = {
+    id: clockId,
+    employeeId,
+    siteId,
+    date,
+    actions: [],
+    employeeType,
+  };
+
+  // Manual times
+  if (manualTimes) {
+    if (manualTimes.clockIn) {
+      payload.clockIn = manualTimes.clockIn;
+      payload.actions.push({
+        action: "clockIn",
+        time: fullDate,
+        source: "manual",
+      });
+    }
+    if (manualTimes.clockOut) {
+      payload.clockOut = manualTimes.clockOut;
+      payload.actions.push({
+        action: "clockOut",
+        time: fullDate,
+        source: "manual",
+      });
+    }
+    if (manualTimes.breaks?.length) {
+      payload.breaks = manualTimes.breaks;
+      payload.actions.push({
+        action: "breaksUpdated",
+        time: fullDate,
+        source: "manual",
+      });
+    }
+  }
+
+  // Quick actions
+  else if (actionType) {
+    const updatedBreaks = [...currentBreaks]; // clone existing breaks
+
+    switch (actionType) {
+      case "clockIn":
+        payload.clockIn = now;
+        payload.status = "checked-in";
+        break;
+      case "breakIn":
+        // append a new break object
+        updatedBreaks.push({ breakIn: now, breakOut: null });
+        payload.breaks = updatedBreaks;
+        payload.status = "on-break";
+        break;
+      case "breakOut":
+        // find last break without breakOut
+        const lastBreakIndex = updatedBreaks
+          .map((b) => b.breakOut === null)
+          .lastIndexOf(true);
+        if (lastBreakIndex >= 0) {
+          updatedBreaks[lastBreakIndex].breakOut = now;
+        } else {
+          // if no break exists, push a new one (optional fallback)
+          updatedBreaks.push({ breakIn: null, breakOut: now });
+        }
+        payload.breaks = updatedBreaks;
+        payload.status = "break-ended";
+        break;
+      case "clockOut":
+        payload.clockOut = now;
+        payload.status = "checked-out";
+        break;
+      default:
+        toast.error("⚠️ Invalid action type");
+        return;
+    }
+
+    payload.actions.push({
+      action: actionType,
+      time: fullDate,
+      source: "manual",
+    });
+  } else {
+    toast.error("⚠️ Must provide either manualTimes or actionType");
+    return;
+  }
+
+  // console.log("Payload for clock update:", payload);
+  // return;
+
+  // Call backend
+  const result = await updateClockManuallyByIdNew(payload);
+
+  if (result.success) toast.success(`✅ ${result.message}`);
+  else toast.error(`❌ ${result.message}`);
+
   return result;
 };

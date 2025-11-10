@@ -127,7 +127,7 @@ export async function checkPermission(data) {
     const role = props?.session?.user?.role;
     if (role === "superAdmin") {
       return {
-        suess: true,
+        success: true,
         message: "Permission fetched successfully",
         data: true,
       };
@@ -137,12 +137,12 @@ export async function checkPermission(data) {
       employeeId: employeeId,
     });
     return {
-      suess: true,
+      success: true,
       message: "Permission fetched successfully",
       data: user.permissions.includes(permission),
     };
   } catch (error) {
     console.log(" Error in checkPermission function", error);
-    return { suess: false, message: "Error fetching permission" };
+    return { success: false, message: "Error fetching permission" };
   }
 }

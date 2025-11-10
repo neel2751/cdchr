@@ -245,6 +245,7 @@ import { useFetchQuery } from "@/hooks/use-query";
 import {
   canEmployeeClockToday,
   fetchAssignedWithClocks,
+  fetchAssignedWithClocksNew,
 } from "@/server/siteAssignmentServer/siteAssignmentServer";
 import { ScannerDialog } from "../hr/employeeScan/page";
 import { io } from "socket.io-client";
@@ -270,7 +271,7 @@ export default function SiteEmployeeScanner() {
   const fetchAttendance = async () => {
     if (employeeId && siteId) {
       try {
-        const res = await fetchAssignedWithClocks({ employeeId, siteId });
+        const res = await fetchAssignedWithClocksNew({ employeeId, siteId });
         setAttendanceData(JSON.parse(res.data)[0] || {});
       } catch (err) {
         console.error("Failed to fetch attendance:", err);
@@ -287,10 +288,8 @@ export default function SiteEmployeeScanner() {
 
       // 👇 make sure event matches what server emits
       socketRef.current.on("refresh-clock-table", (updatedEmployeeId) => {
-        console.log("Received refresh-clock-table for:");
-        if (String(updatedEmployeeId) === String(employeeId)) {
-          fetchAttendance(); // ✅ refetch and update screen
-        }
+        console.log("Received refresh-clock-table for:", updatedEmployeeId);
+        fetchAttendance(); // ✅ refetch and update screen
       });
 
       socketRef.current.on("disconnect", () =>
@@ -307,12 +306,19 @@ export default function SiteEmployeeScanner() {
     };
   }, [employeeId, siteId]); // 👈 depend on both
 
-  const getAvailableActions = (data) => {
-    if (!data?.clockIn) return ["clockIn"];
-    if (data?.clockIn && !data?.breakIn && !data?.clockOut)
-      return ["breakIn", "clockOut"];
-    if (data?.breakIn && !data?.breakOut) return ["breakOut"];
-    if (data?.breakOut && !data?.clockOut) return ["clockOut"];
+  const getAvailableActions = (status) => {
+    if (!status || !status.clockIn) return ["clockIn"];
+
+    const breaks = status.breaks || [];
+    const lastBreak = breaks.length ? breaks[breaks.length - 1] : null;
+
+    // If currently on break
+    if (lastBreak && !lastBreak.breakOut) return ["breakOut"];
+
+    // If working and not clocked out
+    if (status.clockIn && !status.clockOut) return ["breakIn", "clockOut"];
+
+    // Already clocked out or invalid state
     return [];
   };
 
@@ -342,103 +348,113 @@ export default function SiteEmployeeScanner() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {employeeData?.newData ? (
-            <>
-              <div className="space-y-4">
+          {attendanceData && (
+            <div className="space-y-4">
+              {/* Clock Section */}
+              <div className="flex gap-6 max-w-full">
                 {[
+                  { label: "Clock In", value: attendanceData?.clockIn || "--" },
                   {
-                    name: "Clock",
-                    data: [
-                      {
-                        label: "Clock In",
-                        value: attendanceData?.clockIn || "--",
-                      },
-                      {
-                        label: "Clock Out",
-                        value: attendanceData?.clockOut || "--",
-                      },
-                    ],
+                    label: "Clock Out",
+                    value: attendanceData?.clockOut || "--",
                   },
-                  {
-                    name: "Break",
-                    data: [
-                      {
-                        label: "Break In",
-                        value: attendanceData?.breakIn || "--",
-                      },
-                      {
-                        label: "Break Out",
-                        value: attendanceData?.breakOut || "--",
-                      },
-                    ],
-                  },
-                ].map((clock) => (
-                  <div key={clock?.name} className="flex gap-6 max-w-full">
-                    {clock?.data?.map((item) => (
-                      <div
-                        key={item?.label}
-                        className="bg-gray-200 p-2 px-4 border border-gray-400 space-y-0.5 flex-1 rounded-md"
-                      >
-                        <p className="text-sm text-gray-500 font-medium">
-                          {item?.label}
-                        </p>
-                        <span className="text-base font-medium text-gray-800 tracking-tight">
-                          {item?.value || "--"}
-                        </span>
-                      </div>
-                    ))}
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md"
+                  >
+                    <p className="text-sm text-gray-500 font-medium">
+                      {item.label}
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      {item.value}
+                    </span>
                   </div>
                 ))}
               </div>
-              {/* Button */}
-              <div className="flex gap-2 flex-wrap max-w-full mt-6">
-                {availableActions.map((action) => (
-                  <Button
-                    key={action}
-                    onClick={() => handleActionClick(action)}
-                    className={"flex-1 h-12 text-base"}
-                  >
-                    {action === "clockIn" && (
-                      <>
-                        <Clock4 className="size-4.5" /> Clock In
-                      </>
-                    )}
-                    {action === "breakIn" && (
-                      <>
-                        <Coffee className="size-4.5" />
-                        Break In
-                      </>
-                    )}
-                    {action === "breakOut" && (
-                      <>
-                        <TimerOff className="size-4.5" />
-                        Break Out
-                      </>
-                    )}
-                    {action === "clockOut" && (
-                      <>
-                        <LogOut className="size-4.5" />
-                        Clock Out
-                      </>
-                    )}
-                  </Button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="h-full w-full flex items-center flex-col gap-4">
-              <Image
-                src={"/images/qr.svg"}
-                width={120}
-                height={120}
-                alt="Assign Employee"
-              />
-              <CardTitle className={"text-center"}>
-                Admin Didn't assign site today. <br />
-                Please contact admin
-              </CardTitle>
+
+              {/* Breaks Section */}
+              {attendanceData?.breaks?.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500 font-semibold">Breaks</p>
+                  {attendanceData.breaks.map((br, index) => (
+                    <div key={index} className="flex gap-6 max-w-full">
+                      <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                        <p className="text-sm text-gray-500 font-medium">
+                          Break {index + 1} In
+                        </p>
+                        <span className="text-base font-medium text-gray-800 tracking-tight">
+                          {br.breakIn || "--"}
+                        </span>
+                      </div>
+                      <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                        <p className="text-sm text-gray-500 font-medium">
+                          Break {index + 1} Out
+                        </p>
+                        <span className="text-base font-medium text-gray-800 tracking-tight">
+                          {br.breakOut || "--"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex gap-6 max-w-full">
+                  <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                    <p className="text-sm text-gray-500 font-medium">
+                      Break In
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      --
+                    </span>
+                  </div>
+                  <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                    <p className="text-sm text-gray-500 font-medium">
+                      Break Out
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      --
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 flex-wrap max-w-full mt-6">
+            {attendanceData?.employeeId &&
+              availableActions.map((action) => (
+                <Button
+                  key={action}
+                  onClick={() => {
+                    handleActionClick(action);
+                  }}
+                  className="flex-1 h-12 text-base"
+                >
+                  {action === "clockIn" && (
+                    <>
+                      <Clock4 className="size-4.5 mr-1" /> Clock In
+                    </>
+                  )}
+                  {action === "breakIn" && (
+                    <>
+                      <Coffee className="size-4.5 mr-1" /> Break In
+                    </>
+                  )}
+                  {action === "breakOut" && (
+                    <>
+                      <TimerOff className="size-4.5 mr-1" /> Break Out
+                    </>
+                  )}
+                  {action === "clockOut" && (
+                    <>
+                      <LogOut className="size-4.5 mr-1" /> Clock Out
+                    </>
+                  )}
+                </Button>
+              ))}
+          </div>
         </CardContent>
       </Card>
       <ScannerDialog

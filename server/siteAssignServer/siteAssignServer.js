@@ -5,6 +5,7 @@ import { getEmployeById } from "../officeServer/officeServer";
 import { connect } from "@/db/db";
 import { getServerSideProps } from "../session/session";
 import { createObjectId } from "@/lib/mongodb";
+import { checkPermission } from "../permissionServer/permissionServer";
 
 export async function getAllSiteAssign(filterData) {
   if (!filterData)
@@ -28,8 +29,12 @@ export async function getAllSiteAssign(filterData) {
     const skip = (validPage - 1) * validLimit;
     const query = { isDelete: false };
 
+    const permission = await checkPermission({
+      permission: "/admin/siteAssign",
+    });
+
     // we have to check if the user is admin or superAdmin they can see all the data
-    if (role !== "admin" && role !== "superAdmin") {
+    if (role !== "admin" && role !== "superAdmin" && !permission?.data) {
       // If the user is not admin or superAdmin, filter by employeeId
       // This means they can only see their own assigned sites
       query.roleId = createObjectId(employeeId);
@@ -37,7 +42,7 @@ export async function getAllSiteAssign(filterData) {
     }
 
     // If the user is admin or superAdmin, they can filter by search query
-    if (role === "admin" || role === "superAdmin") {
+    if (role === "admin" || role === "superAdmin" || permission?.data) {
       // If a search query is provided, add it to the query object
       // The search query will match role name, site name, site address, and site type
       if (sanitizedSearch || sanitizedSearch.length < 3)

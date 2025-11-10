@@ -1,6 +1,7 @@
 "use client";
 import {
   fetchAssignedWithClocks,
+  fetchAssignedWithClocksNew,
   fetchLiveSiteClocks,
   fetchLiveSiteClocksOld,
 } from "@/server/siteAssignmentServer/siteAssignmentServer";
@@ -342,7 +343,7 @@ export function useSiteAttendanceSocket({
       toDate,
     }) => {
       try {
-        const res = await fetchAssignedWithClocks({
+        const res = await fetchAssignedWithClocksNew({
           siteId: siteOId,
           employeeId,
           query,

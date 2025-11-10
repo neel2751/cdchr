@@ -11,7 +11,6 @@ import {
   EditIcon,
   XIcon,
   SaveIcon,
-  QrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +46,10 @@ import { getSelectProjects } from "@/server/selectServer/selectServer";
 import { useSiteAttendanceSocket } from "@/hooks/useAttendanceSocket";
 import { calculateDuration, calculateTotalPay } from "@/lib/utils";
 import { format } from "date-fns";
-import { handleTimeAction } from "../_components/handleTimeAction";
+import {
+  handleTimeAction,
+  handleTimeActionNew,
+} from "../_components/handleTimeAction";
 import { toast } from "sonner";
 import { formatCurrency } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
@@ -58,8 +60,6 @@ import { moveEmployeeToNewSite } from "@/server/timeOffServer/updateClockServer"
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { useCommonContext } from "@/context/commonContext";
 import { useSession } from "next-auth/react";
-import { decrypt } from "@/lib/algo";
-import Link from "next/link";
 import AddSiteAssignment from "./addSiteAssignment";
 import Pagination from "@/lib/pagination";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
@@ -93,37 +93,75 @@ const EmployeeSiteManagement = () => {
     fetchFn: getSelectProjects,
   });
 
+  // const handleManualClockUpdate = async (
+  //   id,
+  //   employeeId,
+  //   siteId,
+  //   actionType
+  // ) => {
+  //   const result = await handleTimeAction({
+  //     clockId: id,
+  //     type: "site",
+  //     actionType: actionType,
+  //     employeeId,
+  //     siteId,
+  //   });
+
+  //   if (result?.success) {
+  //     toast.success("Updated successfully");
+  //     // Emit a refresh event to trigger socket update
+  //     if (socket) {
+  //       toast.warning("socket is working");
+  //       // 👇 ADD THIS LINE HERE
+  //       socket.emit("admin-clock-update", employeeId);
+  //     }
+
+  //     // Immediately reload local attendance data to reflect changes in admin UI
+  //     // Assuming you have access to loadData from your hook, or you can
+  //     // use React Query's invalidateQueries instead
+  //     queryClient.invalidateQueries({ queryKey: queryKey });
+  //   } else {
+  //     toast.error("Failed to update clock");
+  //   }
+  // };
+
   const handleManualClockUpdate = async (
     id,
     employeeId,
     siteId,
-    actionType
+    actionType,
+    employeeType,
+    breaks = []
   ) => {
-    const result = await handleTimeAction({
+    // Automatically detect type (no need to pass "site" anymore)
+    const result = await handleTimeActionNew({
       clockId: id,
-      type: "site",
-      actionType: actionType,
+      actionType,
       employeeId,
-      siteId,
+      siteId: siteId || null, // only included if on a site
+      employeeType,
+      currentBreaks: breaks, // pass current breaks from UI if needed
     });
 
     if (result?.success) {
-      toast.success("Updated successfully");
-      // Emit a refresh event to trigger socket update
+      toast.success("✅ Updated successfully");
+
+      // Emit a socket event to notify live dashboards / site tablets
       if (socket) {
-        toast.warning("socket is working");
-        // 👇 ADD THIS LINE HERE
-        socket.emit("admin-clock-update", employeeId);
+        socket.emit("admin-clock-update", {
+          employeeId,
+          siteId: siteId || null,
+          actionType,
+        });
       }
 
-      // Immediately reload local attendance data to reflect changes in admin UI
-      // Assuming you have access to loadData from your hook, or you can
-      // use React Query's invalidateQueries instead
-      queryClient.invalidateQueries({ queryKey: queryKey });
+      // ✅ Refresh local data (React Query or custom hook)
+      queryClient.invalidateQueries({ queryKey });
     } else {
-      toast.error("Failed to update clock");
+      toast.error(`❌ Failed to update clock: ${result?.message || ""}`);
     }
   };
+
   const handleEdit = (employee) => {
     setShowEditForm(employee);
   };
@@ -346,6 +384,9 @@ const EmployeeSiteManagement = () => {
                 <TableBody>
                   {attendanceList?.map((assignment, index) => {
                     const statusConfig = getStatusBadge(assignment?.status);
+                    const lastBreak = assignment?.breaks?.length
+                      ? assignment.breaks[assignment.breaks.length - 1]
+                      : null;
 
                     return (
                       <TableRow key={index}>
@@ -459,6 +500,13 @@ const EmployeeSiteManagement = () => {
                           ) : (
                             "-"
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <BreaksCell
+                            clockRecordId={assignment?.clockRecordId}
+                            showEditForm={showEditForm}
+                            breaks={assignment?.breaks}
+                          />
                         </TableCell>
                         <TableCell>
                           {calculateDuration(
@@ -606,6 +654,7 @@ const EmployeeSiteManagement = () => {
                           )}
                         <TableCell className="px-6 py-4">
                           <div className="flex items-center gap-2">
+                            {/* Clock In */}
                             {!assignment?.clockIn && (
                               <Button
                                 onClick={() =>
@@ -613,7 +662,9 @@ const EmployeeSiteManagement = () => {
                                     assignment?.clockRecordId,
                                     assignment?.employeeId,
                                     assignment?.siteId,
-                                    "clockIn"
+                                    "clockIn",
+                                    assignment?.employeeType,
+                                    assignment?.breaks || [] // pass current breaks
                                   )
                                 }
                                 size="icon"
@@ -623,53 +674,75 @@ const EmployeeSiteManagement = () => {
                               </Button>
                             )}
 
+                            {/* Compute last break */}
+                            {(() => {
+                              const breaks = assignment?.breaks || [];
+                              const lastBreak = breaks.length
+                                ? breaks[breaks.length - 1]
+                                : null;
+
+                              return (
+                                <>
+                                  {/* Break In */}
+                                  {assignment?.clockIn &&
+                                    (!lastBreak || lastBreak.breakOut) && (
+                                      <Button
+                                        onClick={() =>
+                                          handleManualClockUpdate(
+                                            assignment?.clockRecordId,
+                                            assignment?.employeeId,
+                                            assignment?.siteId,
+                                            "breakIn",
+                                            assignment?.employeeType,
+                                            breaks
+                                          )
+                                        }
+                                        size="icon"
+                                        className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                                      >
+                                        <Coffee />
+                                      </Button>
+                                    )}
+
+                                  {/* Break Out */}
+                                  {lastBreak && !lastBreak.breakOut && (
+                                    <Button
+                                      onClick={() =>
+                                        handleManualClockUpdate(
+                                          assignment?.clockRecordId,
+                                          assignment?.employeeId,
+                                          assignment?.siteId,
+                                          "breakOut",
+                                          assignment?.employeeType,
+                                          breaks
+                                        )
+                                      }
+                                      size="icon"
+                                      className="bg-blue-100 text-blue-700 hover:bg-blue-200"
+                                    >
+                                      <Coffee />
+                                    </Button>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            {/* Clock Out */}
                             {assignment?.clockIn &&
                               !assignment?.clockOut &&
-                              !assignment?.breakIn && (
+                              (!assignment?.breaks?.length ||
+                                assignment?.breaks?.[
+                                  assignment.breaks.length - 1
+                                ]?.breakOut) && (
                                 <Button
                                   onClick={() =>
                                     handleManualClockUpdate(
                                       assignment?.clockRecordId,
                                       assignment?.employeeId,
                                       assignment?.siteId,
-                                      "breakIn"
-                                    )
-                                  }
-                                  size="icon"
-                                  className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-                                >
-                                  <Coffee />
-                                </Button>
-                              )}
-
-                            {assignment?.breakIn && !assignment?.breakOut && (
-                              <Button
-                                onClick={() =>
-                                  handleManualClockUpdate(
-                                    assignment?.clockRecordId,
-                                    assignment?.employeeId,
-                                    assignment?.siteId,
-                                    "breakOut"
-                                  )
-                                }
-                                size="icon"
-                                className="bg-blue-100 text-blue-700 hover:bg-blue-200"
-                              >
-                                <Coffee />
-                              </Button>
-                            )}
-
-                            {assignment?.clockIn &&
-                              !assignment?.clockOut &&
-                              (!assignment?.breakIn ||
-                                assignment?.breakOut) && (
-                                <Button
-                                  onClick={() =>
-                                    handleManualClockUpdate(
-                                      assignment?.clockRecordId,
-                                      assignment?.employeeId,
-                                      assignment?.siteId,
-                                      "clockOut"
+                                      "clockOut",
+                                      assignment?.employeeType,
+                                      assignment?.breaks || []
                                     )
                                   }
                                   size="icon"
@@ -695,3 +768,49 @@ const EmployeeSiteManagement = () => {
 };
 
 export default EmployeeSiteManagement;
+
+const BreaksCell = ({ clockRecordId, showEditForm, breaks = [] }) => {
+  if (clockRecordId && showEditForm?.clockRecordId) {
+    // Editable mode: maybe only allow last break editing
+    const lastBreak = breaks[breaks.length - 1] || {};
+    return (
+      <div className="flex gap-2 flex-col">
+        {breaks.map((b, i) => (
+          <div key={i} className="flex gap-1 items-center">
+            <Input
+              type="time"
+              name={`breakIn-${i}`}
+              value={showEditForm?.breaks?.[i]?.breakIn || b.breakIn || ""}
+              onChange={handleChange}
+              className="max-w-max"
+            />
+            <Input
+              type="time"
+              name={`breakOut-${i}`}
+              value={showEditForm?.breaks?.[i]?.breakOut || b.breakOut || ""}
+              onChange={handleChange}
+              className="max-w-max"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Display mode
+  return breaks.length > 0 ? (
+    <div className="flex flex-col gap-1">
+      {breaks.map((b, i) => (
+        <div
+          key={i}
+          className="flex gap-1 items-center text-yellow-600 font-medium"
+        >
+          <Clock className="h-4 w-4" />
+          {b.breakIn || "-"} - {b.breakOut || "-"}
+        </div>
+      ))}
+    </div>
+  ) : (
+    "-"
+  );
+};
