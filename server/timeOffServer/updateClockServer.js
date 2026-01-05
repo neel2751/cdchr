@@ -133,7 +133,37 @@ export const updateClockManuallyByIdNew = async ({
     if (clockIn !== undefined) updateFields.clockIn = clockIn;
     if (clockOut !== undefined) updateFields.clockOut = clockOut;
     if (status !== undefined) updateFields.status = status;
-    if (breaks?.length > 0) updateFields.breaks = breaks; // full array replace
+
+    if (breaks && breaks.length > 0) {
+      for (let i = 0; i < breaks.length; i++) {
+        const b = breaks[i];
+
+        // If breakOut exists but breakIn does NOT → REJECT
+        if (b.breakOut && !b.breakIn) {
+          return {
+            success: false,
+            message: `Break #${i + 1} has breakOut but no breakIn.
+            Please refresh the page and try again.
+            `,
+          };
+        }
+
+        // If both exist, ensure valid times
+        if (b.breakIn && b.breakOut) {
+          if (new Date(b.breakOut) < new Date(b.breakIn)) {
+            return {
+              success: false,
+              message: `Break #${
+                i + 1
+              }: breakOut cannot be earlier than breakIn`,
+            };
+          }
+        }
+      }
+
+      // If all good → allow saving breaks
+      updateFields.breaks = breaks;
+    }
 
     if (employeeType) updateFields.employeeType = employeeType;
 
@@ -141,6 +171,27 @@ export const updateClockManuallyByIdNew = async ({
     if (actions?.length > 0) {
       updateQuery.$push = { actions: { $each: actions } };
     }
+
+    // 👉 ADD DUPLICATE CHECK HERE 👇👇👇
+    if (!id) {
+      const normalizedDate = new Date(date);
+
+      const existingRecord = await ClockRecordModel.findOne({
+        employeeId: createObjectId(employeeId),
+        date: normalizedDate,
+        ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
+        isDeleted: false,
+      });
+
+      if (existingRecord) {
+        return {
+          success: false,
+          message:
+            "Clock record for this employee on this date already exists.",
+        };
+      }
+    }
+    // 👉 END DUPLICATE CHECK
 
     let updatedDoc;
 

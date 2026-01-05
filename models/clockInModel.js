@@ -20,7 +20,7 @@ const clockInSchema = new Schema(
     },
     siteId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Site",
+      ref: "ProjectSite",
     },
     clockIn: {
       type: String,

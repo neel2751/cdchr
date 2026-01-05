@@ -746,14 +746,17 @@ export async function fetchLiveOfficeClock({
     const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
     const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
 
-    // 🔹 If fetching for a single employee
+    // -----------------------------------------------
+    // 1) SINGLE EMPLOYEE VIEW
+    // -----------------------------------------------
     if (employeeId) {
       const [employee] = await OfficeEmployeeModel.aggregate([
         { $match: { _id: createObjectId(employeeId) } },
+
         {
           $lookup: {
-            from: "clocks",
-            let: { eid: "$_id", sid: siteId ? siteId : null },
+            from: "clockrecords",
+            let: { eid: "$_id", sid: siteId ? createObjectId(siteId) : null },
             pipeline: [
               {
                 $match: {
@@ -767,28 +770,30 @@ export async function fetchLiveOfficeClock({
                   },
                 },
               },
-              { $sort: { date: -1 } }, // latest record first
+              { $sort: { date: -1 } },
               { $limit: 1 },
             ],
-            as: "clockRecords",
+            as: "clockRecord",
           },
         },
-        {
-          $unwind: { path: "$clockRecords", preserveNullAndEmptyArrays: true },
-        },
+
+        { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
+
         {
           $project: {
             _id: 0,
             employeeId: "$_id",
             name: 1,
             email: 1,
-            clockRecordId: { $ifNull: ["$clockRecords._id", null] },
-            clockIn: "$clockRecords.clockIn",
-            clockOut: "$clockRecords.clockOut",
-            breakIn: "$clockRecords.breakIn",
-            breakOut: "$clockRecords.breakOut",
-            status: "$clockRecords.status",
-            date: "$clockRecords.date",
+
+            clockRecordId: { $ifNull: ["$clockRecord._id", null] },
+            clockIn: "$clockRecord.clockIn",
+            clockOut: "$clockRecord.clockOut",
+
+            // ⭐ MULTI BREAKS HERE
+            breaks: { $ifNull: ["$clockRecord.breaks", []] },
+
+            date: "$clockRecord.date",
           },
         },
       ]);
@@ -800,7 +805,9 @@ export async function fetchLiveOfficeClock({
       };
     }
 
-    // 🔹 Else → fetch all employees (admin/office view) with pagination
+    // -----------------------------------------------
+    // 2) ALL EMPLOYEES VIEW (PAGINATED)
+    // -----------------------------------------------
     const queryObj = {};
     if (query) {
       queryObj.$or = [
@@ -813,10 +820,11 @@ export async function fetchLiveOfficeClock({
 
     const basePipeline = [
       { $match: queryObj },
+
       {
         $lookup: {
-          from: "clocks",
-          let: { eid: "$_id", sid: siteId ? siteId : null },
+          from: "clockrecords",
+          let: { eid: "$_id", sid: siteId ? createObjectId(siteId) : null },
           pipeline: [
             {
               $match: {
@@ -833,32 +841,47 @@ export async function fetchLiveOfficeClock({
             { $sort: { date: -1 } },
             { $limit: 1 },
           ],
-          as: "clockRecords",
+          as: "clockRecord",
         },
       },
-      { $unwind: { path: "$clockRecords", preserveNullAndEmptyArrays: true } },
+
+      { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
+
       {
         $project: {
-          _id: 0,
           employeeId: "$_id",
           name: 1,
           email: 1,
-          clockRecordId: { $ifNull: ["$clockRecords._id", null] },
-          clockIn: "$clockRecords.clockIn",
-          clockOut: "$clockRecords.clockOut",
-          breakIn: "$clockRecords.breakIn",
-          breakOut: "$clockRecords.breakOut",
-          status: "$clockRecords.status",
-          date: "$clockRecords.date",
+
+          clockRecordId: { $ifNull: ["$clockRecord._id", null] },
+          clockIn: "$clockRecord.clockIn",
+          clockOut: "$clockRecord.clockOut",
+
+          // ⭐ MULTI BREAKS
+          breaks: { $ifNull: ["$clockRecord.breaks", []] },
+
+          date: "$clockRecord.date",
         },
       },
     ];
 
     const pipeline = [
+      ...basePipeline,
+
+      // ⭐ SORT - ACTIVE FIRST
+      {
+        $sort: {
+          clockIn: -1,
+        },
+      },
+
       {
         $facet: {
-          totalCount: [...basePipeline, { $count: "count" }],
-          data: [...basePipeline, { $skip: skip }, { $limit: pageSize }],
+          data: [
+            { $skip: skip }, // Skip for pagination
+            { $limit: pageSize }, // Limit results for pagination
+          ],
+          totalCount: [{ $count: "count" }],
         },
       },
       {

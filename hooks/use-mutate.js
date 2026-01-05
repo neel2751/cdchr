@@ -20,6 +20,7 @@ export const useSubmitMutation = ({
         }
         onClose();
       } else {
+        console.log(`Under this function is ${mutationFn}`, response);
         throw new Error(response?.message);
       }
     },

@@ -25,12 +25,21 @@ export function useUploader() {
   };
 
   const uploadDirect = async (file, path = "uploads", access = "private") => {
-    const { url, key } = await generatePreSignedUrl({
+    const { url, key, success } = await generatePreSignedUrl({
       fileName: generateRandomFileName(file.name),
       contentType: file.type,
       path,
       access,
     });
+
+    if (!success) {
+      return { success: false, error: "Failed to get presigned URL" };
+    }
+
+    console.log("Uploading file directly to URL:", url);
+    console.log("-------------------------------------------------------");
+    console.log("key:", key);
+    console.log("------------------------------------------------------");
 
     try {
       const response = await axios.put(url, file, {

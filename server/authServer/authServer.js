@@ -97,17 +97,23 @@ export const LoginData = async (email, password) => {
   await connect();
 
   // Try OfficeEmployeeModel first
-  let user = await OfficeEmployeeModel.findOne({ email }).lean();
+  let user = await OfficeEmployeeModel.findOne({
+    email,
+    delete: { $ne: true },
+  }).lean();
   let userType = "office";
 
   if (!user) {
     // Then try SiteEmployeeModel
-    user = await EmployeModel.findOne({ email }).lean();
+    user = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
     userType = "site";
   }
 
   if (!user) {
-    user = await OfficeUserModel.findOne({ email }).lean();
+    user = await OfficeUserModel.findOne({
+      email,
+      delete: { $ne: true },
+    }).lean();
     userType = "reception";
   }
 
@@ -117,7 +123,7 @@ export const LoginData = async (email, password) => {
   }
 
   // Check active status
-  if (user.isActive === false || user.delete === true) {
+  if (!user.isActive) {
     return {
       status: false,
       message: "Your account is inactive. Please contact admin.",

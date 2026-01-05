@@ -244,12 +244,11 @@ import { format } from "date-fns";
 import { useFetchQuery } from "@/hooks/use-query";
 import {
   canEmployeeClockToday,
-  fetchAssignedWithClocks,
   fetchAssignedWithClocksNew,
+  fetchClockRecordsTest,
 } from "@/server/siteAssignmentServer/siteAssignmentServer";
-import { ScannerDialog } from "../hr/employeeScan/page";
+import { SiteEmployeeScannerDialog } from "../hr/employeeScan/page";
 import { io } from "socket.io-client";
-import Image from "next/image";
 
 export default function SiteEmployeeScanner() {
   const { data: session } = useSession();
@@ -271,7 +270,7 @@ export default function SiteEmployeeScanner() {
   const fetchAttendance = async () => {
     if (employeeId && siteId) {
       try {
-        const res = await fetchAssignedWithClocksNew({ employeeId, siteId });
+        const res = await fetchClockRecordsTest({ employeeId, siteId });
         setAttendanceData(JSON.parse(res.data)[0] || {});
       } catch (err) {
         console.error("Failed to fetch attendance:", err);
@@ -457,7 +456,7 @@ export default function SiteEmployeeScanner() {
           </div>
         </CardContent>
       </Card>
-      <ScannerDialog
+      <SiteEmployeeScannerDialog
         open={scannerOpen}
         onOpenChange={setScannerOpen}
         action={currentAction}

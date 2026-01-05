@@ -148,14 +148,14 @@ export async function handleSiteAssignManager(data, id) {
   try {
     // check if employed id and  site id exists in database with status true and delete false to already assigned error
     const proId = data?.projectSiteID;
-    const rolId = data?.roleId;
-    const siteData = await isSiteandNameisExists(id, proId);
+    const roleId = data?.roleId;
+    const siteData = await isSiteandNameisExists(id, proId, roleId);
     if (!siteData?.success) return siteData;
     //Getting the site information to check if it exists
     const siteInfo = await getSiteById(proId);
     if (!siteInfo?.success) return siteInfo;
 
-    const employeInfo = await getEmployeById(rolId);
+    const employeInfo = await getEmployeById(roleId);
     if (!employeInfo?.success)
       return { success: false, message: `Failed to retrieve employee` };
 
@@ -164,7 +164,7 @@ export async function handleSiteAssignManager(data, id) {
     const email = info?.email;
 
     // we have to add permission to the site assign manager
-    if (!proId || !rolId || !password || !email)
+    if (!proId || !roleId || !password || !email)
       return { success: false, message: "Required fields are missing" };
 
     if (id) {
@@ -172,7 +172,7 @@ export async function handleSiteAssignManager(data, id) {
         password,
         email,
         projectSiteID: proId,
-        roleId: rolId,
+        roleId: roleId,
         isActive: true,
       };
       const updateAssignData = await SiteAssignManagerModel.updateOne(
@@ -216,33 +216,74 @@ const assignSiteData = async (assignData) => {
   }
 };
 
-const isSiteandNameisExists = async (id, projectSiteID) => {
+// const isSiteandNameisExists = async (id, projectSiteID) => {
+//   try {
+//     if (!id) {
+//       const existingSite = await SiteAssignManagerModel.findOne({
+//         projectSiteID: projectSiteID,
+//         // isActive: true,
+//       });
+//       if (existingSite) {
+//         return { success: false, message: "This Site is Already Assigned." };
+//       }
+//       return { success: true, message: "Site is available for assignment." };
+//     } else {
+//       const existingAssignment = await SiteAssignManagerModel.find({
+//         projectSiteID: projectSiteID, // exclude the current project site
+//         _id: { $ne: id }, // Exclude the current assignment
+//       });
+//       if (existingAssignment.length > 0) {
+//         return {
+//           success: false,
+//           message: "This Site Already Assigned Another Role.",
+//         };
+//       }
+//       return { success: true, message: "Site is available for assignment." };
+//     }
+//   } catch (error) {
+//     console.log("this error come from isSiteandNameisExists", error);
+//     return { success: false, message: "Error checking while Assignment" };
+//   }
+// };
+
+const isSiteandNameisExists = async (id, projectSiteID, roleId) => {
   try {
     if (!id) {
-      const existingSite = await SiteAssignManagerModel.findOne({
-        projectSiteID: projectSiteID,
-        // isActive: true,
+      // Check if this employee is already assigned to this site
+      const existingAssign = await SiteAssignManagerModel.findOne({
+        projectSiteID,
+        roleId, // only check duplicate employee assignment
       });
-      if (existingSite) {
-        return { success: false, message: "This Site is Already Assigned." };
-      }
-      return { success: true, message: "Site is available for assignment." };
-    } else {
-      const existingAssignment = await SiteAssignManagerModel.find({
-        projectSiteID: projectSiteID, // exclude the current project site
-        _id: { $ne: id }, // Exclude the current assignment
-      });
-      if (existingAssignment.length > 0) {
+
+      if (existingAssign) {
         return {
           success: false,
-          message: "This Site Already Assigned Another Role.",
+          message: "Employee already assigned to this site.",
         };
       }
-      return { success: true, message: "Site is available for assignment." };
+
+      // Allow multiple employees for same site
+      return { success: true };
+    } else {
+      // Update case: exclude current ID but check duplication
+      const existingAssign = await SiteAssignManagerModel.findOne({
+        projectSiteID,
+        roleId,
+        _id: { $ne: id },
+      });
+
+      if (existingAssign) {
+        return {
+          success: false,
+          message: "Employee already assigned to this site.",
+        };
+      }
+
+      return { success: true };
     }
-  } catch (error) {
-    console.log("this error come from isSiteandNameisExists", error);
-    return { success: false, message: "Error checking while Assignment" };
+  } catch (err) {
+    console.log("Error in site validation", err);
+    return { success: false, message: "Error checking assignment" };
   }
 };
 

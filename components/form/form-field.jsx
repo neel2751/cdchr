@@ -330,10 +330,14 @@ export const FormDate = ({ field }) => {
                 </div>
                 <Calendar
                   mode="single"
-                  selected={value ? new Date(value) : new Date()}
+                  selected={value ? new Date(value) : undefined}
                   onSelect={(date) => {
                     if (date) {
-                      onChange(formatToDateString(normalizeDateToUTC(date)));
+                      onChange(
+                        date
+                          ? formatToDateString(normalizeDateToUTC(date))
+                          : null
+                      );
                     }
                   }}
                   month={value}
@@ -343,6 +347,16 @@ export const FormDate = ({ field }) => {
                   initialFocus
                   disabled={disabledDateLogic}
                 />
+                {/* Clear button if allow to clear */}
+                {field?.allowClear && value && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => onChange(null)}
+                  >
+                    Clear
+                  </Button>
+                )}
               </PopoverContent>
             </Popover>
           );

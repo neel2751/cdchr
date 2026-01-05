@@ -1,4 +1,4 @@
-import { FormProvider, useForm } from "react-hook-form";
+import { FormProvider } from "react-hook-form";
 import {
   AvatarImageProfile,
   FormCheckbox,
@@ -17,7 +17,6 @@ import { Loader2 } from "lucide-react";
 import { isObjectEmpty } from "@/lib/object";
 import { useEffect, useRef } from "react";
 import useGlobalForm from "@/hooks/useGlobalForm";
-import { MultiDatePicker } from "./formFields";
 
 export function GlobalForm({
   fields,

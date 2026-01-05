@@ -559,34 +559,43 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
 
       // Clock Out
       if (action === "clockOut" && !existingRecord.clockOut) {
-        const hoursSinceClockIn =
-          (currentTime - existingRecord.clockIn) / (1000 * 60 * 60); // in hours
-        if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
-          return {
-            success: false,
-            message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
-          };
-        }
+        // clockIn convert to hours we have time in 13:20 format
+        // const [clockInHours, clockInMinutes] = existingRecord.clockIn
+        //   .split(":")
+        //   .map(Number);
+        // const clockInDate = new Date();
+        // clockInDate.setHours(clockInHours, clockInMinutes, 0, 0);
+        // const [currentHours, currentMinutes] = currentTime
+        //   .split(":")
+        //   .map(Number);
+        // const currentDate = new Date();
+        // currentDate.setHours(currentHours, currentMinutes, 0, 0);
+
+        // const hoursSinceClockIn =
+        //   (currentTime - existingRecord.clockIn) / (1000 * 60 * 60); // in hours
+        // if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
+        //   return {
+        //     success: false,
+        //     message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
+        //   };
+        // }
 
         const standardHours = 8;
-        const overtime = Math.max(0, hoursSinceClockIn - standardHours) * 60; // in minutes
+        // const overtime = Math.max(0, hoursSinceClockIn - standardHours) * 60; // in minutes
 
         await ClockRecordModel.updateOne(
           { employeeId: createObjectId(employeeId), date: date },
           {
             $set: {
               clockOut: currentTime,
-              overtime: overtime,
+              overtime: 0,
               status: "completed",
             },
           }
         );
         return {
           success: true,
-          message:
-            overtime > 0
-              ? `Clocked Out with ${overtime} minutes overtime`
-              : "Clocked Out",
+          message: "Clocked Out",
           employeeId,
         };
       }

@@ -27,6 +27,13 @@ import {
 } from "@/components/ui/card";
 import { Clock4, Coffee, LogOut, TimerOff, Loader2 } from "lucide-react";
 import { format } from "date-fns";
+import {
+  fetchAssignedWithClocks,
+  fetchAssignedWithClocksNew,
+  fetchClockRecordsTest,
+  fetchClockRecordsTestOffice,
+} from "@/server/siteAssignmentServer/siteAssignmentServer";
+import { Badge } from "@/components/ui/badge";
 
 export default function EmployeeClockScanner({ siteId }) {
   const [attendanceData, setAttendanceData] = useState({});
@@ -42,7 +49,8 @@ export default function EmployeeClockScanner({ siteId }) {
     try {
       const response = await fetchLiveOfficeClock({ employeeId });
       if (response?.success) {
-        setAttendanceData(JSON.parse(response.data) || {});
+        const data = JSON.parse(response.data) || {};
+        setAttendanceData(data || {});
       }
     } catch (err) {
       console.error("Failed to fetch attendance:", err);
@@ -59,12 +67,31 @@ export default function EmployeeClockScanner({ siteId }) {
   }, []);
 
   // Determine the **next allowed action**
+  // const getAvailableActions = (status) => {
+  //   console.log("Calculating available actions for status:", status);
+  //   if (!status?.clockIn) return ["clockIn"];
+  //   if (status?.clockIn && !status?.breakIn && !status?.clockOut)
+  //     return ["breakIn", "clockOut"];
+  //   if (status?.breakIn && !status?.breakOut) return ["breakOut"];
+  //   if (status?.breakOut && !status?.clockOut) return ["clockOut"];
+  //   return [];
+  // };
+
   const getAvailableActions = (status) => {
-    if (!status?.clockIn) return ["clockIn"];
-    if (status?.clockIn && !status?.breakIn && !status?.clockOut)
-      return ["breakIn", "clockOut"];
-    if (status?.breakIn && !status?.breakOut) return ["breakOut"];
-    if (status?.breakOut && !status?.clockOut) return ["clockOut"];
+    // if not status or no clockIn yet show only clockIn
+    if (!status) return ["clockIn"];
+    if (!status.clockIn) return ["clockIn"];
+
+    const breaks = status.breaks || [];
+    const lastBreak = breaks.length ? breaks[breaks.length - 1] : null;
+
+    // If currently on break
+    if (lastBreak && !lastBreak.breakOut) return ["breakOut"];
+
+    // If working and not clocked out
+    if (status.clockIn && !status.clockOut) return ["breakIn", "clockOut"];
+
+    // Already clocked out or invalid state
     return [];
   };
 
@@ -105,9 +132,14 @@ export default function EmployeeClockScanner({ siteId }) {
     };
   }, [employeeId]); // 👈 depend on employeeId
 
+  const handleActionClick = (action) => {
+    setSelectedAction(action);
+    setDialogOpen(true);
+  };
+
   return (
     <div className="space-y-4">
-      <Card className={"max-w-sm"}>
+      {/* <Card className={"max-w-sm"}>
         <CardHeader className="space-y-3">
           <CardTitle>
             <div className="flex items-center gap-2">
@@ -177,7 +209,6 @@ export default function EmployeeClockScanner({ siteId }) {
               ))}
             </div>
           )}
-          {/* Button */}
           <div className="flex gap-2 flex-wrap max-w-full mt-6">
             {attendanceData?.employeeId &&
               availableActions?.map((action) => (
@@ -216,9 +247,135 @@ export default function EmployeeClockScanner({ siteId }) {
               ))}
           </div>
         </CardContent>
+      </Card> */}
+
+      <Card className={"max-w-sm mx-auto"}>
+        <CardHeader className="space-y-3">
+          <div className="flex items-center gap-4">
+            <CardTitle>Hi, {session?.user?.name || "Employee"}!</CardTitle>
+            <div className="text-sm">
+              Site:{" "}
+              <Badge className={"bg-purple-100 text-purple-800"}>
+                {attendanceData?.siteName || "N/A"}
+              </Badge>
+            </div>
+          </div>
+          <CardDescription className="flex items-center gap-2">
+            <Clock4 className="size-4" /> Clock{" "}
+            {format(new Date(), "EEEE, d LLL R")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {attendanceData && (
+            <div className="space-y-4">
+              {/* Clock Section */}
+              <div className="flex gap-6 max-w-full">
+                {[
+                  { label: "Clock In", value: attendanceData?.clockIn || "--" },
+                  {
+                    label: "Clock Out",
+                    value: attendanceData?.clockOut || "--",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md"
+                  >
+                    <p className="text-sm text-gray-500 font-medium">
+                      {item.label}
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      {item.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Breaks Section */}
+              {attendanceData?.breaks?.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500 font-semibold">Breaks</p>
+                  {attendanceData.breaks.map((br, index) => (
+                    <div key={index} className="flex gap-6 max-w-full">
+                      <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                        <p className="text-sm text-gray-500 font-medium">
+                          Break {index + 1} In
+                        </p>
+                        <span className="text-base font-medium text-gray-800 tracking-tight">
+                          {br.breakIn || "--"}
+                        </span>
+                      </div>
+                      <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                        <p className="text-sm text-gray-500 font-medium">
+                          Break {index + 1} Out
+                        </p>
+                        <span className="text-base font-medium text-gray-800 tracking-tight">
+                          {br.breakOut || "--"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex gap-6 max-w-full">
+                  <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                    <p className="text-sm text-gray-500 font-medium">
+                      Break In
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      --
+                    </span>
+                  </div>
+                  <div className="bg-gray-200 p-2 px-4 border border-gray-400 flex-1 rounded-md">
+                    <p className="text-sm text-gray-500 font-medium">
+                      Break Out
+                    </p>
+                    <span className="text-base font-medium text-gray-800 tracking-tight">
+                      --
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 flex-wrap max-w-full mt-6">
+            {availableActions.map((action) => (
+              <Button
+                key={action}
+                onClick={() => {
+                  handleActionClick(action);
+                }}
+                className="flex-1 h-12 text-base"
+              >
+                {action === "clockIn" && (
+                  <>
+                    <Clock4 className="size-4.5 mr-1" /> Clock In
+                  </>
+                )}
+                {action === "breakIn" && (
+                  <>
+                    <Coffee className="size-4.5 mr-1" /> Break In
+                  </>
+                )}
+                {action === "breakOut" && (
+                  <>
+                    <TimerOff className="size-4.5 mr-1" /> Break Out
+                  </>
+                )}
+                {action === "clockOut" && (
+                  <>
+                    <LogOut className="size-4.5 mr-1" /> Clock Out
+                  </>
+                )}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
       </Card>
 
-      <ScannerDialog
+      <SiteEmployeeScannerDialog
         siteId={siteId}
         action={selectedAction}
         open={dialogOpen}
@@ -604,6 +761,255 @@ export function ScannerDialog({
     } catch (err) {
       console.error(err);
       toast.error("❌ Scan failed");
+    }
+  };
+
+  // Load available cameras and start default one
+  useEffect(() => {
+    if (!open) return;
+
+    const initScanner = async () => {
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          // start with the back camera if available
+          let backCamera = devices.find((device) =>
+            /back|rear|environment/gi.test(device.label)
+          );
+          if (!backCamera) {
+            backCamera = devices[devices.length - 1]; // fallback to last camera
+          }
+          setCameras(devices);
+          const backCameraIndex = devices.findIndex(
+            (device) => device.id === backCamera.id
+          );
+          setCurrentCameraIndex(backCameraIndex);
+          await startScanner(backCamera.id, backCamera.label);
+        }
+      } catch (err) {
+        console.error("Error fetching cameras:", err);
+        await startScanner(); // fallback
+      }
+    };
+
+    initScanner();
+
+    return () => {
+      stopScanner();
+    };
+  }, [open]);
+
+  // Auto-retry when permission is granted
+  useEffect(() => {
+    if (permissionError) {
+      const retry = setInterval(async () => {
+        try {
+          const devices = await Html5Qrcode.getCameras();
+          if (devices.length > 0) {
+            clearInterval(retry);
+            setPermissionError(false);
+            await startScanner(devices[0].id, devices[0].label);
+          }
+        } catch {
+          // keep retrying silently
+        }
+      }, 2000);
+
+      return () => clearInterval(retry);
+    }
+  }, [permissionError]);
+
+  // Handle camera switching
+  const switchCamera = async () => {
+    if (cameras.length < 2) return;
+    const newIndex = (currentCameraIndex + 1) % cameras.length;
+    setCurrentCameraIndex(newIndex);
+
+    stopScanner();
+    await startScanner(cameras[newIndex].id, cameras[newIndex].label);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-full max-w-md h-[75vh] bg-white rounded-lg shadow-lg p-4 flex flex-col">
+        <DialogHeader>
+          <DialogTitle>
+            Scan QR for
+            {action && action.replace(/([A-Z])/g, " $1")}
+          </DialogTitle>
+          <DialogDescription>
+            Hold your camera over the QR code to continue.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="relative flex-1 w-full mt-4">
+          <div
+            id="qr-reader"
+            className="w-full h-full bg-gray-100 rounded-md"
+          />
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-md">
+              <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
+              <span className="ml-2 text-gray-700">Switching camera...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Show which camera is active */}
+        {activeCameraLabel && (
+          <p className="text-sm text-gray-600 mt-2 text-center">
+            📷 Active Camera:{" "}
+            <span className="font-medium">{activeCameraLabel}</span>
+          </p>
+        )}
+
+        {/* Permission error message */}
+        {permissionError && (
+          <div className="text-red-600 text-sm text-center mt-3 bg-red-50 border border-red-300 p-2 rounded">
+            🚫 Camera access denied. Please allow camera permissions in your
+            browser settings.
+          </div>
+        )}
+
+        <div className="flex gap-2 w-full mt-4">
+          {cameras.length > 1 && (
+            <Button
+              onClick={switchCamera}
+              className="flex-1 bg-indigo-500 hover:bg-indigo-600"
+              disabled={loading}
+            >
+              Switch Camera
+            </Button>
+          )}
+          <Button
+            className="flex-1 bg-red-500 hover:bg-red-600"
+            onClick={() => {
+              stopScanner();
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Site Employee scan Dialog
+export function SiteEmployeeScannerDialog({
+  siteId,
+  action,
+  open,
+  onOpenChange,
+  employeeId,
+}) {
+  const scannerRef = useRef(null);
+  const audioRef = useRef(null);
+  const errorAudioRef = useRef(null);
+  const socketRef = useRef(null);
+  const isProcessingRef = useRef(false);
+
+  const [cameras, setCameras] = useState([]);
+  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+  const [activeCameraLabel, setActiveCameraLabel] = useState("");
+  const [permissionError, setPermissionError] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    audioRef.current = new Audio("/audio/beep.mp3");
+    errorAudioRef.current = new Audio("/audio/error.mp3");
+  }, []);
+
+  const startScanner = async (cameraId = null, label = "") => {
+    setLoading(true);
+    isProcessingRef.current = false; // reset processing flag
+    try {
+      const scanner = new Html5Qrcode("qr-reader");
+      scannerRef.current = scanner;
+
+      const config = { fps: 10, qrbox: 250 };
+
+      if (cameraId) {
+        await scanner.start(
+          { deviceId: { exact: cameraId } },
+          config,
+          handleScan
+        );
+        setActiveCameraLabel(label || "Unknown Camera");
+
+        // ✅ Add notification here
+        toast.success(`Switched to ${label || "camera"}`);
+      } else {
+        await scanner.start({ facingMode: "environment" }, config, handleScan);
+        setActiveCameraLabel("Back Camera");
+
+        // ✅ Add notification here too
+        toast.success("Switched to Back Camera");
+      }
+
+      setPermissionError(false);
+    } catch (err) {
+      console.error("Scanner start failed:", err);
+      if (
+        err?.name === "NotAllowedError" ||
+        err?.message?.includes("permission")
+      ) {
+        setPermissionError(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleScan = async (decodedText) => {
+    if (isProcessingRef.current || !scannerRef.current) return; // ignore if already processing
+    isProcessingRef.current = true; // set processing flag
+
+    try {
+      // This stop the video feed so no more scans can physically happen
+      await stopScanner();
+
+      const response = await storeClockTimeNew(decodedText, siteId, action);
+      if (response.success) {
+        toast.success(`✅ ${action.replace(/([A-Z])/g, " $1")} success`);
+        try {
+          await audioRef.current.play();
+        } catch {}
+
+        if (!socketRef.current) {
+          socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+        }
+
+        socketRef.current.emit("employee-scan-qr", {
+          token: decodedText,
+          employeeId,
+          action,
+        });
+
+        stopScanner();
+        onOpenChange(false);
+      } else {
+        toast.error(response.message || "❌ Scan failed");
+        try {
+          await errorAudioRef.current.play();
+        } catch {}
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("❌ Scan failed");
+    }
+  };
+
+  const stopScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+        scannerRef.current = null;
+      } catch (err) {
+        console.warn("Scanner stop error:", err);
+      }
     }
   };
 

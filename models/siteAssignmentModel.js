@@ -9,7 +9,8 @@ const siteAssignmentSchema = new Schema(
     assignDate: { type: Date, required: true },
     assignedEmployees: [
       {
-        employeeId: { type: ObjectId, required: true, ref: "Employe" },
+        // employeeId: { type: ObjectId, required: true, ref: "Employe" },
+        employeeId: { type: ObjectId, required: true },
         assignedBy: { type: ObjectId },
         assignedAt: { type: Date, default: Date.now },
         isLocked: { type: Boolean, default: false }, // set to true on first clock-in

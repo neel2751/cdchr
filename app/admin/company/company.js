@@ -175,9 +175,120 @@ const Company = ({ searchParams }) => {
             onConfirm={handleStatus}
           />
         </div>
+        {/* <NewDesignCompany /> */}
       </CommonContext.Provider>
     </div>
   );
 };
 
 export default Company;
+
+export const NewDesignCompany = () => {
+  return (
+    <section className="relative grid w-screen overflow-hidden py-32">
+      <div className="container relative z-10 h-full grid-cols-1 items-center justify-center gap-6">
+        <div className="flex flex-col items-center justify-center text-center">
+          <div className="bg-muted-foreground/5 text-muted-foreground mb-10 flex items-center justify-center gap-3 rounded-full p-1 pr-4 text-sm font-medium tracking-tight">
+            <div className="bg-muted-foreground/10 flex items-center gap-3 rounded-full px-4 py-1.5">
+              <span className="inline-block size-2 rounded-full bg-blue-500"></span>
+              <span>We're Hiring</span>
+            </div>
+            <div className="flex items-center gap-2">
+              Join Our Team{" "}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="lucide lucide-arrow-right size-4"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14"></path>
+                <path d="m12 5 7 7-7 7"></path>
+              </svg>
+            </div>
+          </div>
+          <h1 className="max-w-2xl text-5xl font-semibold tracking-tighter lg:text-6xl">
+            Elevate Your Next Project With,
+            <div className="relative w-fit inline-block">
+              <span>Production-Ready</span>
+              <div className="pointer-events-none absolute inset-0 z-0">
+                <div className="absolute inset-0 border border-neutral-800 dark:border-neutral-200"></div>
+                <div className="pointer-events-none absolute">
+                  <svg
+                    stroke="currentColor"
+                    fill="currentColor"
+                    strokeWidth="1"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    viewBox="0 0 16 16"
+                    height="1em"
+                    width="1em"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5 text-blue-500"
+                  >
+                    <path d="M14.082 2.182a.5.5 0 0 1 .103.557L8.528 15.467a.5.5 0 0 1-.917-.007L5.57 10.694.803 8.652a.5.5 0 0 1-.006-.916l12.728-5.657a.5.5 0 0 1 .556.103z"></path>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            Shadcnblocks
+          </h1>
+          <p className="text-muted-foreground mt-10 max-w-lg">
+            Lorem, ipsum dolor sit amet consectetur adipisicing elit. Officiis
+            atque perferendis fugit molestiae quae ad molestias eveniet alias
+          </p>
+          <div className="mt-10 flex w-full flex-col items-center justify-center gap-2">
+            <button
+              data-slot="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&amp;_svg]:pointer-events-none [&amp;_svg:not([class*='size-'])]:size-4 shrink-0 [&amp;_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive bg-primary hover:bg-primary/90 h-9 has-[&gt;svg]:px-3 text-background rounded-2xl px-6 py-6 shadow-[0px_1px_3px_#0000001a,inset_0px_2px_0px_#ffffff40] md:rounded-3xl md:px-7 md:py-7 md:text-base"
+            >
+              <p className="text-background mr-1 text-xl md:mr-3 md:text-2xl">
+                
+              </p>
+              Download for Mac
+            </button>
+            <button
+              data-slot="button"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&amp;_svg]:pointer-events-none [&amp;_svg:not([class*='size-'])]:size-4 shrink-0 [&amp;_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive underline-offset-4 hover:underline h-9 px-4 py-2 has-[&gt;svg]:px-3 text-muted-foreground text-sm"
+            >
+              Download for Windows
+            </button>
+          </div>
+        </div>
+        <div className="rounded-4xl relative mt-10 flex h-[80vh] w-full items-center justify-center overflow-hidden border">
+          <img
+            src="/images/block/guri3/img7.jpeg"
+            alt="hero"
+            className="size-full object-cover"
+          />
+        </div>
+      </div>
+      <div className="absolute inset-0 flex h-full w-full items-center justify-between">
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+        <div className="to-muted/50 h-full w-10 bg-gradient-to-l from-transparent"></div>
+      </div>
+    </section>
+  );
+};

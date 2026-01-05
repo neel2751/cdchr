@@ -149,6 +149,7 @@ export const VISAFIELD = [
     labelText: "End Date",
     type: "date",
     placeholder: "End Date",
+    allowClear: true,
   },
   {
     name: "visaStartDate",

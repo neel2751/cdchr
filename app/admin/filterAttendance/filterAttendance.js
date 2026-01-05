@@ -16,9 +16,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
-import { fetchFilteredAttendanceData } from "@/server/siteAssignmentServer/siteAssignmentServer";
-import { calculateDuration, calculateTotalPay } from "@/lib/utils";
-import { formatCurrency } from "@/utils/time";
+import { fetchFilterClockRecordData } from "@/server/siteAssignmentServer/siteAssignmentServer";
+import { calculateDuration } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
 
@@ -30,7 +29,6 @@ const FilterAttendance = ({ searchParams }) => {
   const [filter, setFilter] = React.useState({
     paymentType: searchParams?.paymentType || "All",
     siteId: searchParams?.siteId || "",
-    employeeType: searchParams?.employeeType || "siteEmployee",
   });
 
   const [date, setDate] = React.useState({
@@ -59,12 +57,11 @@ const FilterAttendance = ({ searchParams }) => {
       query: query || "",
       page: currentPage,
       pageSize: pagePerData,
-      employeeType: filter.employeeType,
       fromDate: format(date.from, "yyyy-MM-dd"),
       toDate: format(date.to, "yyyy-MM-dd"),
     },
     queryKey,
-    fetchFn: fetchFilteredAttendanceData,
+    fetchFn: fetchFilterClockRecordData,
   });
 
   // we have to set the date in query paarams
@@ -81,7 +78,6 @@ const FilterAttendance = ({ searchParams }) => {
       pageSize: pagePerData,
       fromDate,
       toDate,
-      employeeType: filter.employeeType,
     });
 
     window.history.replaceState({}, "", `?${params.toString()}`);
@@ -89,52 +85,64 @@ const FilterAttendance = ({ searchParams }) => {
 
   const { newData, totalCount } = data || {};
 
+  const calculateBreakDuration = (breaks) => {
+    let totalMinutes = 0; // Accumulate all break duration in minutes
+
+    breaks.forEach((b) => {
+      // Ensure both break-in and break-out times exist
+      if (b.breakIn && b.breakOut) {
+        // Parse hours and minutes from the "HH:MM" strings
+        const [inHour, inMinute] = b.breakIn.split(":").map(Number);
+        const [outHour, outMinute] = b.breakOut.split(":").map(Number);
+
+        // Convert times to total minutes from midnight for easy subtraction
+        const totalInMinutes = inHour * 60 + inMinute;
+        const totalOutMinutes = outHour * 60 + outMinute;
+
+        // Calculate the duration of this specific break in minutes
+        const diff = totalOutMinutes - totalInMinutes;
+
+        // Add this break's duration to the total
+        totalMinutes += diff;
+      }
+    });
+
+    // --- New formatting logic starts here ---
+
+    // 1. Calculate final hours and remaining minutes from the totalMinutes
+    const finalHours = Math.floor(totalMinutes / 60);
+    const finalMinutes = totalMinutes % 60;
+
+    // 2. Format both components to ensure they are two digits (e.g., 9 -> "09")
+    //    We use String.padStart(2, '0') for this.
+    const formattedHours = String(finalHours).padStart(2, "0");
+    const formattedMinutes = String(finalMinutes).padStart(2, "0");
+
+    // 3. Return the result in "hh:mm" format
+    return `${formattedHours}:${formattedMinutes}`;
+  };
+
   // we have to send only the data that is required for the table
   const filteredData = React.useMemo(() => {
     if (!newData || newData.length === 0) return [];
     // for office employee we have to show only name, clock in, clock out, break in, break out, total hours, total break;
-    if (filter.employeeType === "officeEmployee") {
-      return newData.map((item) => ({
-        EmployeeName: item?.name,
-        date: item?.date ? format(item?.date, "PPP") : "Not Clocked In",
-        clockIn: item?.clockIn || "00:00",
-        clockOut: item?.clockOut || "00:00",
-        BreakIn: item?.breakIn || "00:00",
-        BreakOut: item?.breakOut || "00:00",
-        TotalHours: calculateDuration(item?.clockIn, item?.clockOut),
-        TotalBreak: calculateDuration(item?.breakIn, item?.breakOut),
-        FinalHours: calculateDuration(
-          calculateDuration(item?.breakIn, item?.breakOut),
-          calculateDuration(item?.clockIn, item?.clockOut)
-        ),
-      }));
-    }
-    if (filter.employeeType === "siteEmployee") {
-      return newData.map((item) => ({
-        EmployeeName: item?.firstName + " " + item?.lastName,
-        PayRate: formatCurrency(item?.payRate),
-        SiteName: item?.siteName,
-        PaymentType: item?.paymentType,
-        AssignDate: format(item?.assignDate, "PPP"),
-        ClockIn: item?.clockIn || "00:00",
-        ClockOut: item?.clockOut || "00:00",
-        BreakIn: item?.breakIn || "00:00",
-        BreakOut: item?.breakOut || "00:00",
-        TotalHours: calculateDuration(item?.clockIn, item?.clockOut),
-        TotalBreak: calculateDuration(item?.breakIn, item?.breakOut),
-        TotalPay:
-          item.clockOut &&
-          formatCurrency(
-            calculateTotalPay(
-              calculateDuration(
-                calculateDuration(item?.breakIn, item?.breakOut),
-                calculateDuration(item?.clockIn, item?.clockOut)
-              ),
-              item?.payRate
-            )
-          ),
-      }));
-    }
+    return newData.map((item) => ({
+      EmployeeName: item?.name,
+      Date: format(item?.date, "PPP"),
+      ClockIn: item?.clockIn || "00:00",
+      ClockOut: item?.clockOut || "00:00",
+      Breaks:
+        item?.breaks
+          .map(
+            (b, index) =>
+              `Break ${index + 1}: ${b.breakIn || "00:00"} - ${
+                b.breakOut || "00:00"
+              }`
+          )
+          .join(" | ") || "No Breaks",
+      WorkHours: calculateDuration(item?.clockIn, item?.clockOut),
+      BreakHours: calculateBreakDuration(item?.breaks),
+    }));
   }, [newData]);
 
   const exportedCSV = () => {
@@ -153,11 +161,7 @@ const FilterAttendance = ({ searchParams }) => {
     link.setAttribute("href", encodedUri);
     link.setAttribute(
       "download",
-      `${format(date.from, "PPP")}-${format(date.to, "PPP")}-${
-        filter.employeeType === "siteEmployee"
-          ? "Site-Employee"
-          : "Office-Employee"
-      }.csv`
+      `${format(date.from, "PPP")}-${format(date.to, "PPP")}.csv`
     );
     document.body.appendChild(link); // Required for FF
     link.click(); // This will download the data file named "attendance_data.csv".
@@ -183,50 +187,36 @@ const FilterAttendance = ({ searchParams }) => {
           <div className={`flex items-center justify-between gap-4`}>
             <SearchDebounce />
             <div className="gap-3 flex">
-              {filter?.employeeType === "siteEmployee" && (
-                <>
-                  <div>
-                    <SelectFilter
-                      value={filter?.paymentType}
-                      frameworks={[
-                        { label: "All", value: "All" },
-                        { label: "Monthly", value: "Monthly" },
-                        { label: "Weekly", value: "Weekly" },
-                      ]}
-                      placeholder={
-                        filter?.paymentType === ""
-                          ? "Payment Type"
-                          : "Select Payment Type"
-                      }
-                      onChange={(e) => setFilter({ ...filter, paymentType: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    {siteData && (
-                      <SelectFilter
-                        value={filter.siteId}
-                        frameworks={[{ label: "All", value: "" }, ...siteData]}
-                        placeholder={
-                          filter.siteId === "" ? "All Sites" : "Select Site"
-                        }
-                        onChange={(e) => setFilter({ ...filter, siteId: e })}
-                        noData="No Data found"
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-              <SelectFilter
-                value={filter?.employeeType}
-                frameworks={[
-                  { label: "Site Employee", value: "siteEmployee" },
-                  { label: "Office Employee", value: "officeEmployee" },
-                ]}
-                placeholder={filter?.employeeType || "Select Payment Type"}
-                onChange={(e) => setFilter({ ...filter, employeeType: e })}
-                noData="No Data found"
-              />
+              <div>
+                <SelectFilter
+                  value={filter?.paymentType}
+                  frameworks={[
+                    { label: "All", value: "All" },
+                    { label: "Monthly", value: "Monthly" },
+                    { label: "Weekly", value: "Weekly" },
+                  ]}
+                  placeholder={
+                    filter?.paymentType === ""
+                      ? "Payment Type"
+                      : "Select Payment Type"
+                  }
+                  onChange={(e) => setFilter({ ...filter, paymentType: e })}
+                  noData="No Data found"
+                />
+              </div>
+              <div>
+                {siteData && (
+                  <SelectFilter
+                    value={filter.siteId}
+                    frameworks={[{ label: "All", value: "" }, ...siteData]}
+                    placeholder={
+                      filter.siteId === "" ? "All Sites" : "Select Site"
+                    }
+                    onChange={(e) => setFilter({ ...filter, siteId: e })}
+                    noData="No Data found"
+                  />
+                )}
+              </div>
               <DatePickerWithRange date={date} setDate={setDate} />
             </div>
           </div>

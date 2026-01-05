@@ -37,7 +37,11 @@ import {
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import TableHeaderCom from "@/components/tableStatus/tableHeader";
 import { useAttendanceSocket } from "@/hooks/useAttendanceSocket";
-import { calculateDuration } from "@/lib/utils";
+import {
+  calculateDuration,
+  durationToMinutes,
+  minutesToHHMM,
+} from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,13 +49,15 @@ import { Input } from "@/components/ui/input";
 import SearchDebounce from "@/components/search/searchDebounce";
 import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { useSession } from "next-auth/react";
-import { handleTimeAction } from "../_components/handleTimeAction";
+import { handleTimeActionNew } from "../_components/handleTimeAction";
 import Link from "next/link";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
+import { BreaksCell } from "../siteAssignEmployee/test";
 
 const EmployeeSiteManagement = ({ searchParams }) => {
   const queryClient = useQueryClient();
   const [showEditForm, setShowEditForm] = useState({});
+  const [errors, setErrors] = useState({});
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page) || 1;
   const pageSize = parseInt(searchParams?.pageSize) || 10;
@@ -67,12 +73,18 @@ const EmployeeSiteManagement = ({ searchParams }) => {
     query,
   });
 
-  const handleManualClockUpdate = async (id, employeeId, actionType) => {
-    const result = await handleTimeAction({
-      clockId: id,
-      type: "office",
-      actionType: actionType,
+  const handleManualClockUpdate = async (
+    recordId,
+    employeeId,
+    actionType,
+    breaks
+  ) => {
+    const result = await handleTimeActionNew({
+      clockId: recordId,
       employeeId,
+      actionType,
+      employeeType: "OfficeEmployee",
+      currentBreaks: breaks,
     });
 
     if (result?.success) {
@@ -92,16 +104,55 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       toast.error("Failed to update clock");
     }
   };
-  const handleEdit = (employee) => {
-    setShowEditForm(employee);
-  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setShowEditForm((preForm) => ({
-      ...preForm,
-      [name]: value,
-    }));
+
+    setShowEditForm((prevForm) => {
+      const newForm = { ...prevForm };
+
+      // Update the value
+      if (name.startsWith("breakIn-") || name.startsWith("breakOut-")) {
+        const [type, index] = name.split("-");
+        const idx = Number(index);
+
+        if (!newForm.breaks) newForm.breaks = [];
+        if (!newForm.breaks[idx]) newForm.breaks[idx] = {};
+
+        newForm.breaks[idx][type] = value;
+      } else {
+        newForm[name] = value;
+      }
+
+      return newForm;
+    });
+
+    // Validation: check breakIn < breakOut
+    setErrors((prevErrors) => {
+      const newErrors = { ...prevErrors };
+      if (name.startsWith("breakIn-") || name.startsWith("breakOut-")) {
+        const [type, index] = name.split("-");
+        const idx = Number(index);
+
+        const breakIn = showEditForm.breaks?.[idx]?.breakIn || "";
+        const breakOut = showEditForm.breaks?.[idx]?.breakOut || "";
+
+        if (breakIn && breakOut) {
+          const [h1, m1] = breakIn.split(":").map(Number);
+          const [h2, m2] = breakOut.split(":").map(Number);
+
+          if (h2 * 60 + m2 < h1 * 60 + m1) {
+            newErrors[`break-${idx}`] =
+              "Break Out cannot be earlier than Break In";
+          } else {
+            delete newErrors[`break-${idx}`];
+          }
+        } else {
+          delete newErrors[`break-${idx}`];
+        }
+      }
+      return newErrors;
+    });
   };
 
   const handleSave = async () => {
@@ -109,20 +160,20 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       _id: id,
       clockIn,
       clockOut,
-      breakIn,
-      breakOut,
+      breaks,
       employeeId,
       clockRecordId,
     } = showEditForm;
-    const result = await handleTimeAction({
+
+    const result = await handleTimeActionNew({
       clockId: clockRecordId || id,
-      type: "office",
+      employeeId,
       manualTimes: {
         clockIn,
         clockOut,
-        breakIn,
-        breakOut,
+        breaks,
       },
+      employeeType: "OfficeEmployee",
     });
     if (result?.success) {
       toast.success("Updated successfully");
@@ -273,284 +324,270 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                 <TableHeaderCom tableHead={commonHeaders} />
                 <TableBody>
                   {attendanceList?.map((assignment, index) => {
-                    const statusConfig = getStatusBadge(assignment?.status);
+                    // compute status
+                    const status = !assignment.clockIn
+                      ? "assigned"
+                      : assignment.clockIn && !assignment.clockOut
+                      ? "checked-in"
+                      : "clocked-out";
+
+                    const statusConfig = getStatusBadge(status);
+
+                    // compute last break
+                    const breaks = assignment?.breaks || [];
+                    const lastBreak = breaks.length
+                      ? breaks[breaks.length - 1]
+                      : null;
+
+                    // calculate total break hours
+                    const breakMinutes = breaks.reduce((sum, br) => {
+                      if (br.breakIn && br.breakOut) {
+                        return sum + durationToMinutes(br.breakIn, br.breakOut);
+                      }
+                      return sum;
+                    }, 0);
+
+                    const breakHours = minutesToHHMM(breakMinutes);
 
                     return (
                       <TableRow key={index}>
                         <TableCell>{assignment?.name}</TableCell>
                         <TableCell>
+                          {assignment?.employeeType === "Employee"
+                            ? "Employee"
+                            : "Office Employee"}
+                        </TableCell>
+
+                        {/* STATUS */}
+                        <TableCell>
                           <Badge className={statusConfig?.color}>
                             <div className="flex items-center gap-1">
-                              {assignment?.status === "checked-in" && (
+                              {status === "checked-in" && (
                                 <CheckCircle className="h-3 w-3" />
                               )}
-
-                              {assignment?.status === "clocked-out" && (
+                              {status === "clocked-out" && (
                                 <CheckCircle className="h-3 w-3" />
                               )}
-
-                              {assignment?.status === "assigned" && (
+                              {status === "assigned" && (
                                 <Clock className="h-3 w-3" />
                               )}
-
-                              {statusConfig?.text || "None"}
+                              {statusConfig?.text}
                             </div>
                           </Badge>
                         </TableCell>
+
+                        {/* CLOCK IN */}
                         <TableCell>
-                          {assignment?.clockRecordId &&
-                          assignment?.clockRecordId ===
-                            showEditForm.clockRecordId ? (
+                          {assignment.clockRecordId ===
+                          showEditForm.clockRecordId ? (
                             <Input
                               type="time"
                               name="clockIn"
-                              value={
-                                showEditForm?.clockIn || assignment?.clockIn
-                              }
-                              className={"max-w-max"}
+                              value={showEditForm.clockIn || assignment.clockIn}
                               onChange={handleChange}
                             />
-                          ) : assignment?.clockIn ? (
+                          ) : assignment.clockIn ? (
                             <div className="flex items-center gap-1 text-green-600 font-medium">
                               <Clock className="h-4 w-4" />
-
-                              {assignment?.clockIn}
+                              {assignment.clockIn}
                             </div>
                           ) : (
                             "-"
                           )}
                         </TableCell>
+
+                        {/* CLOCK OUT */}
                         <TableCell>
-                          {assignment?.clockRecordId &&
-                          assignment?.clockRecordId ===
-                            showEditForm.clockRecordId ? (
+                          {assignment.clockRecordId ===
+                          showEditForm.clockRecordId ? (
                             <Input
                               type="time"
                               name="clockOut"
                               value={
-                                showEditForm.clockOut || assignment?.clockOut
+                                showEditForm.clockOut || assignment.clockOut
                               }
-                              className={"max-w-max"}
                               onChange={handleChange}
                             />
-                          ) : assignment?.clockOut ? (
+                          ) : assignment.clockOut ? (
                             <div className="flex items-center gap-1 text-blue-600 font-medium">
                               <Clock className="h-4 w-4" />
-                              {assignment?.clockOut}
+                              {assignment.clockOut}
                             </div>
                           ) : (
                             "-"
                           )}
                         </TableCell>
-                        <TableCell>
-                          {assignment?.clockRecordId &&
-                          assignment?.clockRecordId ===
-                            showEditForm.clockRecordId ? (
-                            <Input
-                              type="time"
-                              name="breakIn"
-                              value={
-                                showEditForm.breakIn || assignment?.breakIn
-                              }
-                              className={"max-w-max"}
-                              onChange={handleChange}
-                            />
-                          ) : assignment?.breakIn ? (
-                            <div className="flex items-center gap-1 text-yellow-600 font-medium">
-                              <Clock className="h-4 w-4" />
-                              {assignment?.breakIn}
-                            </div>
-                          ) : (
-                            "-"
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {assignment?.clockRecordId &&
-                          assignment?.clockRecordId ===
-                            showEditForm.clockRecordId ? (
-                            <Input
-                              type="time"
-                              name="breakOut"
-                              value={
-                                showEditForm.breakOut || assignment?.breakOut
-                              }
-                              className={"max-w-max"}
-                              onChange={handleChange}
-                            />
-                          ) : assignment?.breakOut ? (
-                            <div className="flex items-center gap-1 text-purple-600 font-medium">
-                              <Clock className="h-4 w-4" />
 
-                              {assignment?.breakOut}
-                            </div>
-                          ) : (
-                            "-"
-                          )}
+                        {/* BREAKS */}
+                        <TableCell>
+                          <BreaksCell
+                            clockRecordId={assignment.clockRecordId}
+                            showEditForm={showEditForm}
+                            breaks={assignment.breaks}
+                            handleChange={handleChange}
+                            errors={errors}
+                          />
                         </TableCell>
+
+                        {/* TOTAL HOURS */}
                         <TableCell>
                           {calculateDuration(
-                            assignment?.clockIn,
-                            assignment?.clockOut
+                            assignment.clockIn,
+                            assignment.clockOut
                           ) || "-"}
                         </TableCell>
+                        {/* BREAK HOURS */}
+                        <TableCell>{breakHours || "-"}</TableCell>
+
+                        {/* ACTION BUTTONS (CLOCK IN/OUT/BREAK IN/OUT/EDIT/DELETE) */}
                         <TableCell>
-                          {calculateDuration(
-                            assignment?.breakIn,
-                            assignment?.breakOut
-                          ) || "-"}
-                        </TableCell>
-                        <TableCell>{assignment?._id}</TableCell>
-                        {(role === "superAdmin" || role === "admin") &&
-                          assignment?.clockOut && (
-                            <TableCell>
-                              {assignment?.clockRecordId ===
-                              showEditForm?.clockRecordId ? (
-                                <div className="flex gap-2 items-center">
-                                  <Button
-                                    onClick={handleSave}
-                                    size={"icon"}
-                                    variant={"outline"}
-                                  >
-                                    <SaveIcon />
-                                  </Button>
-                                  <Button
-                                    onClick={() => setShowEditForm({})}
-                                    size={"icon"}
-                                    variant={"outline"}
-                                  >
-                                    <XIcon />
-                                  </Button>
-                                </div>
-                              ) : (
+                          <div className="flex items-center gap-2">
+                            {/* Only show SAVE + CANCEL if row is being edited and has a clock record */}
+                            {assignment.clockRecordId &&
+                            showEditForm?._id === assignment._id ? (
+                              <>
                                 <Button
-                                  onClick={() => handleEdit(assignment)}
-                                  size={"icon"}
-                                  variant={"outline"}
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={handleSave} // save handler
+                                  disabled={Object.keys(errors).length > 0}
                                 >
-                                  <EditIcon />
+                                  <SaveIcon />
                                 </Button>
-                              )}
-                            </TableCell>
-                          )}
-
-                        {(role === "superAdmin" || role === "admin") &&
-                          assignment?.clockOut && (
-                            <TableCell>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={assignment?.isLocked}
-                                    className="text-red-600 hover:text-red-700"
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={() => setShowEditForm({})} // cancel edit
+                                >
+                                  <XIcon />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                {/* Clock In */}
+                                {!assignment.clockIn && (
+                                  <ClockConfirmDialog
+                                    action="clockIn"
+                                    employeeName={assignment.name}
+                                    onConfirm={() =>
+                                      handleManualClockUpdate(
+                                        assignment.clockRecordId,
+                                        assignment.employeeId,
+                                        "clockIn",
+                                        breaks
+                                      )
+                                    }
                                   >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </AlertDialogTrigger>
+                                    <Button
+                                      size="icon"
+                                      className="bg-green-100 text-green-700"
+                                    >
+                                      <CheckCircle />
+                                    </Button>
+                                  </ClockConfirmDialog>
+                                )}
 
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>
-                                      Remove Assignment
-                                    </AlertDialogTitle>
+                                {/* Break In */}
+                                {assignment.clockIn &&
+                                  (!lastBreak || lastBreak.breakOut) &&
+                                  !assignment.clockOut && (
+                                    <ClockConfirmDialog
+                                      action="breakIn"
+                                      employeeName={assignment.name}
+                                      onConfirm={() =>
+                                        handleManualClockUpdate(
+                                          assignment.clockRecordId,
+                                          assignment.employeeId,
+                                          "breakIn",
+                                          breaks
+                                        )
+                                      }
+                                    >
+                                      <Button
+                                        size="icon"
+                                        className="bg-yellow-100 text-yellow-700"
+                                      >
+                                        <Coffee />
+                                      </Button>
+                                    </ClockConfirmDialog>
+                                  )}
 
-                                    <AlertDialogDescription>
-                                      Are you sure you want to remove{" "}
-                                      {assignment?.firstName} from{" "}
-                                      {assignment?.siteName}? This action cannot
-                                      be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
+                                {/* Break Out */}
+                                {assignment.clockIn &&
+                                  lastBreak &&
+                                  !lastBreak.breakOut &&
+                                  !assignment.clockOut && (
+                                    <ClockConfirmDialog
+                                      action="breakOut"
+                                      employeeName={assignment.name}
+                                      onConfirm={() =>
+                                        handleManualClockUpdate(
+                                          assignment.clockRecordId,
+                                          assignment.employeeId,
+                                          "breakOut",
+                                          breaks
+                                        )
+                                      }
+                                    >
+                                      <Button
+                                        size="icon"
+                                        className="bg-blue-100 text-blue-700"
+                                      >
+                                        <Coffee />
+                                      </Button>
+                                    </ClockConfirmDialog>
+                                  )}
 
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>
-                                      Cancel
-                                    </AlertDialogCancel>
+                                {/* Clock Out */}
+                                {assignment.clockIn &&
+                                  !assignment.clockOut &&
+                                  (!lastBreak || lastBreak.breakOut) && (
+                                    <ClockConfirmDialog
+                                      action="clockOut"
+                                      employeeName={assignment.name}
+                                      onConfirm={() =>
+                                        handleManualClockUpdate(
+                                          assignment.clockRecordId,
+                                          assignment.employeeId,
+                                          "clockOut",
+                                          breaks
+                                        )
+                                      }
+                                    >
+                                      <Button
+                                        size="icon"
+                                        className="bg-red-100 text-red-700"
+                                      >
+                                        <LogOut />
+                                      </Button>
+                                    </ClockConfirmDialog>
+                                  )}
 
-                                    <AlertDialogAction
+                                {/* EDIT / DELETE only after Clock Out */}
+                                {assignment.clockOut && (
+                                  <>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      onClick={() =>
+                                        setShowEditForm(assignment)
+                                      }
+                                    >
+                                      <EditIcon />
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
                                       onClick={() =>
                                         handleRemoveAssignment(assignment._id)
                                       }
-                                      className="bg-red-600 hover:bg-red-700"
                                     >
-                                      Remove
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </TableCell>
-                          )}
-
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {!assignment?.clockIn && (
-                              <Button
-                                onClick={() =>
-                                  handleManualClockUpdate(
-                                    assignment?.clockRecordId,
-                                    assignment?.employeeId,
-                                    "clockIn"
-                                  )
-                                }
-                                size="icon"
-                                className="bg-green-100 text-green-700 hover:bg-green-200"
-                              >
-                                <Clock />
-                              </Button>
+                                      <Trash2 />
+                                    </Button>
+                                  </>
+                                )}
+                              </>
                             )}
-
-                            {assignment?.clockIn &&
-                              !assignment?.clockOut &&
-                              !assignment?.breakIn && (
-                                <Button
-                                  onClick={() =>
-                                    handleManualClockUpdate(
-                                      assignment?.clockRecordId,
-                                      assignment?.employeeId,
-                                      "breakIn"
-                                    )
-                                  }
-                                  size="icon"
-                                  className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-                                >
-                                  <Coffee />
-                                </Button>
-                              )}
-
-                            {assignment?.breakIn && !assignment?.breakOut && (
-                              <Button
-                                onClick={() =>
-                                  handleManualClockUpdate(
-                                    assignment?.clockRecordId,
-                                    assignment?.employeeId,
-                                    "breakOut"
-                                  )
-                                }
-                                size="icon"
-                                className="bg-blue-100 text-blue-700 hover:bg-blue-200"
-                              >
-                                <Coffee />
-                              </Button>
-                            )}
-
-                            {assignment?.clockIn &&
-                              !assignment?.clockOut &&
-                              (!assignment?.breakIn ||
-                                assignment?.breakOut) && (
-                                <Button
-                                  onClick={() =>
-                                    handleManualClockUpdate(
-                                      assignment?.clockRecordId,
-                                      assignment?.employeeId,
-                                      "clockOut"
-                                    )
-                                  }
-                                  size="icon"
-                                  className="bg-red-100 text-red-700 hover:bg-red-200"
-                                >
-                                  <LogOut />
-                                </Button>
-                              )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -560,6 +597,8 @@ const EmployeeSiteManagement = ({ searchParams }) => {
               </Table>
             </div>
           )}
+          {/* {total > pagePerData && <Pagination />} */}
+          {/* {total > pagePerData && <PaginationWithLinks totalCount={total} />} */}
         </CardContent>
         <CardFooter className={"border-t"}>
           {total > 10 && (
@@ -579,3 +618,62 @@ const EmployeeSiteManagement = ({ searchParams }) => {
 };
 
 export default EmployeeSiteManagement;
+
+// alert dialog for clock confirmation copomponent
+
+export const ClockConfirmDialog = ({
+  action,
+  employeeName,
+  onConfirm,
+  children,
+}) => {
+  const actionConfig = {
+    clockIn: {
+      title: "Are you sure you want to clock in?",
+      description: `This will record the clock in time for the ${employeeName} employee.`,
+      confirmText: "Clock In",
+      confirmClass: "bg-green-600 hover:bg-green-700",
+    },
+    clockOut: {
+      title: "Are you sure you want to clock out?",
+      description: `This will record the clock out time for the ${employeeName} employee.`,
+      confirmText: "Clock Out",
+      confirmClass: "bg-red-600 hover:bg-red-700",
+    },
+    breakIn: {
+      title: "Are you sure you want to start a break?",
+      description: `This will record the break start time for the ${employeeName} employee.`,
+      confirmText: "Start Break",
+      confirmClass: "bg-yellow-600 hover:bg-yellow-700",
+    },
+    breakOut: {
+      title: "Are you sure you want to end the break?",
+      description: `This will record the break end time for the ${employeeName} employee.`,
+      confirmText: "End Break",
+      confirmClass: "bg-blue-600 hover:bg-blue-700",
+    },
+  };
+
+  const config = actionConfig[action] || {};
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{config.title}</AlertDialogTitle>
+          <AlertDialogDescription>{config.description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={config.confirmClass}
+            onClick={onConfirm}
+          >
+            {config.confirmText}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
