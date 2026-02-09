@@ -10,7 +10,7 @@ import SiteClockModel from "@/models/siteClockModel";
 import { getServerSideProps } from "../session/session";
 import ClockRecordModel from "@/models/clockInModel";
 import { connect } from "@/db/db";
-import { dbConnect } from "@/db/prod-db";
+
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
 import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
@@ -352,7 +352,7 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
 
 export async function reportAllAttendanceData() {
   try {
-    await dbConnect();
+    await connect();
 
     // 1. Fetch all clock records
     const logs = await ClockRecordModel.find({ isDeleted: false }).lean();
@@ -465,7 +465,7 @@ export async function reportAllAttendanceData() {
 
 export async function OldAttendanceData() {
   try {
-    await dbConnect();
+    await connect();
 
     // 1. Fetch data
     const logs = await ClockModel.find({ isDeleted: false }).lean();
