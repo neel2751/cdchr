@@ -88,6 +88,39 @@ export async function toggleDeviceLock(data) {
 
 // /pages/api/auth/verify-device.js
 
+// export async function verifyDevice(data) {
+//   const { userId, deviceId } = data;
+
+//   try {
+//     await connect();
+//     const user = await OfficeUserModel.findById(userId).lean();
+
+//     if (!user || !user.enforceDeviceLock) {
+//       return res.status(200).json({ authorized: true });
+//     }
+
+//     // Check if the deviceId still exists in the authorized list
+//     const isAuthorized = user.authorizedDevices.some(
+//       (d) => d.deviceId === deviceId
+//     );
+
+//     // from user we have to remove the password
+//     delete user.password;
+
+//     return {
+//       success: true,
+//       authorized: isAuthorized,
+//       data: user,
+//     };
+//   } catch (error) {
+//     console.error("Error verifying device:", error);
+//     return {
+//       success: false,
+//       message: "Internal server error",
+//     };
+//   }
+// }
+
 export async function verifyDevice(data) {
   const { userId, deviceId } = data;
 
@@ -95,28 +128,26 @@ export async function verifyDevice(data) {
     await connect();
     const user = await OfficeUserModel.findById(userId).lean();
 
-    if (!user || !user.enforceDeviceLock) {
-      return res.status(200).json({ authorized: true });
+    if (!user) {
+      return { success: false, message: "User not found" };
     }
 
     // Check if the deviceId still exists in the authorized list
-    const isAuthorized = user.authorizedDevices.some(
-      (d) => d.deviceId === deviceId
-    );
+    // If enforceDeviceLock is OFF, we return true automatically
+    const isAuthorized =
+      !user.enforceDeviceLock ||
+      user.authorizedDevices.some((d) => d.deviceId === deviceId);
 
-    // from user we have to remove the password
-    delete user.password;
+    // Safety: Remove sensitive data
+    const { password, ...userData } = user;
 
     return {
       success: true,
       authorized: isAuthorized,
-      data: user,
+      data: userData,
     };
   } catch (error) {
     console.error("Error verifying device:", error);
-    return {
-      success: false,
-      message: "Internal server error",
-    };
+    return { success: false, message: "Internal server error" };
   }
 }

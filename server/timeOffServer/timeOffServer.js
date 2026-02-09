@@ -892,11 +892,12 @@ export async function fetchLiveOfficeClock({
       { $project: { total: 1, data: 1 } },
     ];
 
-    const [result] = await OfficeEmployeeModel.aggregate(pipeline);
+    const aggregationResult = await OfficeEmployeeModel.aggregate(pipeline);
+    const result = aggregationResult[0] || { data: [], total: 0 };
 
     return {
       success: true,
-      data: JSON.stringify(result.data || []),
+      data: JSON.stringify(result.data),
       totalCount: result.total || 0,
     };
   } catch (error) {

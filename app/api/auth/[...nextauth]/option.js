@@ -63,7 +63,7 @@ export const options = {
           // }
           return { ...response?.data, deviceId };
         } catch (error) {
-          console.error("Authorize error:", error.message);
+          console.log("Authorization error:", error);
           throw new Error(error); // Propagate error to sign-in page
         }
       },
