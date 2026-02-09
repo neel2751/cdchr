@@ -1,6 +1,8 @@
 import { checkIntegrationStatus } from "@/server/integrationServer/integrationServer";
 import ConnectButton from "./connectButton";
 
+export const dynamic = "force-dynamic";
+
 export default async function MicrosoftIntegrationPage() {
   const connected = await checkIntegrationStatus();
   return (
