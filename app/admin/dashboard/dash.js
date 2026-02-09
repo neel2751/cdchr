@@ -3,6 +3,9 @@ import { useMemo } from "react";
 import DashCount from "./components/dashCard";
 import { useQuery } from "@tanstack/react-query";
 import { getDashboardDataServer } from "@/utils/dashData";
+import TodayCard from "./components/todayCard";
+import Overview from "./components/overview";
+import RecentData from "./components/recentData";
 
 const Dash = () => {
   const { data } = useQuery({
