@@ -290,8 +290,6 @@ const EmployeeSiteManagement = ({ searchParams }) => {
 
   const handleRemoveAssignment = (assignmentId) => {};
 
-  const { data: session } = useSession();
-  const role = session?.user?.role;
   const commonHeaders = [
     "Name",
     "Status",
@@ -315,12 +313,12 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button asChild size={"sm"} variant={"outline"}>
+            {/* <Button asChild size={"sm"} variant={"outline"}>
               <Link href={"/admin/scan"}>
                 <QrCodeIcon />
                 Open Scan
               </Link>
-            </Button>
+            </Button> */}
             <DateFilter name={"date"} />
           </div>
         </CardHeader>

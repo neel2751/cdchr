@@ -189,8 +189,11 @@ export function useAttendanceSocket({
           fromDate,
           toDate,
         });
-
-        const data = JSON.parse(res?.data);
+        if (!res.success) {
+          toast.error(res.message || "Failed to load attendance data");
+          return null;
+        }
+        const data = res?.data ? JSON.parse(res.data) : {}; // Fallback to {} instead of crashing
         setTotal(res.totalCount);
         return data;
       } catch (err) {
@@ -216,7 +219,11 @@ export function useAttendanceSocket({
       }),
   });
 
-  const attendanceList = Object.values(attendanceMap).flat();
+  // const attendanceList = Object.values(attendanceMap || {}).flat();
+  // This prevents the "Cannot convert undefined to object" error permanently
+  const attendanceList = attendanceMap
+    ? Object.values(attendanceMap).flat()
+    : [];
 
   // QR code generator helper
   const generateQrCode = async (token) => {

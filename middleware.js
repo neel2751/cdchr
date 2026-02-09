@@ -40,7 +40,7 @@ async function checkRoleMiddleware(req) {
     const currentDeviceId = token?.deviceId;
 
     const response = await fetch(
-      "http://localhost:3000/api/reception/verify-device",
+      `${process.env.NEXTAUTH_URL}/api/reception/verify-device`,
       {
         method: "POST",
         headers: {
