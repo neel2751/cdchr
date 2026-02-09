@@ -21,11 +21,23 @@ export const options = {
             throw new Error("Please provide both email and password.");
           }
 
-          const { email, password } = credentials;
-          const response = await LoginData(email, password);
+          const { email, password, deviceId } = credentials;
+          const response = await LoginData(email, password, deviceId);
 
           if (!response?.status) {
-            throw new Error(response?.message || "Invalid login attempt.");
+            if (response.message === "DEVICE_UNAUTHORIZED") {
+              // Stringify the whole response so we can send the detectedId
+              throw new Error(
+                JSON.stringify({
+                  type: "DEVICE_ERROR",
+                  message: "Unauthorized Device",
+                  detectedId: response.detectedId,
+                })
+              );
+            }
+
+            // For normal errors (wrong password, etc)
+            throw new Error(response.message || "Invalid login attempt.");
           }
 
           // Optional: Fetch and store session details
@@ -49,10 +61,10 @@ export const options = {
           // based on that we have to show 2FA page once enabled after they can't disable without admin approval
           // if (response.data.twoFactorEnabled && !response.data.twoFactorVerified) {
           // }
-          return { ...response?.data };
+          return { ...response?.data, deviceId };
         } catch (error) {
           console.error("Authorize error:", error.message);
-          throw new Error(error.message); // Propagate error to sign-in page
+          throw new Error(error); // Propagate error to sign-in page
         }
       },
     }),
@@ -83,6 +95,7 @@ export const options = {
         token.name = user.name;
         token.email = user.email;
         token.role = user.role;
+        token.deviceId = user.deviceId;
         token.requiresTwoFactor = user.requiresTwoFactor ?? false; // Initialize 2FA requirement status
       }
       // Handle update, including 2FA verification
@@ -95,6 +108,7 @@ export const options = {
       if (session?.user) {
         session.user._id = token.id;
         session.user.role = token.role;
+        session.user.deviceId = token.deviceId;
       }
       // Include 2FA requirement status in session
       if (token.requiresTwoFactor) {

@@ -160,8 +160,8 @@ const OfficeEmplyee = ({ searchParams }) => {
       onClose: alertClose,
     });
 
-  const handleAlert = (id, type, status) => {
-    setAlert({ id, type, status });
+  const handleAlert = (id, type, status, name) => {
+    setAlert({ id, type, status, name });
   };
 
   const immigrationField = field.find((it) => it.name === "immigrationType");

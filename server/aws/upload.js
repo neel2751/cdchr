@@ -329,3 +329,17 @@ export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
     };
   }
 }
+
+export async function getPublicUrl({ key }) {
+  if (!key) {
+    return {
+      success: false,
+      message: "Key is required to generate public URL",
+    };
+  }
+  const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+  return {
+    success: true,
+    url,
+  };
+}

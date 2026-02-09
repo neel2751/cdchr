@@ -87,7 +87,7 @@ export const LoginDataOld = async (email, password) => {
   }
 };
 
-export const LoginData = async (email, password) => {
+export const LoginDataNew = async (email, password) => {
   if (!email || !password)
     return { status: false, message: "Please provide all details" };
 
@@ -178,6 +178,131 @@ export const LoginData = async (email, password) => {
     user.role = "siteEmployee";
   } else {
     user.role = "reception";
+    //
+  }
+
+  delete user.password;
+  // Set employeType based on user type
+  user.employeType =
+    userType === "office"
+      ? "OfficeEmployee"
+      : userType === "site"
+      ? "SiteEmployee"
+      : "ReceptionEmployee";
+  // user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
+  user.name = user.name || user.firstName || "User";
+  return {
+    status: true,
+    data: user,
+  };
+};
+
+export const LoginData = async (email, password, deviceId) => {
+  if (!email || !password)
+    return { status: false, message: "Please provide all details" };
+
+  email = email.trim();
+  password = password.trim();
+
+  await connect();
+
+  // Try OfficeEmployeeModel first
+  let user = await OfficeEmployeeModel.findOne({
+    email,
+    delete: { $ne: true },
+  }).lean();
+  let userType = "office";
+
+  if (!user) {
+    // Then try SiteEmployeeModel
+    user = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
+    userType = "site";
+  }
+
+  if (!user) {
+    user = await OfficeUserModel.findOne({
+      email,
+      delete: { $ne: true },
+    }).lean();
+    userType = "reception";
+  }
+
+  // No user found
+  if (!user) {
+    return { status: false, message: "Email not found" };
+  }
+
+  // Check active status
+  if (!user.isActive) {
+    return {
+      status: false,
+      message: "Your account is inactive. Please contact admin.",
+    };
+  }
+
+  // Password check
+  const isMatch = await isMatchedPassword(password, user.password);
+  if (!isMatch) {
+    return {
+      status: false,
+      message: "Invalid password. Try again.",
+    };
+  }
+
+  if (userType === "reception" && user.enforceDeviceLock) {
+    console.log("Checking device authorization for reception user");
+    const isAuthorizedDevice = user?.authorizedDevices?.some(
+      (device) => device?.deviceId === deviceId
+    );
+    if (!isAuthorizedDevice) {
+      return {
+        status: false,
+        message: "DEVICE_UNAUTHORIZED",
+        detectedId: deviceId,
+      };
+    }
+  }
+
+  // Date/visa checks only for Office Employee
+  if (userType === "office") {
+    if (user.immigrationType === "British") {
+      if (new Date(user.endDate) < new Date()) {
+        return {
+          status: false,
+          message: "Your EndDate has expired. Please contact Admin.",
+        };
+      }
+    } else if (userType === "site") {
+      if (
+        new Date(user.endDate) < new Date() ||
+        new Date(user.visaEndDate) < new Date()
+      ) {
+        return {
+          status: false,
+          message: "Your visa has expired. Please contact Admin.",
+        };
+      }
+    }
+  }
+
+  // Set role based on user type
+  if (userType === "office") {
+    if (user.isSuperAdmin) user.role = "superAdmin";
+    else if (user.isAdmin) user.role = "admin";
+    else user.role = "user";
+    // const siteAssignment = await SiteAssignManagerModel.findOne({
+    //   email,
+    //   isActive: true,
+    //   isDelete: false,
+    // });
+    // if (siteAssignment && siteAssignment.projectSiteID) {
+    //   user.siteId = siteAssignment?.projectSiteID;
+    // }
+  } else if (userType === "site") {
+    user.role = "siteEmployee";
+  } else {
+    user.role = "reception";
+    //
   }
 
   delete user.password;

@@ -19,6 +19,8 @@ import { getServerSideProps } from "../session/session";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { fetchLeaveCategory } from "../category/category";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { createObjectId } from "@/lib/mongodb";
+import { getLeaveSettings } from "../leaveSettingServer";
 
 export async function storeLeave(employeeId, data) {
   try {
@@ -49,7 +51,6 @@ export async function storeLeave(employeeId, data) {
 
 // if employee doesn't have any leave so give permission to generate leave depend on the current data
 export async function fetchCommonLeave(filterData) {
-  const MongooseId = mongoose.Types.ObjectId;
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
   // const searchRegex = new RegExp(sanitizedSearch, "i"); // Create a case-ins ensitive regex
   const validPage = parseInt(filterData?.page < 0 ? 1 : filterData?.page || 1);
@@ -60,12 +61,18 @@ export async function fetchCommonLeave(filterData) {
   const skip = (validPage - 1) * validLimit;
   const query = { delete: false };
 
+  const settings = await getLeaveSettings();
+  const currentLeaveYear = getLeaveYearString(
+    new Date(),
+    settings?.data?.leaveYearStartMonth
+  );
+
   const roleTypeFilterQuery = roleTypeFilter
-    ? { "departments._id": new MongooseId(roleTypeFilter) } // Field for department filter
+    ? { "departments._id": createObjectId(roleTypeFilter) } // Field for department filter
     : {};
 
   const companyFilterQuery = companyFilter
-    ? { "companys._id": new MongooseId(companyFilter) } // Field for company filter
+    ? { "companys._id": createObjectId(companyFilter) } // Field for company filter
     : {};
 
   if (filterType) {
@@ -90,11 +97,23 @@ export async function fetchCommonLeave(filterData) {
       {
         $lookup: {
           from: "commonleaves",
-          localField: "_id",
-          foreignField: "employeeId",
+          let: { empId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$empId"] },
+                    { $eq: ["$leaveYear", currentLeaveYear] },
+                  ],
+                },
+              },
+            },
+          ],
           as: "commonLeave",
         },
       },
+
       {
         $lookup: {
           from: "roletypes",

@@ -31,7 +31,7 @@ import { formatDates } from "@/lib/formatDate";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+
 import {
   Tooltip,
   TooltipContent,
@@ -40,6 +40,13 @@ import {
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { useCommonContext } from "@/context/commonContext";
 import { PaginationWithLinks } from "@/components/filters/pagination/pagination-client";
+import SearchDebounce from "@/components/search/searchDebounce";
+import { SelectFilter } from "@/components/filters/selectFilter/selectFilter";
+import {
+  getLeaveYearString,
+  getPreviousLeaveYearString,
+} from "@/helper/getLeaveYearString";
+import { DateRangeFilter } from "@/components/filters/filterDate/filterDateRange";
 
 export function LeaveRequestTable({
   showDialog,
@@ -160,20 +167,67 @@ export function LeaveRequestTableNew({ onEdit }) {
   const { searchParams } = useCommonContext();
   const currentPage = searchParams?.page || 1;
   const limit = searchParams?.pageSize || 10;
-  const queryKey = ["leave-superadmin", currentPage, limit];
+  const leaveYear = searchParams?.leaveYear || "";
+  const leaveStatus = searchParams?.leaveStatus || "";
+  const fromDate = searchParams?.fromDate || "";
+  const toDate = searchParams?.toDate || "";
+  const queryKey = [
+    "leave-superadmin",
+    currentPage,
+    limit,
+    leaveYear,
+    leaveStatus,
+    fromDate,
+    toDate,
+  ];
   const { data, isPending } = useFetchQuery({
     params: {
       leaveYear: getLeaveYearString(new Date()),
       page: currentPage,
       limit: limit,
+      leaveStatus: leaveStatus,
+      leaveYear: leaveYear,
+      fromDate: fromDate,
+      toDate: toDate,
     },
     queryKey,
     fetchFn: getLeaveRequestDataAdmin,
   });
   const { newData, totalCount } = data || {};
+  const leaveYearsSet = new Set();
+  const leaveYearString = getLeaveYearString(new Date());
+  // we have leave year string like 2025-26 now we have to create one minus one year
+  const previousLeaveYearString = getPreviousLeaveYearString(leaveYearString);
+  leaveYearsSet.add(previousLeaveYearString);
+  leaveYearsSet.add(leaveYearString);
 
   return (
     <div>
+      <div className="flex justify-start items-center mb-2">
+        <DateRangeFilter />
+        <div className="flex gap-4">
+          <SelectFilter
+            name="leaveYear"
+            label={"Leave Year"}
+            options={Array.from(leaveYearsSet).map((year) => ({
+              label: year,
+              value: year,
+            }))}
+          />
+          <SelectFilter
+            name="leaveStatus"
+            label={"Leave Status"}
+            options={[
+              { label: "All", value: "All" },
+              { label: "Approved", value: "Approved" },
+              { label: "Pending", value: "Pending" },
+              { label: "Cancelled", value: "Cancelled" },
+              { label: "Rejected", value: "Rejected" },
+              { label: "Expired", value: "Expired" },
+            ]}
+          />
+        </div>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>
@@ -214,9 +268,11 @@ export function LeaveRequestTableNew({ onEdit }) {
           </TableBody>
         )}
       </Table>
-      <div className="flex justify-between items-center mt-4">
-        <PaginationWithLinks totalCount={totalCount || 0} />
-      </div>
+      {totalCount > 0 && (
+        <div className="flex justify-between items-center mt-4">
+          <PaginationWithLinks totalCount={totalCount || 0} />
+        </div>
+      )}
     </div>
   );
 }

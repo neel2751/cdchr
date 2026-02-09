@@ -52,6 +52,23 @@ export const AddEmploeeLeave = () => {
         required: "Please select a leave type",
       },
     },
+    {
+      name: "halfDayType",
+      labelText: "Half Day Type",
+      type: "select",
+      showIf: {
+        field: "leaveType",
+        value: "Half Day",
+      },
+      options: [
+        { label: "First Half", value: "First Half" },
+        { label: "Second Half", value: "Second Half" },
+      ],
+      size: true,
+      validationOptions: {
+        required: "Please select a half day type",
+      },
+    },
     // {
     //   name: "leaveStartDate",
     //   labelText: "Start Date",

@@ -17,6 +17,7 @@ import {
   ClipboardPlus,
   ScanQrCodeIcon,
   SettingsIcon,
+  Settings,
 } from "lucide-react";
 import Overview from "../leaveManagement/components/overview/overview";
 import LeaveCategoryNew from "../leaveManagement/components/leaveCategory/leave-category";
@@ -48,6 +49,9 @@ import SiteExpense from "../siteAssign/features/siteExpense";
 import { SiteEmployeeOtherDeatils } from "../employee/components/employeeOtherDeatils";
 import EmployeDocument from "../employee/components/employeDocument";
 import OfficeEmployeeAttendance from "@/components/tabs/employee-attendance";
+import CarryForwardSettings from "../leaveManagement/components/leaveSettings/carryForwardSettings";
+import LeaveReports from "../report/leaveReport/leaveReport";
+import AttendanceReport from "../report/attendanceReport/attendanceReport";
 
 export const officeMenu = [
   {
@@ -212,12 +216,12 @@ export const leaveMenu = [
   //   //   content: <LeaveEntitlementCalculator />,
   //   icon: SquareChartGantt,
   // },
-  // {
-  //   name: "Settings",
-  //   link: "settings",
-  //   //   content: <ParentalLeaveCalculator />,
-  //   icon: Settings,
-  // },
+  {
+    name: "Settings",
+    link: "settings",
+    //   content: <ParentalLeaveCalculator />,
+    icon: Settings,
+  },
 
   // {
   //   name: "Help",
@@ -269,6 +273,34 @@ export const siteMenu = [
   // },
 ];
 
+export const reportMenu = [
+  {
+    name: "Dashboard",
+    icon: HomeIcon,
+    link: "overview",
+  },
+  {
+    name: "Leave Report",
+    icon: CalendarIcon,
+    link: "leave",
+  },
+  {
+    name: "Attendance Report",
+    icon: TimerIcon,
+    link: "attendance",
+  },
+  {
+    name: "Expense Report",
+    icon: ClipboardPlus,
+    link: "expense",
+  },
+  {
+    name: "Employee Report",
+    icon: FileLockIcon,
+    link: "employee",
+  },
+];
+
 export const officeSlugComponentmap = {
   overview: EmployeeOtherDeatils,
   edit: EmployeeEdit,
@@ -294,6 +326,7 @@ export const slugComponentmap = {
   // addleaveEmployee: AddEmploeeLeave,
   bankholiday: BankHoliday,
   report: LeaveReport,
+  settings: CarryForwardSettings,
 };
 
 export const siteSlugComponentmap = {
@@ -305,4 +338,10 @@ export const siteSlugComponentmap = {
 export const siteOfficeEmployeSlugComponentmap = {
   overview: SiteEmployeeOtherDeatils,
   document: EmployeDocument,
+};
+
+export const reportSlugComponentmap = {
+  overview: Overview,
+  leave: LeaveReports,
+  attendance: AttendanceReport,
 };

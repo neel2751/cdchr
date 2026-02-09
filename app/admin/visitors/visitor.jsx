@@ -22,7 +22,6 @@ import {
 import ViewVisitorHistory from "./viewVisitor";
 import SearchDebounce from "@/components/filters/search/search-debounce";
 import { PaginationWithLinks } from "@/components/filters/pagination/pagination-client";
-import VisitorCount from "./visitorCount";
 
 export default function Visitor({ searchParams }) {
   const [open, setOpen] = React.useState(false);

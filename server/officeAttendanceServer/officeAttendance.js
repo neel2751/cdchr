@@ -279,6 +279,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     const allEmployees = await OfficeEmployeeModel.find({
       isActive: true,
       delete: false,
+      isShowenInWeeklyTimesheet: true,
       $or: [
         { visaEndDate: { $gt: now } },
         { visaEndDate: { $exists: false } },

@@ -24,8 +24,17 @@ const SearchDebounce = memo(
       }
       if (newTerm) {
         params.set("query", newTerm);
+        //we have to check if page and pageSize are already present in the url then we don't have to set it again
+        if (params.get("page")) {
+          params.set("page", "1");
+        }
+        if (params.get("pageSize")) {
+          params.set("pageSize", "10");
+        }
       } else {
         params.delete("query");
+        params.delete("page");
+        params.delete("pageSize");
       }
       replace(`${pathName}?${params.toString()}`);
     }, 1000);

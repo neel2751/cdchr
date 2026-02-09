@@ -10,6 +10,10 @@ import SiteClockModel from "@/models/siteClockModel";
 import { getServerSideProps } from "../session/session";
 import ClockRecordModel from "@/models/clockInModel";
 import { connect } from "@/db/db";
+import { dbConnect } from "@/db/prod-db";
+import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import EmployeModel from "@/models/employeModel";
+import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
 
 export const updateClockManuallyById = async ({
   id = null,
@@ -344,4 +348,180 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
     );
     return { success: true, message: "Employee moved successfully." };
   });
+}
+
+export async function reportAllAttendanceData() {
+  try {
+    await dbConnect();
+
+    // 1. Fetch all clock records
+    const logs = await ClockRecordModel.find({ isDeleted: false }).lean();
+
+    // 2. Fetch both employee types to build a master name map
+    const [fieldStaff, officeStaff] = await Promise.all([
+      EmployeModel.find({}, "firstName").lean(),
+      OfficeEmployeeModel.find({}, "name").lean(),
+    ]);
+
+    const nameMap = {};
+    fieldStaff.forEach((e) => (nameMap[e._id.toString()] = e.firstName));
+    officeStaff.forEach((e) => (nameMap[e._id.toString()] = e.name));
+
+    // let grandShiftMinutes = 0;
+    // let grandBreakMinutes = 0;
+    // let grandWorkMinutes = 0;
+
+    // 3. Define CSV Headers
+    const headers = [
+      "Employee Name",
+      "Type",
+      "Location Type",
+      "Date",
+      "Clock In",
+      "Breaks (In-Out)",
+      "Clock Out",
+      "Total Shift Time",
+      "Total Break Time",
+      "Final Work Hours",
+      "Status",
+    ];
+
+    // 4. Format the Rows
+    const rows = logs.map((log) => {
+      const name = nameMap[log.employeeId?.toString()] || "Unknown";
+
+      const shiftMinutes = calculateDurationNew(log.clockIn, log.clockOut);
+
+      let totalBreakMinutes = 0;
+      if (log.breaks && log.breaks.length > 0) {
+        log.breaks.forEach((b) => {
+          totalBreakMinutes += calculateDurationNew(b.breakIn, b.breakOut);
+        });
+      }
+
+      const finalWorkMinutes = shiftMinutes - totalBreakMinutes;
+
+      // grandShiftMinutes += shiftMinutes;
+      // grandBreakMinutes += totalBreakMinutes;
+      // grandWorkMinutes += finalWorkMinutes;
+
+      // Flatten the breaks array into a single string for the CSV cell
+      // e.g., "12:00-12:30 | 15:00-15:15"
+      const breaksString = log.breaks
+        ? log.breaks
+            .map((b) => `${b.breakIn || ""}-${b.breakOut || ""}`)
+            .join(" | ")
+        : "";
+
+      return [
+        `"${name}"`, // Wrapped in quotes in case of commas in names
+        log.employeeType,
+        log.locationType,
+        log.date ? new Date(log.date).toISOString().split("T")[0] : "",
+        log.clockIn,
+        `"${breaksString}"`, // Wrapped in quotes to handle the "|" or potential commas
+        log.clockOut || "",
+        formatMinutesNew(shiftMinutes),
+        formatMinutesNew(totalBreakMinutes),
+        formatMinutesNew(finalWorkMinutes),
+        log.status || "",
+      ];
+    });
+
+    // const totalRow = [
+    //   "TOTAL",
+    //   "",
+    //   "",
+    //   "",
+    //   "",
+    //   "",
+    //   "",
+    //   formatMinutesNew(grandShiftMinutes),
+    //   formatMinutesNew(grandBreakMinutes),
+    //   formatMinutesNew(grandWorkMinutes),
+    //   "",
+    // ];
+
+    // 5. Build CSV Content
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.join(",")),
+      // totalRow.join(","),
+    ].join("\n");
+
+    // 6. Return Response
+    return {
+      success: true,
+      data: csvContent,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      success: false,
+      message: "Failed to export attendance data",
+    };
+  }
+}
+
+export async function OldAttendanceData() {
+  try {
+    await dbConnect();
+
+    // 1. Fetch data
+    const logs = await ClockModel.find({ isDeleted: false }).lean();
+
+    if (!logs || logs.length === 0) {
+      return new Response("No data found", { status: 404 });
+    }
+
+    const employees = await OfficeEmployeeModel.find({}).lean();
+    const employeeMap = {};
+    employees.forEach((emp) => {
+      employeeMap[emp._id.toString()] = emp.name;
+    });
+    logs.forEach((log) => {
+      log.name = employeeMap[log.employeeId.toString()] || "Unknown";
+    });
+
+    // 2. Define Headers
+    const headers = [
+      "No. ",
+      "Name",
+      "Date",
+      "Clock In",
+      "Break In",
+      "Break Out",
+      "Clock Out",
+    ];
+
+    // 3. Map data to rows
+    // We use JSON.stringify on values to handle commas or quotes that might break CSV formatting
+    const rows = logs.map((log, index) => [
+      index + 1,
+      log.name || "",
+      log.date ? log.date.toISOString().split("T")[0] : "",
+      log.clockIn,
+      log.breakIn || "",
+      log.breakOut || "",
+      log.clockOut || "",
+    ]);
+
+    // 4. Combine headers and rows into a single string
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.join(",")),
+    ].join("\n");
+
+    // 5. Return CSV
+    return {
+      success: true,
+      data: csvContent,
+    };
+  } catch (error) {
+    console.error("Error exporting old attendance data:", error);
+    return {
+      success: false,
+      message: "Failed to export data",
+    };
+  }
 }

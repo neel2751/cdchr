@@ -107,6 +107,7 @@ export const VISAFIELD = [
     options: [
       { value: "British", label: "British" },
       { value: "Immigrant", label: "Immigrant" },
+      { value: "Other", label: "Other" },
     ],
     validationOptions: {
       required: "Immigration Type is required",
@@ -886,10 +887,25 @@ export const OFFICEFIELD = [
     },
   },
   {
+    name: "countryOfWork",
+    labelText: "Country",
+    options: COUNTRIES,
+    showIf: {
+      field: "immigrationType",
+      value: "Other",
+    },
+    type: "select",
+    validationOptions: { required: "Country is required" },
+  },
+  {
     name: "employeNI",
     labelText: "Employee NI",
     type: "text",
     placeholder: " Enter Employee NI",
+    hideIf: {
+      field: "immigrationType",
+      value: "Other",
+    },
     validationOptions: {
       required: " Employee NI is required",
       pattern: {
@@ -1228,3 +1244,71 @@ export const EXPENSEFIELD = [
     },
   },
 ];
+
+export const FIELD_PRESETS = {
+  text: {
+    validationOptions: {
+      required: "This field is required",
+    },
+  },
+
+  email: {
+    validationOptions: {
+      required: "Email is required",
+      pattern: {
+        value: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+        message: "Invalid email format",
+      },
+    },
+  },
+
+  phone: {
+    validationOptions: {
+      required: "Phone number is required",
+      pattern: {
+        value: "^[0-9]{10,15}$",
+        message: "Enter a valid phone number",
+      },
+    },
+  },
+  tel: {
+    validationOptions: {
+      required: "Phone number is required",
+      pattern: {
+        value: "^[0-9]{10,15}$",
+        message: "Enter a valid phone number",
+      },
+    },
+  },
+
+  url: {
+    validationOptions: {
+      required: "URL is required",
+      pattern: {
+        value:
+          "^(https?:\\/\\/)?([\\w\\-]+\\.)+[\\w\\-]+(\\/[\\w\\-./?%&=]*)?$",
+        message: "Enter a valid URL",
+      },
+    },
+  },
+
+  number: {
+    validationOptions: {
+      required: "Number is required",
+      pattern: {
+        value: "^[0-9]+$",
+        message: "Only numeric values allowed",
+      },
+    },
+  },
+
+  password: {
+    validationOptions: {
+      required: "Password is required",
+      minLength: {
+        value: 6,
+        message: "Password must be at least 6 characters",
+      },
+    },
+  },
+};

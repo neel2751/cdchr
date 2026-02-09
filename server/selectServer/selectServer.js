@@ -9,7 +9,7 @@ import RoleBasedModel from "@/models/rolebasedModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import ProjectSiteModel from "@/models/siteProjectModel";
 import { getServerSideProps } from "../session/session";
-import { COMMONMENUITEMS, MENU } from "@/data/menu";
+import { COMMONMENUITEMS, MENU, PERSONAL_MENU } from "@/data/menu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
@@ -18,6 +18,7 @@ import mongoose from "mongoose";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { createObjectId } from "@/lib/mongodb";
 import ExpenseCategoryModel from "@/models/expense/expenseCategoryModel";
+import FormTemplateModel from "@/models/formTemplateModel";
 
 export const getSelectRoleType = async () => {
   try {
@@ -366,6 +367,34 @@ export const getEmployeeMenu = async () => {
   }
 };
 
+// export const getEmployeeMenu = async () => {
+//   try {
+//     const { props } = await getServerSideProps();
+//     const employeeId = props?.session?.user?._id;
+//     const role = props?.session?.user?.role;
+//     if (role === "superAdmin") {
+//       return {
+//         success: true,
+//         data: JSON.stringify([...PERSONAL_MENU, ...MENU]),
+//       };
+//     }
+
+//     await connect();
+//     const dbEntry = await RoleBasedModel.findOne({ employeeId: employeeId });
+//     const userPermissions = dbEntry?.permissions || [];
+
+//     const allowedManagement = MENU.filter((item) =>
+//       userPermissions.includes(item.path)
+//     );
+
+//     const finalMenu = [...PERSONAL_MENU, ...allowedManagement, COMMONMENUITEMS];
+//     return { success: true, data: JSON.stringify(finalMenu) };
+//   } catch (error) {
+//     console.log(error);
+//     return { success: false, message: "Error Occured" };
+//   }
+// };
+
 export const getSelectLeaveCategories = async () => {
   try {
     const leaveTypes = await LeaveCategoryModel.aggregate([
@@ -516,6 +545,37 @@ export const getSelectExpenseCategoryBySite = async ({ projectId }) => {
     return data;
   } catch (err) {
     console.log("Error fetching expense categories by site:", err);
+    return { success: false, message: "Error Occured" };
+  }
+};
+
+export const getSelectFormTemplates = async () => {
+  try {
+    await connect();
+    const templates = await FormTemplateModel.aggregate([
+      // {
+      //   $match: { isActive: true, isDeleted: false }, // Filters documents where delete is false
+      // },
+      {
+        $project: {
+          _id: 0,
+          value: "$_id", // Renames `_id` to `value`
+          label: "$templateName", // Renames `roleTitle` to `name`
+        },
+      },
+    ]).exec();
+
+    if (!templates || templates.length === 0) {
+      return { success: false, message: "No Data Found" };
+    } else {
+      const data = {
+        success: true,
+        data: JSON.stringify(templates),
+      };
+      return data;
+    }
+  } catch (err) {
+    console.log(err);
     return { success: false, message: "Error Occured" };
   }
 };

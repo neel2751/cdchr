@@ -28,6 +28,8 @@ const officeEmployeSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     isAdmin: { type: Boolean, default: false },
     isSuperAdmin: { type: Boolean, default: false },
+    countryOfWork: { type: String, required: false },
+    isShowenInWeeklyTimesheet: { type: Boolean, default: true },
     employeNI: { type: String, required: false },
     visaStartDate: { type: Date, required: false },
     visaEndDate: { type: Date, required: false },
@@ -38,6 +40,7 @@ const officeEmployeSchema = new mongoose.Schema(
     emergencyRelation: { type: String, required: false },
     emergencyAddress: { type: String, required: false },
     statusDate: { type: Date, required: false },
+    pushSubscription: { type: Object, required: false, default: null },
     delete: { type: Boolean, default: false },
   },
   { timestamps: true }

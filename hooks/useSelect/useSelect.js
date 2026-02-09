@@ -2,6 +2,7 @@
 
 import {
   getSelectCompanies,
+  getSelectFormTemplates,
   getSelectLeaveCategories,
   getSelectProjects,
 } from "@/server/selectServer/selectServer";
@@ -22,4 +23,8 @@ export const useSelectCompany = createSelectHook(getSelectCompanies, [
 
 export const useSelectSiteProject = createSelectHook(getSelectProjects, [
   "selectSiteProject",
+]);
+
+export const useSelectFormTemplate = createSelectHook(getSelectFormTemplates, [
+  "selectFormTemplate",
 ]);

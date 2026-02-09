@@ -150,9 +150,44 @@ const EmployeeSiteManagement = () => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setShowEditForm((preForm) => ({
-      ...preForm,
+
+    // Handle break inputs: breakIn-0, breakOut-1, etc
+    if (name.startsWith("break")) {
+      const [field, indexStr] = name.split("-");
+      const index = Number(indexStr);
+
+      setShowEditForm((prev) => {
+        const updatedBreaks = [...(prev.breaks || [])];
+
+        if (!updatedBreaks[index]) {
+          updatedBreaks[index] = { breakIn: "", breakOut: "" };
+        }
+
+        updatedBreaks[index] = {
+          ...updatedBreaks[index],
+          [field]: value,
+        };
+
+        return {
+          ...prev,
+          breaks: updatedBreaks,
+        };
+      });
+
+      return;
+    }
+
+    // Normal fields (clockIn, clockOut, etc)
+    setShowEditForm((prev) => ({
+      ...prev,
       [name]: value,
+    }));
+  };
+
+  const addBreak = () => {
+    setShowEditForm((prev) => ({
+      ...prev,
+      breaks: [...(prev.breaks || []), { breakIn: "", breakOut: "" }],
     }));
   };
 
@@ -246,7 +281,7 @@ const EmployeeSiteManagement = () => {
   const hasPermission = data?.newData;
 
   if (role === "superAdmin" || role === "admin") {
-    commonHeaders.push("Pay", "Move");
+    commonHeaders.push("Pay");
     commonHeaders.push("Actions");
   } else {
     commonHeaders.push("Actions");
@@ -303,7 +338,7 @@ const EmployeeSiteManagement = () => {
           </Card>
           <Card className="bg-red-50 text-red-600 border-none shadow-none">
             <CardHeader>
-              <CardTitle>Leaving Today</CardTitle>
+              <CardTitle>Clocked Out</CardTitle>
               <span className="text-2xl font-semibold">
                 {attendanceList.filter((emp) => emp.clockOut).length}
               </span>
@@ -462,6 +497,7 @@ const EmployeeSiteManagement = () => {
                             showEditForm={showEditForm}
                             breaks={assignment.breaks}
                             handleChange={handleChange}
+                            addBreak={addBreak}
                           />
                         </TableCell>
 
@@ -652,41 +688,63 @@ export const BreaksCell = ({
   breaks = [],
   handleChange,
   errors = {},
+  addBreak,
+  removeBreak,
 }) => {
-  // Only this row is in edit mode if clockRecordId matches
   const isEditing =
     clockRecordId && showEditForm?.clockRecordId === clockRecordId;
 
   if (isEditing) {
     return (
-      <div className="flex flex-col gap-2">
-        {breaks.map((b, i) => (
-          <div key={i} className="f">
-            <div className="flex gap-2 items-center">
-              <Input
-                type="time"
-                name={`breakIn-${i}`}
-                value={showEditForm?.breaks?.[i]?.breakIn || b.breakIn || ""}
-                onChange={handleChange}
-                className="max-w-max"
-              />
-              <Input
-                type="time"
-                name={`breakOut-${i}`}
-                value={showEditForm?.breaks?.[i]?.breakOut || b.breakOut || ""}
-                onChange={handleChange}
-                className="max-w-max"
-              />
-            </div>
-            <p>
+      <div className="flex gap-2">
+        <div className="flex flex-col gap-2">
+          {(showEditForm?.breaks || breaks).map((b, i) => (
+            <div key={i}>
+              <div className="flex gap-2 items-center">
+                <Input
+                  type="time"
+                  name={`breakIn-${i}`}
+                  value={b.breakIn || ""}
+                  onChange={handleChange}
+                  className="max-w-max"
+                />
+                <Input
+                  type="time"
+                  name={`breakOut-${i}`}
+                  value={b.breakOut || ""}
+                  onChange={handleChange}
+                  className="max-w-max"
+                />
+              </div>
+              {/* if break have only one entry then don't show remove button */}
+              {(i > 0 || (showEditForm?.breaks || breaks).length > 1) && (
+                <button
+                  type="button"
+                  onClick={() => removeBreak(i)}
+                  className="text-red-500 font-bold px-2"
+                  title="Remove break"
+                >
+                  ×
+                </button>
+              )}
               {errors[`break-${i}`] && (
                 <span className="text-red-500 text-xs">
                   {errors[`break-${i}`]}
                 </span>
               )}
-            </p>
-          </div>
-        ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Add new break */}
+        <button
+          type="button"
+          onClick={addBreak}
+          className="text-lg font-bold text-blue-600 cursor-pointer"
+          title="Add break"
+        >
+          +
+        </button>
       </div>
     );
   }

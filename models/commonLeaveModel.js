@@ -12,7 +12,7 @@ const commonLeaveSchema = new mongoose.Schema(
       required: true,
     },
     leaveData: {
-      type: Object,
+      type: Array,
       required: true,
     },
     submitedBy: mongoose.Types.ObjectId,

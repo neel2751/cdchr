@@ -221,6 +221,7 @@ export async function getReceptionUserById(userId) {
   }
 
   try {
+    await connect();
     const userData = await OfficeUserModel.findOne({
       _id: userId,
       delete: false,

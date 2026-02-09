@@ -87,8 +87,10 @@ export default function SacnContainer() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <CardTitle>Leave Requests</CardTitle>
-              <CardDescription>List of leave requests</CardDescription>
+              <CardTitle>Reception Scan Users</CardTitle>
+              <CardDescription>
+                Manage the users who can perform scans at the reception.
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button onClick={handleAdd} variant="outline">

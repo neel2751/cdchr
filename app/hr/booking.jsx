@@ -28,9 +28,9 @@ const availableDates = Array.from({ length: 12 }, (_, i) => {
   const dayOptions = { weekday: "short" };
 
   return {
-    day: date.toLocaleDateString("en-US", dayOptions),
+    day: date.toLocaleDateString("en-GB", dayOptions),
     date: date.getDate(),
-    month: date.toLocaleDateString("en-US", options),
+    month: date.toLocaleDateString("en-GB", options),
     fullDate: date.toISOString().split("T")[0],
     available: Math.floor(Math.random() * 5) + 1, // Random availability between 1 and 5
   };
@@ -95,7 +95,7 @@ const discussionTopics = [
 ];
 
 const services = [
-  { id: "architectural", name: "Architectural drawings" },
+  { id: "architectural", name: "Architectural Drawings" },
   { id: "design-planning", name: "Design and planning advice" },
   { id: "financing", name: "Help with financing my build" },
   { id: "builder", name: "Help finding a builder" },
@@ -131,10 +131,10 @@ export const ConsultationBooking = () => {
     <div className="min-h-screen bg-[#edebfc] rounded-3xl my-8">
       <section className="py-12 md:py-16 lg:py-20 px-4">
         <div className="max-w-4xl mx-auto text-center">
-          <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-[#3e3068] mb-4 md:mb-6 leading-tight tracking-tight">
+          <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-[#3e3068] mb-4 md:mb-6 leading-tight tracking-tighter">
             Book a free 30-minute consultation call with a CDC expert
           </h1>
-          <p className="text-base md:text-lg text-[#3e3068] mb-8 md:mb-12 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-base md:text-lg text-[#3e3068] mb-8 md:mb-12 max-w-3xl mx-auto leading-relaxed tracking-tight">
             Whether you’re just starting out or deep into your project, our
             experts are here to help you navigate the complexities of your
             build. From budgeting and planning to design and finding the right

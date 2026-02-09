@@ -1,4 +1,4 @@
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { getLeaveYearString } from "@/helper/getLeaveYearString";
 import { isValidObjectId, createObjectId } from "@/lib/mongodb";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import LeaveRequestModel from "@/models/leaveRequestModel";
@@ -630,4 +630,86 @@ export async function getRemainingBalance(
 
   const leaveEntry = leaveDoc.leaveData.find((l) => l.leaveType === leaveType);
   return leaveEntry?.remaining || 0;
+}
+
+export function splitLeaveDatesByYear(dates, startMonth) {
+  const map = {};
+
+  for (const dateStr of dates) {
+    const leaveYear = getLeaveYearString(new Date(dateStr), startMonth);
+
+    if (!map[leaveYear]) {
+      map[leaveYear] = [];
+    }
+
+    map[leaveYear].push(dateStr);
+  }
+
+  return map;
+}
+
+export async function validateOverlappingLeave(employeeId, leaveDates) {
+  const overlapping = await LeaveRequestModel.findOne({
+    employeeId,
+    leaveStatus: { $in: ["Pending", "Approved"] },
+    leaveDates: { $in: leaveDates },
+  });
+
+  if (overlapping) {
+    return {
+      success: false,
+      message: "Some of the selected dates are already applied for leave.",
+    };
+  }
+
+  return { success: true };
+}
+
+export async function validateOverlappingHalfDayLeave(
+  employeeId,
+  leaveDates,
+  halfDayType
+) {
+  const overlapping = await LeaveRequestModel.find({
+    employeeId,
+    leaveStatus: { $in: ["Pending", "Approved"] },
+    leaveDates: { $in: leaveDates },
+    isDeleted: false,
+  });
+
+  for (const leave of overlapping) {
+    if (!leave.isHalfDay) {
+      return {
+        success: false,
+        message:
+          "Some of the selected dates are already applied for full-day leave.",
+      };
+    }
+    if (leave.halfDayType === halfDayType) {
+      return {
+        success: false,
+        message: "Some of the selected half-day leaves are already applied.",
+      };
+    }
+  }
+
+  return { success: true };
+}
+
+export function calculateLeaveDays(leaveDates, rules) {
+  let count = 0;
+  for (const dateStr of leaveDates) {
+    const date = new Date(dateStr);
+    const day = date.getUTCDay();
+    if (day === 0) {
+      // always skip Sunday
+      continue;
+    }
+    if (day === 6 && !rules.includeSaturday) {
+      // skip Saturday if needed
+      continue;
+    }
+    count++;
+  }
+  return count;
 }

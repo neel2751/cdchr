@@ -280,10 +280,14 @@ export const OfficeEmployeeStatus = async (data) => {
     const id = data?.id;
     const isActive = !data?.status;
     const statusDate = data.status ? new Date() : null;
+    const isShowenInWeeklyTimesheet = !data?.isShowenInWeeklyTimesheet;
+    const name = data?.name === "status" ? isActive : isShowenInWeeklyTimesheet;
+
     await OfficeEmployeeModel.updateOne(
       { _id: id },
-      { $set: { isActive, statusDate } }
+      { $set: { [data?.name]: name, statusDate } }
     );
+
     return {
       success: true,
       message: "The Status of the Assign Project has been Updated",

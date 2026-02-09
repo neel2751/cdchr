@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { GlobalForm } from "@/components/form/form";
+import FingerprintJS from "@fingerprintjs/fingerprintjs";
+import { CopyCode } from "@/components/clipboard";
 
 export const LOGINFIELD = [
   {
@@ -46,6 +48,7 @@ export const LoginUi = () => {
   const { status, data: session } = useSession();
   const router = useRouter();
   const [isLoading, setIsLoading] = React.useState(false);
+  const [unauthorizedId, setUnauthorizedId] = React.useState(""); // State to store the ID
 
   const callBackcheck = callback || process.env.NEXTAUTH_URL || "/";
 
@@ -67,15 +70,34 @@ export const LoginUi = () => {
     setIsLoading(true);
     // add the artifical  delay to simulate the server response
     // await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const fp = await FingerprintJS.load();
+    const result = await fp.get();
+    const deviceId = result.visitorId;
+
     try {
       const res = await signIn("credentials", {
         redirect: false, // Prevent automatic page reload
         email: data.email,
         password: data.password,
+        deviceId, // Send the device ID
       });
 
       if (res?.error) {
-        toast.error(res.error); // Optionally show a toast notification
+        // we have ERROR TYPE from the API
+        try {
+          const cleanJson = res.error.replace(/^Error: /, "");
+          const errorObj = JSON.parse(cleanJson);
+
+          if (errorObj.type === "DEVICE_ERROR") {
+            toast.error("This device is not authorized. Please contact admin.");
+            setUnauthorizedId(errorObj?.detectedId || "");
+          } else {
+            toast.error(errorObj?.message); // Optionally show a toast notification
+          }
+        } catch (parseError) {
+          toast.error(res.error.replace(/^Error: /, ""));
+        }
       } else {
         toast.success("Logged in successfully. Please wait..."); // Optionally show a toast notification
         window.location.href = res.url || callBackcheck || "/";
@@ -118,6 +140,31 @@ export const LoginUi = () => {
             isLoading={isLoading}
             btnName={"Login"}
           />
+
+          {unauthorizedId && (
+            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-400 rounded-md">
+              <p className="text-yellow-800 font-bold">UNAUTHORIZED DEVICE</p>
+              <p className="text-sm text-yellow-700">Your Hardware ID is:</p>
+
+              {/* <div className="flex items-center gap-2 mt-2 bg-white p-2 border rounded font-mono text-blue-600"> */}
+              {/* <span className="flex-1 select-all">{unauthorizedId}</span> */}
+              {/* <Button
+                  variant={"icon"}
+                  onClick={() => navigator.clipboard.writeText(unauthorizedId)}
+                  className="bg-gray-200 px-2 py-1 text-xs rounded"
+                >
+                  Copy ID
+                </Button> */}
+
+              <CopyCode code={unauthorizedId} />
+              {/* </div> */}
+
+              <p className="text-xs mt-3 text-gray-500 italic">
+                * Copy the ID and send it to the Super Admin via WhatsApp or
+                Email.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

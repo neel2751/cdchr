@@ -1,4 +1,9 @@
-import { useFormContext, Controller, useFieldArray } from "react-hook-form";
+import {
+  useFormContext,
+  Controller,
+  useFieldArray,
+  get,
+} from "react-hook-form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -19,6 +24,7 @@ import {
   ImagePlus,
   Minus,
   Plus,
+  Trash2,
   X,
 } from "lucide-react";
 import { format, getMonth, getYear, setMonth, setYear } from "date-fns";
@@ -53,6 +59,8 @@ export const FormInput = ({ field, ...props }) => {
     register,
     formState: { errors },
   } = useFormContext();
+
+  const fieldError = get(errors, field?.name);
 
   return (
     <div className="space-y-2">
@@ -95,10 +103,8 @@ export const FormInput = ({ field, ...props }) => {
       {field.helperText && (
         <p className="text-xs text-muted-foreground">{field.helperText}</p>
       )}
-      {errors[field.name] && (
-        <p className="text-sm text-destructive">
-          {errors[field.name]?.message}
-        </p>
+      {fieldError && (
+        <p className="text-sm text-destructive">{fieldError.message}</p>
       )}
     </div>
   );
@@ -109,33 +115,45 @@ export const FormSelect = ({ field }) => {
     control,
     formState: { errors },
   } = useFormContext();
+
+  const error = get(errors, field?.name);
+
   return (
     <div className="space-y-2">
-      <FormLabel name={field.name} labelText={field.labelText} />
+      <FormLabel name={field?.name} labelText={field?.labelText} />
+
       <Controller
-        name={field.name}
+        name={field?.name}
         control={control}
-        rules={field.validationOptions}
+        rules={field?.validationOptions}
         render={({ field: { onChange, value } }) => (
-          <Select onValueChange={onChange} value={value}>
+          <Select onValueChange={onChange} value={value || ""}>
             <SelectTrigger>
-              <SelectValue placeholder={field.placeholder} />
+              <SelectValue placeholder={field?.placeholder} />
             </SelectTrigger>
+
             <SelectContent>
-              {field.options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
+              {field?.options?.map((option, index) => {
+                const formattedOption =
+                  typeof option === "string"
+                    ? { label: option, value: option }
+                    : option;
+
+                return (
+                  <SelectItem
+                    key={formattedOption?.value || index}
+                    value={formattedOption?.value}
+                  >
+                    {formattedOption?.label}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         )}
       />
-      {errors[field.name] && (
-        <p className="text-sm text-destructive">
-          {errors[field.name]?.message}
-        </p>
-      )}
+
+      {error && <p className="text-sm text-destructive">{error.message}</p>}
     </div>
   );
 };
@@ -186,41 +204,134 @@ export const FormRadio = ({ field }) => {
   );
 };
 
+// export const FormCheckbox = ({ field }) => {
+//   const {
+//     control,
+//     formState: { errors },
+//   } = useFormContext();
+//   return (
+//     <>
+//       <div className="flex items-center space-x-2">
+//         <Controller
+//           name={field.name}
+//           control={control}
+//           rules={field.validationOptions}
+//           render={({ field: { onChange, value } }) => (
+//             <Checkbox
+//               id={field.name}
+//               checked={value}
+//               onCheckedChange={onChange}
+//             />
+//           )}
+//         />
+//         <Label
+//           htmlFor={field.name}
+//           className={`${
+//             errors[field.name] ? "text-destructive" : "text-neutral-700"
+//           }`}
+//         >
+//           {field.labelText}
+//         </Label>
+//       </div>
+//       {errors[field.name] && (
+//         <p className="text-sm text-destructive ml-6 mt-1">
+//           {errors[field.name]?.message}
+//         </p>
+//       )}
+//     </>
+//   );
+// };
+
 export const FormCheckbox = ({ field }) => {
   const {
     control,
     formState: { errors },
   } = useFormContext();
+
+  // If there are no options, it behaves as a single toggle (existing logic)
+  if (!field.options || field.options.length === 0) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center space-x-2">
+          <Controller
+            name={field.name}
+            control={control}
+            rules={field.validationOptions}
+            render={({ field: { onChange, value } }) => (
+              <Checkbox
+                id={field.name}
+                checked={value}
+                onCheckedChange={onChange}
+              />
+            )}
+          />
+          <Label
+            htmlFor={field.name}
+            className={
+              errors[field.name] ? "text-destructive" : "text-neutral-700"
+            }
+          >
+            {field.labelText}
+          </Label>
+        </div>
+        {errors[field.name] && (
+          <p className="text-sm text-destructive ml-6">
+            {errors[field.name]?.message}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // --- MULTIPLE CHECKBOX GROUP LOGIC ---
   return (
-    <>
-      <div className="flex items-center space-x-2">
-        <Controller
-          name={field.name}
-          control={control}
-          rules={field.validationOptions}
-          render={({ field: { onChange, value } }) => (
-            <Checkbox
-              id={field.name}
-              checked={value}
-              onCheckedChange={onChange}
+    <div className="space-y-3">
+      <FormLabel name={field.name} labelText={field.labelText} />
+      <div className="grid grid-cols-2 gap-4 border rounded-md p-3 shadow-sm">
+        {field.options.map((option) => (
+          <div key={option.value} className="flex items-center space-x-2">
+            <Controller
+              name={field.name}
+              control={control}
+              rules={field.validationOptions}
+              render={({ field: { onChange, value } }) => {
+                // value is expected to be an array like ['tenant', 'buyer']
+                const isChecked =
+                  Array.isArray(value) && value.includes(option.value);
+
+                return (
+                  <Checkbox
+                    id={`${field.name}-${option.value}`}
+                    checked={isChecked}
+                    onCheckedChange={(checked) => {
+                      const currentValue = Array.isArray(value) ? value : [];
+                      if (checked) {
+                        onChange([...currentValue, option.value]);
+                      } else {
+                        onChange(
+                          currentValue.filter((v) => v !== option.value)
+                        );
+                      }
+                    }}
+                  />
+                );
+              }}
             />
-          )}
-        />
-        <Label
-          htmlFor={field.name}
-          className={`${
-            errors[field.name] ? "text-destructive" : "text-neutral-700"
-          }`}
-        >
-          {field.labelText}
-        </Label>
+            <Label
+              htmlFor={`${field.name}-${option.value}`}
+              className="text-sm text-neutral-600 cursor-pointer"
+            >
+              {option.label}
+            </Label>
+          </div>
+        ))}
       </div>
       {errors[field.name] && (
-        <p className="text-sm text-destructive ml-6 mt-1">
+        <p className="text-sm text-destructive">
           {errors[field.name]?.message}
         </p>
       )}
-    </>
+    </div>
   );
 };
 
@@ -464,6 +575,8 @@ export const SearchableSelect = ({ field }) => {
 
   const options = field.options;
 
+  const fieldError = get(errors, field?.name);
+
   return (
     <div className="space-y-2">
       <FormLabel name={field.name} labelText={field.labelText} />
@@ -510,11 +623,11 @@ export const SearchableSelect = ({ field }) => {
                     {options &&
                       options?.map((framework) => (
                         <CommandItem
-                          key={framework.value}
-                          value={framework.value}
+                          key={framework?.value}
+                          value={framework?.value}
                           onSelect={() => {
                             onChange(
-                              framework.value === value ? "" : framework.value
+                              framework?.value === value ? "" : framework?.value
                             );
                             setOpen(false);
                           }}
@@ -522,12 +635,12 @@ export const SearchableSelect = ({ field }) => {
                           <Check
                             className={cn(
                               "mr-2 h-4 w-4",
-                              value === framework.value
+                              value === framework?.value
                                 ? "opacity-100"
                                 : "opacity-0"
                             )}
                           />
-                          {framework.label}
+                          {framework?.label}
                         </CommandItem>
                       ))}
                     {/* </ScrollArea> */}
@@ -538,10 +651,8 @@ export const SearchableSelect = ({ field }) => {
           </>
         )}
       />
-      {errors[field.name] && (
-        <p className="text-sm text-destructive">
-          {errors[field.name]?.message}
-        </p>
+      {fieldError && (
+        <p className="text-sm text-destructive">{fieldError.message}</p>
       )}
     </div>
   );
@@ -695,153 +806,112 @@ export const FormMultipleSelect = ({ field }) => {
 export const FormImageUpload = ({ field }) => {
   const {
     control,
-    setValue, // ✅ Use `setValue` to update form
+    setValue,
+    watch,
     formState: { errors },
   } = useFormContext();
 
-  const [uploadedFiles, setUploadedFiles] = React.useState([]);
+  const value = watch(field.name);
 
-  // 🔹 Sync with React Hook Form safely (only when uploadedFiles changes)
-  React.useEffect(() => {
-    setValue(
-      field.name,
-      field.maxFiles === 1 ? uploadedFiles[0] || null : uploadedFiles
-    );
-  }, [uploadedFiles, setValue, field.name]);
+  // Normalize value to array
+  const files = React.useMemo(() => {
+    if (!value) return [];
+    return Array.isArray(value) ? value : [value];
+  }, [value]);
 
-  // 🔹 Cleanup Object URLs when the component unmounts
+  // Cleanup object URLs when component unmounts
   React.useEffect(() => {
-    return () =>
-      uploadedFiles.forEach((file) => URL.revokeObjectURL(file.preview));
-  }, [uploadedFiles]);
+    return () => {
+      files.forEach((file) => {
+        if (file?.preview) URL.revokeObjectURL(file.preview);
+      });
+    };
+  }, [files]);
 
   const onDrop = (acceptedFiles) => {
-    if (acceptedFiles.length === 0) return;
+    if (!acceptedFiles.length) return;
 
-    const newFiles = acceptedFiles
-      .filter(
-        (file) =>
-          !uploadedFiles.some((existingFile) => existingFile.name === file.name)
-      )
-      .map((file) =>
-        Object.assign(file, { preview: URL.createObjectURL(file) })
-      );
+    // 🚫 If only 1 file allowed and one already exists
+    if (field.maxFiles === 1 && files.length === 1) {
+      return; // Do nothing
+    }
 
-    setUploadedFiles((prev) => {
-      const updatedFiles =
-        field.maxFiles === 1 ? [newFiles[0]] : [...prev, ...newFiles];
-      return updatedFiles;
-    });
+    const newFiles = acceptedFiles.map((file) =>
+      Object.assign(file, {
+        preview: URL.createObjectURL(file),
+      })
+    );
+
+    if (field.maxFiles === 1) {
+      setValue(field.name, newFiles[0], { shouldValidate: true });
+    } else {
+      setValue(field.name, [...files, ...newFiles], {
+        shouldValidate: true,
+      });
+    }
   };
 
-  const handleRemove = (event, index) => {
-    event.stopPropagation(); // Prevent Dropzone from opening file manager
-
-    setUploadedFiles((prev) => {
-      URL.revokeObjectURL(prev[index].preview);
-      return prev.filter((_, i) => i !== index);
-    });
+  const handleRemove = (index) => {
+    if (field.maxFiles === 1) {
+      setValue(field.name, null, { shouldValidate: true });
+    } else {
+      const updated = files.filter((_, i) => i !== index);
+      setValue(field.name, updated, { shouldValidate: true });
+    }
   };
 
   const renderPreview = (file) => {
-    const fileType = file.type;
+    // Existing image URL (edit mode)
+    if (typeof file === "string") {
+      return (
+        <Image
+          src={file}
+          alt="Uploaded"
+          width={120}
+          height={120}
+          className="rounded-md border object-cover size-28"
+        />
+      );
+    }
 
-    if (fileType.startsWith("image/")) {
-      // Image file preview
+    // New uploaded file
+    if (file?.type?.startsWith("image/")) {
       return (
         <Image
           src={file.preview}
           alt={file.name}
-          height={80}
-          width={80}
-          className="rounded-md border border-gray-200 size-28 object-fill"
+          width={120}
+          height={120}
+          className="rounded-md border object-cover size-28"
         />
       );
     }
 
-    if (fileType.startsWith("video/")) {
-      // Video file preview
-      return (
-        <video controls className="rounded-md border border-gray-200 size-28">
-          <source src={file.preview} type={fileType} />
-          Your browser does not support the video tag.
-        </video>
-      );
-    }
-
-    if (fileType === "application/pdf") {
-      // PDF file preview
-      return (
-        <embed
-          src={file.preview}
-          type="application/pdf"
-          className="rounded-md border border-gray-200 size-28"
-        />
-      );
-    }
-
-    if (fileType.startsWith("text/")) {
-      // Text file preview
-      return (
-        <iframe
-          src={file.preview}
-          title={file.name}
-          className="rounded-md border border-gray-200 size-28"
-        />
-      );
-    }
-    // word or excel file preview
-    // if (
-    //   fileType === "application/msword" ||
-    //   fileType ===
-    //     "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    //   fileType === "application/vnd.ms-excel" ||
-    //   fileType ===
-    //     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    // ) {
-    //   return (
-    //     // show the preview of word or excel file
-    //     <div className=" h-28 w-28 flex items-center justify-center bg-gray-200 flex-wrap p-1 overflow-hidden">
-    //       <span>{file.name}</span>
-    //       <p className="text-xs text-gray-500">Preview not available</p>
-    //     </div>
-    //   );
-    // }
-
-    // Fallback for other file types
     return (
-      // Show a generic preview for unsupported file types
-
-      <Card className={"w-28 h-28 flex-wrap "}>
-        <CardHeader>
-          <CardTitle>
-            {file.name.length > 20 ? `${file.name.slice(0, 20)}...` : file.name}
-          </CardTitle>
-          <CardDescription>
-            <div className="flex space-x-2 h-3 items-center mt-1 text-xs">
-              <span className="text-gray-500">
-                {(file.size / 1024).toFixed(2)} KB
-              </span>
-            </div>
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="w-28 h-28 flex items-center justify-center border rounded-md text-sm">
+        {file.name}
+      </div>
     );
   };
 
+  const isDisabled =
+    field.maxFiles === 1
+      ? files.length === 1
+      : field.maxFiles && files.length >= field.maxFiles;
+
   return (
     <div className="space-y-2">
-      <FormLabel name={field.name} labelText={field.labelText} />
       <Controller
-        name={field?.name}
+        name={field.name}
         control={control}
-        rules={field?.validationOptions}
+        rules={field.validationOptions}
         render={() => (
           <Dropzone
             onDrop={onDrop}
             accept={field?.acceptedFileTypes}
             maxSize={field?.maxFileSize}
             maxFiles={field?.maxFiles}
+            disabled={isDisabled}
           >
             {({ fileRejections, isDragActive }) => (
               <>
@@ -854,16 +924,16 @@ export const FormImageUpload = ({ field }) => {
                       : "border-gray-300 bg-white"
                   }`}
                 >
-                  {uploadedFiles.length > 0 ? (
+                  {files.length > 0 ? (
                     <div className="flex flex-wrap gap-4 items-start justify-start">
-                      {uploadedFiles.map((file, index) => (
+                      {files.map((file, index) => (
                         <div key={index} className="relative group">
                           {renderPreview(file)}
                           {/* <img
-                          src={file.preview}
-                          alt="Uploaded"
-                          className="h-20 w-20 border border-indigo-500 rounded-lg"
-                        /> */}
+                        src={file.preview}
+                        alt="Uploaded"
+                        className="h-20 w-20 border border-indigo-500 rounded-lg"
+                      /> */}
                           <Button
                             type="button"
                             className="absolute size-5 rounded-full bg-rose-600 hover:bg-rose-700 -right-1 -top-1"
@@ -879,6 +949,11 @@ export const FormImageUpload = ({ field }) => {
                     <div className="flex justify-center items-center w-full p-12">
                       {isDragActive ? (
                         "Drop the file here"
+                      ) : isDisabled ? (
+                        <div className="text-center text-sm text-muted-foreground">
+                          Maximum of {field.maxFiles}{" "}
+                          {field.maxFiles > 1 ? "files" : "file"} uploaded
+                        </div>
                       ) : (
                         <div className="text-center">
                           <svg
@@ -988,8 +1063,8 @@ export const FormImageUpload = ({ field }) => {
                         ? `You have allow only ${field.maxFiles} files and trying to upload ${fileRejections.length} files`
                         : fileRejections[0].errors[0].message}
                       {/* {fileRejections.map((rejection, index) => (
-                        <p key={index}>{rejection.errors[0].message}</p>
-                      ))} */}
+                      <p key={index}>{rejection.errors[0].message}</p>
+                    ))} */}
                     </div>
                   )}
                 </div>
@@ -998,10 +1073,9 @@ export const FormImageUpload = ({ field }) => {
           </Dropzone>
         )}
       />
-      {errors[field?.name] && (
-        <p className="text-sm font-medium text-destructive">
-          {errors[field?.name]?.message}
-        </p>
+
+      {errors[field.name] && (
+        <p className="text-sm text-red-500">{errors[field.name]?.message}</p>
       )}
     </div>
   );
@@ -1013,13 +1087,17 @@ const Dropzone = ({
   maxSize,
   maxFiles,
   onDrop,
+  disabled,
 }) => {
+  // const isMaxReached = maxFiles === 1 ? !!children.fileRejections.length || !!children.isDragActive : children.fileRejections.length >= maxFiles || children.isDragActive;
   const { getRootProps, getInputProps, isDragActive, fileRejections } =
     useDropzone({
       accept,
       maxSize,
       maxFiles,
       onDrop,
+      // disabled: maxFiles === 1 ? !!children.fileRejections.length || !!isDragActive : fileRejections.length >= maxFiles || isDragActive,
+      disabled,
     });
 
   return (
@@ -1088,7 +1166,6 @@ export const FormMultiInput = ({ field }) => {
                       onChange(e.target.value);
                       trigger(field?.name);
                     }}
-                    name={name}
                     id={field?.name}
                   />
                 </div>
@@ -1281,6 +1358,90 @@ export function AvatarImageProfile({ field }) {
         <p className="text-sm text-destructive">
           {errors[field?.name]?.message}
         </p>
+      )}
+    </div>
+  );
+}
+
+export function MultiGroupInput({ field }) {
+  const { control } = useFormContext();
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: field.name,
+  });
+
+  const renderSubField = (subField, index) => {
+    const scopedName = `${field.name}.${index}.${subField.name}`;
+
+    const commonProps = {
+      field: {
+        ...subField,
+        name: scopedName,
+        labelText: subField.label,
+        validationOptions: subField.validationOptions,
+      },
+    };
+
+    switch (subField.type) {
+      case "text":
+      case "number":
+      case "email":
+      case "password":
+        return <FormInput key={scopedName} {...commonProps} />;
+
+      case "textarea":
+        return <FormTextarea key={scopedName} {...commonProps} />;
+
+      case "select":
+        return <SearchableSelect key={scopedName} {...commonProps} />;
+
+      case "multipleSelect":
+        return <FormMultipleSelect key={scopedName} {...commonProps} />;
+
+      case "checkbox":
+        return <FormCheckbox key={scopedName} {...commonProps} />;
+
+      case "date":
+        return <FormDate key={scopedName} {...commonProps} />;
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-4 border p-5 rounded-xl bg-indigo-50/30">
+      <div className="flex justify-between items-center">
+        <h4 className="font-semibold text-indigo-700">{field.labelText}</h4>
+        <span className="text-xs bg-indigo-200 px-2 py-1 rounded">
+          Max: {field.maxItem || 5}
+        </span>
+      </div>
+
+      {fields.map((item, index) => (
+        <div
+          key={item.id}
+          className="border bg-white p-4 rounded-lg space-y-3 relative"
+        >
+          {field.fieldsConfig?.map((sub) => renderSubField(sub, index))}
+
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="absolute top-2 right-2"
+            onClick={() => remove(index)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+
+      {(!field.maxItem || fields.length < field.maxItem) && (
+        <Button type="button" onClick={() => append({})} className="w-full">
+          + Add {field.labelText}
+        </Button>
       )}
     </div>
   );

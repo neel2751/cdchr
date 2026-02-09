@@ -16,6 +16,23 @@ const officeUserSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    authorizedDevices: [
+      {
+        deviceId: String, // The Hardware Fingerprint
+        deviceName: String, // e.g., "Main Reception PC"
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
+    restrictedIPAddresses: [
+      {
+        ipAddress: String,
+        addedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    enforceDeviceLock: { type: Boolean, default: true },
     isActive: {
       type: Boolean,
       default: true,

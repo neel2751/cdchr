@@ -34,6 +34,7 @@ const EmployeTabel = () => {
               "email",
               "contactNo",
               "status",
+              "timesheet",
               "joindate",
               "Enddate",
               "VisaStart",
@@ -59,7 +60,7 @@ const EmployeTabel = () => {
                 {!item?.isSuperAdmin ? (
                   <div
                     onClick={() =>
-                      handleAlert(item?._id, "Update", item?.isActive)
+                      handleAlert(item?._id, "Update", item?.isActive, "status")
                     }
                   >
                     <TableStatus isActive={item?.isActive} />
@@ -67,6 +68,20 @@ const EmployeTabel = () => {
                 ) : (
                   <TableStatus isActive={item?.isActive} />
                 )}
+              </TableCell>
+              <TableCell>
+                <div
+                  onClick={() =>
+                    handleAlert(
+                      item?._id,
+                      "Update",
+                      item?.isShowenInWeeklyTimesheet,
+                      "isShowenInWeeklyTimesheet"
+                    )
+                  }
+                >
+                  <TableStatus isActive={item?.isShowenInWeeklyTimesheet} />
+                </div>
               </TableCell>
               <TableCell>
                 {item?.joinDate && format(new Date(item?.joinDate), "PPP")}
@@ -106,29 +121,29 @@ const EmployeTabel = () => {
                   : "-"}
               </TableCell>
               <TableCell>
-                {!item?.isSuperAdmin && (
-                  <div className="flex gap-2">
-                    <Button
-                      size={"icon"}
-                      variant={"outline"}
-                      asChild
-                      className={"text-blue-600"}
+                <div className="flex gap-2">
+                  <Button
+                    size={"icon"}
+                    variant={"outline"}
+                    asChild
+                    className={"text-blue-600"}
+                  >
+                    <Link
+                      href={`/admin/officeEmployee/${encrypt(
+                        item?._id
+                      )}/overview`}
                     >
-                      <Link
-                        href={`/admin/officeEmployee/${encrypt(
-                          item?._id
-                        )}/overview`}
-                      >
-                        <Eye />
-                      </Link>
-                    </Button>
-                    <Button
-                      onClick={() => handleEdit(item)}
-                      variant="outline"
-                      size="icon"
-                    >
-                      <Edit className="text-indigo-600" />
-                    </Button>
+                      <Eye />
+                    </Link>
+                  </Button>
+                  <Button
+                    onClick={() => handleEdit(item)}
+                    variant="outline"
+                    size="icon"
+                  >
+                    <Edit className="text-indigo-600" />
+                  </Button>
+                  {!item?.isSuperAdmin && (
                     <Button
                       onClick={() =>
                         handleAlert(item?._id, "Delete", item?.isActive)
@@ -138,8 +153,8 @@ const EmployeTabel = () => {
                     >
                       <Trash2 className="text-rose-600" />
                     </Button>
-                  </div>
-                )}
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}

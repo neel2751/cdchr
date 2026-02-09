@@ -1,9 +1,6 @@
 "use client";
 import { useMemo } from "react";
 import DashCount from "./components/dashCard";
-import TodayCard from "./components/todayCard";
-import Overview from "./components/overview";
-import RecentData from "./components/recentData";
 import { useQuery } from "@tanstack/react-query";
 import { getDashboardDataServer } from "@/utils/dashData";
 
@@ -53,7 +50,8 @@ const Dash = () => {
     <>
       {/* Office Employee Data */}
       {mergeData && <DashCount memoizedEmployeeData={mergeData} />}
-      <div className="sm:px-8 px-4 py-4 lg:flex gap-x-8 w-full">
+
+      {/* <div className="sm:px-8 px-4 py-4 lg:flex gap-x-8 w-full">
         <div className="flex flex-col lg:w-1/2 gap-8">
           <div className="flex gap-8">
             <TodayCard
@@ -68,12 +66,11 @@ const Dash = () => {
             />
           </div>
           <Overview dayData={chartData} />
-          {/* <ChartComponent chartData={chartData} /> */}
         </div>
         <div className="lg:w-1/2 sm:mt-0 mt-8">
           <RecentData data={today?.employees} />
         </div>
-      </div>
+      </div> */}
     </>
   );
 };

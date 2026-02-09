@@ -6,6 +6,11 @@ import LeaveRequestModel from "@/models/leaveRequestModel";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import { createObjectId, withTransaction } from "@/lib/mongodb";
 import { validateLeaveData } from "./helper/helper";
+import RoleBasedModel from "@/models/rolebasedModel";
+import { getLeaveYearString } from "@/helper/getLeaveYearString";
+import { normalizeDateToUTC } from "@/lib/formatDate";
+import { getLeaveSettings } from "../leaveSettingServer";
+import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 
 export async function getLeaveRequestData(leaveYear) {
   try {
@@ -17,6 +22,8 @@ export async function getLeaveRequestData(leaveYear) {
     const checLeaveYear = Number(parseInt(leaveYear))
       ? Number(parseInt(leaveYear))
       : getYear(new Date());
+
+    // Assign match condition based on role
 
     const match =
       role === "superAdmin"
@@ -92,18 +99,56 @@ export async function getLeaveRequestDataAdmin(filterData) {
     const employeeId = props?.session?.user?._id;
     const role = props?.session?.user?.role;
     if (!employeeId) return { success: false, message: "Employee not found" };
+    const roles = await RoleBasedModel.find({
+      employeeId,
+      isDeleted: false,
+    })
+      .lean()
+      .exec();
+    const permissions = roles.flatMap((r) => r.permissions);
+    const isPermission = permissions.includes("/admin/leaveManagement");
 
     await connect();
-    const { leaveYear, page, limit } = filterData;
+    const { leaveYear, page, limit, leaveStatus, fromDate, toDate } =
+      filterData;
+
+    // before apply page and limit we have to convert them to number and set default values
+    const validPage =
+      Number.isInteger(parseInt(page)) && parseInt(page) > 0
+        ? parseInt(page)
+        : 1;
+    const validLimit =
+      Number.isInteger(parseInt(limit)) && parseInt(limit) > 0
+        ? parseInt(limit)
+        : 10;
+    const skip = (validPage - 1) * validLimit;
     const match =
-      role === "superAdmin"
-        ? { leaveYear: leaveYear }
-        : {
-            employeeId: createObjectId(employeeId),
-            leaveYear: leaveYear,
-          };
+      role === "superAdmin" || isPermission
+        ? {}
+        : { employeeId: createObjectId(employeeId) };
+
+    if (leaveYear) {
+      match.leaveYear = leaveYear;
+    } else {
+      match.leaveYear = getLeaveYearString(new Date());
+    }
+
+    if (fromDate && toDate) {
+      match.leaveDates = {
+        $elemMatch: {
+          $gte: normalizeDateToUTC(new Date(fromDate)),
+          $lte: normalizeDateToUTC(new Date(toDate)),
+        },
+      };
+    }
+
+    console.log("Leave Status Filter:", match);
+
+    if (leaveStatus && leaveStatus !== "All") {
+      match.leaveStatus = leaveStatus;
+    }
     const lookup =
-      role === "superAdmin"
+      role === "superAdmin" || isPermission
         ? {
             from: "officeemployes",
             localField: "employeeId",
@@ -257,8 +302,10 @@ export async function getLeaveRequestDataAdmin(filterData) {
       {
         $facet: {
           data: [
-            { $skip: (page - 1) * limit }, // Skip for pagination
-            { $limit: limit }, // Limit the number of results
+            { $skip: skip }, // Skip for pagination
+            { $limit: validLimit }, // Limit the number of results
+            // { $skip: (page - 1) * limit }, // Skip for pagination
+            // { $limit: limit }, // Limit the number of results
           ],
           totalCount: [{ $count: "count" }], // Count total documents
         },
@@ -629,4 +676,197 @@ export async function getCommonSpecificLeave({
     console.log(error);
     return null;
   }
+}
+
+export async function previewCarryForward({ leaveYear }) {
+  await connect();
+
+  const settings = await getLeaveSettings();
+
+  if (!settings?.data?.carryForwardEnabled) {
+    throw new Error("Carry forward is disabled in settings");
+  }
+  const rules = settings?.data?.carryForwardRules || [];
+
+  const commonLeaves = await CommonLeaveModel.find({
+    leaveYear,
+  })
+    .populate("employeeId", "name")
+    .lean();
+
+  const preview = [];
+
+  for (const common of commonLeaves) {
+    for (const leave of common.leaveData) {
+      if (leave.leaveType === "Unpaid Leave") continue;
+
+      const rule = rules.find((r) => r.leaveType === leave.leaveType);
+
+      const remaining = leave.remaining || 0;
+
+      let carryAllowed = false;
+      let maxDays = 0;
+
+      if (rule && rule.allowed) {
+        carryAllowed = true;
+        maxDays = rule.maxDays || 0;
+      }
+
+      let willCarry = 0;
+      let willExpire = remaining;
+
+      if (carryAllowed && remaining > 0) {
+        willCarry = Math.min(remaining, maxDays);
+        willExpire = remaining - willCarry;
+      }
+
+      // Default entitlement for next year (you probably already store this)
+      const newYearEntitlement = leave.defaultEntitlement || leave.total || 0;
+
+      const newTotal = newYearEntitlement + willCarry;
+
+      preview.push({
+        employeeName: common.employeeId?.name || "Unknown",
+        leaveType: rules?.leaveType || leave.leaveType,
+        carryAllowed,
+        remaining,
+        maxCarryLimit: maxDays,
+        willExpire,
+        willCarry,
+        newYearEntitlement,
+        newTotal,
+      });
+    }
+  }
+
+  const result = preview.filter((p) => p.willCarry > 0);
+
+  return {
+    success: true,
+    leaveYear,
+    data: JSON.stringify(result),
+  };
+}
+
+// export async function getLeaveLiabilityReport() {
+//   const employees = await OfficeEmployeeModel.find({ isDeleted: false });
+
+//   const report = [];
+
+//   for (const emp of employees) {
+//     const commonLeave = await CommonLeaveModel.findOne({
+//       employeeId: emp._id,
+//       leaveYear: currentLeaveYear,
+//     });
+
+//     if (!commonLeave) continue;
+
+//     const annual = commonLeave.leaveData.find(
+//       (l) => l.leaveType === "Annual Leave"
+//     );
+
+//     if (!annual) continue;
+
+//     const dailyRate = emp.salary / 260;
+
+//     report.push({
+//       employee: emp.name,
+//       remainingDays: annual.remaining,
+//       dailyRate,
+//       liability: annual.remaining * dailyRate,
+//     });
+//   }
+
+//   return report;
+// }
+
+export async function holidayPlanner({ startDate, endDate }) {
+  try {
+    await connect();
+
+    const plannerData = await LeaveRequestModel.aggregate([
+      {
+        $match: {
+          leaveStatus: "Approved",
+          leaveDates: {
+            $elemMatch: {
+              $gte: normalizeDateToUTC(startDate),
+              $lte: normalizeDateToUTC(endDate),
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "officeemployes",
+          localField: "employeeId",
+          foreignField: "_id",
+          as: "employee",
+        },
+      },
+      { $unwind: "$employee" },
+
+      {
+        $project: {
+          _id: 1,
+          employeeId: 1,
+          employeeName: "$employee.fullName",
+          status: "$leaveStatus",
+          leaveType: 1,
+          leaveDates: 1,
+          isHalfDay: 1,
+          halfDayType: 1,
+          isPaid: 1,
+        },
+      },
+    ]);
+
+    return { success: true, data: JSON.stringify(plannerData) };
+  } catch (error) {
+    console.log("Error fetching holiday planner data", error);
+    return { success: false, message: "Error fetching holiday planner data" };
+  }
+}
+
+export async function holidayPlannerNew({ startDate, endDate }) {
+  await connect();
+  const leaves = await LeaveRequestModel.find({
+    leaveStatus: "Approved",
+    leaveDates: {
+      $gte: normalizeDateToUTC(startDate),
+      $lte: normalizeDateToUTC(endDate),
+    },
+  }).lean();
+
+  const employees = await OfficeEmployeeModel.find(
+    { _id: { $in: leaves.map((l) => l.employeeId) } },
+    { name: 1 }
+  ).lean();
+
+  const employeeMap = Object.fromEntries(
+    employees.map((e) => [e._id.toString(), e.name])
+  );
+
+  const calendarMap = {};
+
+  leaves.forEach((leave) => {
+    leave.leaveDates.forEach((date) => {
+      const key = date.toISOString().split("T")[0];
+      if (!calendarMap[key]) calendarMap[key] = [];
+
+      calendarMap[key].push({
+        employeeId: leave.employeeId,
+        employeeName: employeeMap[leave.employeeId.toString()],
+        leaveType: leave.leaveType,
+        isHalfDay: leave.isHalfDay,
+        halfDayType: leave.halfDayType || null,
+        isPaid: leave.isPaid,
+        status: leave.leaveStatus,
+        leaveDates: leave.leaveDates,
+        leaveSubmitDate: leave.leaveSubmitDate,
+      });
+    });
+  });
+
+  return { success: true, data: JSON.stringify(calendarMap) };
 }

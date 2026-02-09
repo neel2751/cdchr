@@ -12,6 +12,7 @@ import {
   XIcon,
   SaveIcon,
   QrCodeIcon,
+  Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,7 @@ import { handleTimeActionNew } from "../_components/handleTimeAction";
 import Link from "next/link";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import { BreaksCell } from "../siteAssignEmployee/test";
+import { sendNotification } from "@/server/attendanceServer/notificationServer";
 
 const EmployeeSiteManagement = ({ searchParams }) => {
   const queryClient = useQueryClient();
@@ -151,7 +153,52 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           delete newErrors[`break-${idx}`];
         }
       }
+      if (name === "clockIn" || name === "clockOut") {
+        const clockIn = name === "clockIn" ? value : showEditForm.clockIn || "";
+        const clockOut =
+          name === "clockOut" ? value : showEditForm.clockOut || "";
+        if (clockIn && clockOut) {
+          const [h1, m1] = clockIn.split(":").map(Number);
+          const [h2, m2] = clockOut.split(":").map(Number);
+
+          if (h2 * 60 + m2 < h1 * 60 + m1) {
+            newErrors["clock"] = "Clock Out cannot be earlier than Clock In";
+          } else {
+            delete newErrors["clock"];
+          }
+        } else {
+          delete newErrors["clock"];
+        }
+      }
+      // if the breaks array breakIn and breakOut is empty show the error
+      // if (
+      //   showEditForm.breaks &&
+      //   showEditForm.breaks.length > 0 &&
+      //   showEditForm.breaks.some((br) => !br.breakIn || !br.breakOut)
+      // ) {
+      //   newErrors["breaks"] =
+      //     "All breaks must have both Break In and Break Out";
+      // }
       return newErrors;
+    });
+  };
+
+  const addBreakRow = () => {
+    setShowEditForm((prev) => ({
+      ...prev,
+      breaks: [...(prev.breaks || []), { breakIn: "", breakOut: "" }],
+    }));
+  };
+
+  const removeBreakRow = (index) => {
+    setShowEditForm((prev) => {
+      const updated = [...(prev.breaks || [])];
+      updated.splice(index, 1);
+
+      return {
+        ...prev,
+        breaks: updated,
+      };
     });
   };
 
@@ -164,6 +211,20 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       employeeId,
       clockRecordId,
     } = showEditForm;
+
+    // Before saving, check for validation errors
+    if (Object.keys(errors).length > 0) {
+      toast.error("Please fix validation errors before saving.");
+      return;
+    }
+    if (breaks && breaks.length > 0) {
+      for (const br of breaks) {
+        if (!br.breakIn || !br.breakOut) {
+          toast.error("All breaks must have Break In and Break Out");
+          return;
+        }
+      }
+    }
 
     const result = await handleTimeActionNew({
       clockId: clockRecordId || id,
@@ -205,6 +266,28 @@ const EmployeeSiteManagement = ({ searchParams }) => {
     );
   };
 
+  const canSendNudge = (assignment) => {
+    // If they haven't even clocked in yet, they might just be off today
+    if (!assignment.clockIn) return false;
+
+    // If they have already clocked out, definitely DON'T send a notification
+    if (assignment.clockOut) return false;
+
+    // Otherwise, they are either "Checked In" or "On Break"
+    // and haven't finished their day—these are the ones to nudge!
+    return true;
+  };
+
+  const handleSendReminder = async (employee) => {
+    const response = await sendNotification(
+      employee.employeeId,
+      `Hi ${employee.name}, it looks like you forgot to clock out!`
+    );
+
+    if (response.success) toast.success("Notification sent!");
+    else toast.error("Failed to send notification.");
+  };
+
   const handleRemoveAssignment = (assignmentId) => {};
 
   const { data: session } = useSession();
@@ -214,8 +297,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
     "Status",
     "Clock In",
     "Clock Out",
-    "Break In",
-    "Break Out",
+    "Breaks",
     "Total Hour",
     "Break Hour",
     "Actions",
@@ -279,7 +361,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           </Card>
           <Card className="bg-red-50 text-red-600 border-none shadow-none">
             <CardHeader>
-              <CardTitle>Leaving Today</CardTitle>
+              <CardTitle>Clocked Out</CardTitle>
               <span className="text-2xl font-semibold">
                 {attendanceList.filter((emp) => emp.clockOut).length}
               </span>
@@ -352,11 +434,11 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                     return (
                       <TableRow key={index}>
                         <TableCell>{assignment?.name}</TableCell>
-                        <TableCell>
+                        {/* <TableCell>
                           {assignment?.employeeType === "Employee"
                             ? "Employee"
                             : "Office Employee"}
-                        </TableCell>
+                        </TableCell> */}
 
                         {/* STATUS */}
                         <TableCell>
@@ -426,6 +508,8 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                             breaks={assignment.breaks}
                             handleChange={handleChange}
                             errors={errors}
+                            addBreak={addBreakRow}
+                            removeBreak={removeBreakRow}
                           />
                         </TableCell>
 
@@ -479,8 +563,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                     }
                                   >
                                     <Button
+                                      type="button"
                                       size="icon"
-                                      className="bg-green-100 text-green-700"
+                                      className="bg-green-100 text-green-700 hover:bg-green-200 hover:text-green-800 hover:[box-shadow:0_0_10px_rgba(0,128,0,0.5)] cursor-pointer"
                                     >
                                       <CheckCircle />
                                     </Button>
@@ -504,8 +589,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                       }
                                     >
                                       <Button
+                                        type="button"
                                         size="icon"
-                                        className="bg-yellow-100 text-yellow-700"
+                                        className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 hover:text-yellow-800 hover:[box-shadow:0_0_10px_rgba(255,165,0,0.5)] cursor-pointer"
                                       >
                                         <Coffee />
                                       </Button>
@@ -530,8 +616,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                       }
                                     >
                                       <Button
+                                        type="button"
                                         size="icon"
-                                        className="bg-blue-100 text-blue-700"
+                                        className="bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-800 hover:[box-shadow:0_0_10px_rgba(0,0,255,0.5)] cursor-pointer"
                                       >
                                         <Coffee />
                                       </Button>
@@ -555,8 +642,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                       }
                                     >
                                       <Button
+                                        type="button"
                                         size="icon"
-                                        className="bg-red-100 text-red-700"
+                                        className="bg-red-100 text-red-700 hover:bg-red-200 hover:text-red-800 hover:[box-shadow:0_0_10px_rgba(255,0,0,0.5)] cursor-pointer"
                                       >
                                         <LogOut />
                                       </Button>
@@ -587,6 +675,18 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                   </>
                                 )}
                               </>
+                            )}
+                            {canSendNudge(assignment) && (
+                              <Button
+                                size={"icon"}
+                                variant={"outline"}
+                                className={
+                                  "border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:text-orange-600 cursor-pointer hover:[box-shadow:0_0_10px_rgba(255,165,0,0.5)]"
+                                }
+                                onClick={() => handleSendReminder(assignment)}
+                              >
+                                <Bell className="h-4 w-4" />
+                              </Button>
                             )}
                           </div>
                         </TableCell>

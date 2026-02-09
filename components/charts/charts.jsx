@@ -12,8 +12,16 @@ import {
   Legend,
   CartesianGrid,
   Line,
+  Label,
 } from "recharts";
-import { ChartContainer } from "../ui/chart";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "../ui/chart";
+import { useEffect, useMemo, useState } from "react";
 
 const COLORS = [
   "#8884d8",
@@ -131,5 +139,95 @@ export function ReusableBarAttendanceChart({ data }) {
         </ResponsiveContainer>
       </CardContent>
     </Card>
+  );
+}
+
+export function ReusableReportChart({ data, dataKey, labelKey, config }) {
+  return (
+    <ChartContainer config={config} className="min-h-[300px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data}>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis
+            dataKey={labelKey}
+            tickLine={false}
+            tickMargin={10}
+            axisLine={false}
+          />
+          <YAxis hide />
+          <ChartTooltip content={<ChartTooltipContent />} />
+          <Bar dataKey={dataKey} fill={`var(--color-${dataKey})`} radius={4} />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartContainer>
+  );
+}
+
+export function ReusablePieChart({ data, dataKey, nameKey, config }) {
+  const totalValue = useMemo(() => {
+    return data.reduce((sum, entry) => sum + (entry[dataKey] || 0), 0);
+  }, [data, dataKey]);
+
+  const [animatedTotal, setAnimatedTotal] = useState(0);
+
+  useEffect(() => {
+    let start = 0;
+    const end = totalValue;
+    if (start === end) return;
+
+    const duration = 1000; // animation duration in ms
+    const increment = end / (duration / 16); // assuming ~60fps
+
+    const animate = () => {
+      start += increment;
+      if (start < end) {
+        setAnimatedTotal(Math.floor(start));
+        requestAnimationFrame(animate);
+      } else {
+        setAnimatedTotal(end);
+      }
+    };
+
+    animate();
+  }, [totalValue]);
+
+  return (
+    <ChartContainer
+      config={config}
+      className="mx-auto aspect-square max-h-[300px] relative w-full"
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <ChartTooltip
+            cursor={false}
+            content={<ChartTooltipContent hideLabel />}
+          />
+          <Pie
+            data={data}
+            dataKey={dataKey}
+            nameKey={nameKey}
+            innerRadius={60} // Makes it a Donut Chart
+            strokeWidth={5}
+          >
+            {/* {data.map((entry, index) => (
+            <Cell
+              key={`cell-${index}`}
+              fill={entry.fill || COLORS[index % COLORS.length]}
+            />
+          ))} */}
+          </Pie>
+          <ChartLegend
+            content={<ChartLegendContent nameKey={nameKey} />}
+            className="-translate-y-2 flex-wrap gap-2 *:basis-1/4 *:justify-center"
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-lg font-semibold">Total</span>
+        <span className="text-2xl font-bold">
+          {animatedTotal.toLocaleString()}
+        </span>
+      </div>
+    </ChartContainer>
   );
 }

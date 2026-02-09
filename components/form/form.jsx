@@ -9,7 +9,9 @@ import {
   FormMultiInput,
   FormMultipleSelect,
   FormRadio,
+  FormSelect,
   FormTextarea,
+  MultiGroupInput,
   SearchableSelect,
 } from "./form-field";
 import { Button } from "../ui/button";
@@ -31,14 +33,15 @@ export function GlobalForm({
   //   defaultValues: initialValues || {},
   //   shouldUnregister: true,
   // });
+
   const method = useGlobalForm(initialValues || {}, null);
 
   // Reset form values after form submission
   useEffect(() => {
-    if (resetForm) {
-      method.reset();
+    if (initialValues) {
+      method.reset(initialValues);
     }
-  }, [resetForm]);
+  }, [initialValues]);
 
   fields.forEach((field) => {
     if (field.dependField && typeof field.function === "function") {
@@ -84,19 +87,47 @@ export function GlobalForm({
   const watchField = method.watch();
 
   // First: filter only visible fields
+  // const visibleFields = fields.filter((field) => {
+  //   if (field.showIf) {
+  //     const { field: dependentField, value } = field.showIf;
+  //     if (watchField[dependentField] !== value) {
+  //       return false;
+  //     }
+  //   }
+  //   if (field.hideIf) {
+  //     const { field: dependentField, value } = field.hideIf;
+  //     if (watchField[dependentField] === value) {
+  //       return false;
+  //     }
+  //   }
+  //   return true;
+  // });
+
   const visibleFields = fields.filter((field) => {
-    if (field.showIf) {
+    if (
+      field.showIf &&
+      field.showIf.field && // ✅ only run if field exists
+      field.showIf.value !== undefined
+    ) {
       const { field: dependentField, value } = field.showIf;
+
       if (watchField[dependentField] !== value) {
         return false;
       }
     }
-    if (field.hideIf) {
+
+    if (
+      field.hideIf &&
+      field.hideIf.field &&
+      field.hideIf.value !== undefined
+    ) {
       const { field: dependentField, value } = field.hideIf;
+
       if (watchField[dependentField] === value) {
         return false;
       }
     }
+
     return true;
   });
 
@@ -197,6 +228,9 @@ export function GlobalForm({
                 )}
                 {field.type === "multiple" && (
                   <FormMultiInput key={field?.name} field={field} />
+                )}
+                {field.type === "multiGroup" && (
+                  <MultiGroupInput key={field.name} field={field} />
                 )}
               </div>
               // switch (field.type) {

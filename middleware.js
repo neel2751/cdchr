@@ -37,15 +37,28 @@ async function checkRoleMiddleware(req) {
   // we have to check for only hr routes here becuase account is active or not
   const isHRRoute = requestedPath.startsWith("/hr");
   if (userRole === "reception" && isHRRoute) {
+    const currentDeviceId = token?.deviceId;
+
     const response = await fetch(
-      "http://localhost:3000/api/reception/check-active",
+      "http://localhost:3000/api/reception/verify-device",
       {
-        method: "GET",
+        method: "POST",
         headers: {
-          Cookie: req.headers.get("cookie") || "",
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({ employeeId, deviceId: currentDeviceId }),
       }
     );
+
+    // const response = await fetch(
+    //   "http://localhost:3000/api/reception/check-active",
+    //   {
+    //     method: "GET",
+    //     headers: {
+    //       Cookie: req.headers.get("cookie") || "",
+    //     },
+    //   }
+    // );
     if (!response.ok) {
       return NextResponse.redirect(
         new URL("/unauthorized?action=logout", req.url)

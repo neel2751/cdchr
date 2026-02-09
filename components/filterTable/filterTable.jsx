@@ -9,10 +9,13 @@ import {
 
 export const FilterDataTableHead = ({ attendanceData }) => {
   const tableHead = Object.keys(attendanceData[0] || "");
+
+  const filteredTableHead = tableHead.filter((item) => !item.startsWith("_"));
+
   return (
     <TableHeader>
       <TableRow>
-        {tableHead.map((item, index) => (
+        {filteredTableHead.map((item, index) => (
           <TableHead className="uppercase text-xs" key={index}>
             {item}
           </TableHead>
@@ -22,7 +25,7 @@ export const FilterDataTableHead = ({ attendanceData }) => {
   );
 };
 
-export const FilterDataTableBody = ({ attendanceData }) => {
+export const FilterDataTableBody = ({ attendanceData, showHighlights }) => {
   if (!attendanceData || !Array.isArray(attendanceData)) {
     console.error("Error: attendanceData is not an array or is empty");
     return null;
@@ -63,23 +66,28 @@ export const FilterDataTableBody = ({ attendanceData }) => {
 
   return (
     <TableBody>
-      {attendanceData.map((item, index) => (
-        <TableRow key={index}>
-          {Object.values(item).map((value, index) => (
-            <TableCell className="text-sm" key={index}>
-              {/* if value is date , format it */}
-              {/* {typeof value === "string" &&
-              // Only try parsing ISO date format
-              /^\d{4}-\d{2}-\d{2}(T.*)?$/.test(value)
-                ? format(value, "PPP")
-                : value} */}
-              {renderCellValue(value)}
-              {/* {value} */}
-              {/* {item[key]} {item[key] === "Weekly" && " (CIS)"} */}
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
+      {attendanceData.map((item, rowIndex) => {
+        // Extract the dynamic style
+        const dynamicStyle = showHighlights ? item._rowStyle || "" : "";
+
+        return (
+          <TableRow key={rowIndex} className={dynamicStyle}>
+            {Object.entries(item).map(([key, value], cellIndex) => {
+              // Skip any hidden fields starting with _
+              if (key.startsWith("_")) return null;
+
+              return (
+                <TableCell
+                  key={cellIndex}
+                  className={`text-sm ${dynamicStyle ? "font-medium" : ""}`}
+                >
+                  {renderCellValue(value)}
+                </TableCell>
+              );
+            })}
+          </TableRow>
+        );
+      })}
     </TableBody>
   );
 };

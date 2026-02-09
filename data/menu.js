@@ -8,6 +8,19 @@ export const MENU = [
   //   role: ["superAdmin"], // admin, manager, user
   //   icon: "LayoutDashboard",
   // },
+
+  // {
+  //   name: "Attendance",
+  //   path: "/admin/employeeAttendance",
+  //   role: ["user"],
+  //   icon: "CalendarClock",
+  // },
+  // {
+  //   name: "My Attendance",
+  //   path: "/admin/my-attendance",
+  //   role: ["user", "admin", "superAdmin"],
+  //   icon: "ClockCheck",
+  // },
   {
     name: "Leave Management",
     path: "/admin/leaveManagement",
@@ -112,6 +125,27 @@ export const MENU = [
     role: ["superAdmin", "admin"],
     icon: "Building2",
   },
+
+  {
+    name: "Visitor Management",
+    path: "/admin/leads",
+    role: ["superAdmin", "admin"],
+    icon: "SquareChartGantt",
+  },
+
+  {
+    name: "QR Code Management",
+    path: "/admin/qr",
+    role: ["superAdmin", "admin"],
+    icon: "ScanQrCode",
+  },
+
+  {
+    name: "Form Template",
+    path: "/admin/templates",
+    role: ["superAdmin", "admin"],
+    icon: "FileText",
+  },
 ];
 
 export const COMMONMENUITEMS = [
@@ -132,6 +166,34 @@ export const COMMONMENUITEMS = [
     path: "/admin/siteAssign",
     role: ["superAdmin", "admin", "user"],
     icon: "RadioIcon",
+  },
+];
+
+export const MENUOLD = [
+  {
+    name: "Attendance",
+    path: "/admin/attendance",
+    permissionKey: "MANAGE_ATTENDANCE",
+    icon: "CalendarClock",
+  },
+  {
+    name: "Leave Management",
+    path: "/admin/leaveManagement",
+    permissionKey: "MANAGE_LEAVES",
+    icon: "Stamp",
+  },
+];
+
+export const PERSONAL_MENU = [
+  {
+    name: "My Attendance",
+    path: "/admin/my-attendance",
+    icon: "CalendarClock",
+  },
+  {
+    name: "My Leaves",
+    path: "/admin/my-leaves",
+    icon: "Stamp",
   },
 ];
 
