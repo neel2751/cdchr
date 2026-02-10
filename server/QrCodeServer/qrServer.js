@@ -23,11 +23,6 @@ export async function createQrCode(data) {
 
   if (data._id) return await editQrCode(data, data._id);
 
-  return {
-    success: false,
-    message: "Image upload during creation is currently disabled for testing",
-  };
-
   try {
     await connect();
 
