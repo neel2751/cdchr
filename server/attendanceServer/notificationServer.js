@@ -23,10 +23,37 @@ export async function saveSubscription(userId, subscription) {
   }
 }
 
+// export async function sendNotification(userId, message) {
+//   try {
+//     await connect();
+//     const employee = await OfficeEmployeeModel.findById(userId);
+//     if (!employee || !employee.pushSubscription) {
+//       return {
+//         success: false,
+//         message: "Employee has not enabled notifications on their browser.",
+//       };
+//     }
+
+//     const payload = JSON.stringify({
+//       title: "Attendance Reminder",
+//       body: message,
+//       url: "/admin/dashboard",
+//     });
+
+//     await webpush.sendNotification(employee.pushSubscription, payload);
+//     return { success: true, message: "Notification sent successfully." };
+//   } catch (error) {
+//     console.error("Error sending notification:", error);
+//     return { success: false, message: "Error sending notification." };
+//   }
+// }
+
 export async function sendNotification(userId, message) {
   try {
     await connect();
+
     const employee = await OfficeEmployeeModel.findById(userId);
+
     if (!employee || !employee.pushSubscription) {
       return {
         success: false,
@@ -41,10 +68,21 @@ export async function sendNotification(userId, message) {
     });
 
     await webpush.sendNotification(employee.pushSubscription, payload);
-    return { success: true, message: "Notification sent successfully." };
+    return {
+      success: true,
+      message: "Notification sent successfully.",
+    };
   } catch (error) {
+    if (error.statusCode === 410 || error.statusCode === 404) {
+      console.log(
+        `Subscription for user ${userId} has expired or is no longer valid.`
+      );
+    }
     console.error("Error sending notification:", error);
-    return { success: false, message: "Error sending notification." };
+    return {
+      success: false,
+      message: `Push failed: ${error.statusCode || "Unknown error"}`,
+    };
   }
 }
 

@@ -66,11 +66,11 @@ export function useAttendanceSocketOld() {
               [employeeId]: clockData,
             }));
           } catch (error) {
-            console.error("❌ Failed to parse updated clock data:", error);
+            console.log("❌ Failed to parse updated clock data:", error);
             toast.error("Failed to fetch updated clock data");
           }
         } else {
-          console.error("❌ Failed to fetch updated clock data");
+          console.log("❌ Failed to fetch updated clock data");
           toast.error("Failed to fetch updated clock data");
         }
       });
@@ -106,7 +106,7 @@ export function useSiteAttendanceSocketOld(siteId = null) {
 
       return map;
     } catch (err) {
-      console.error("❌ Error fetching clock data:", err);
+      console.log("❌ Error fetching clock data:", err);
       toast.error("Failed to load attendance data");
       return null;
     }
@@ -197,7 +197,7 @@ export function useAttendanceSocket({
         setTotal(res.totalCount);
         return data;
       } catch (err) {
-        console.error("❌ Error fetching clock data:", err);
+        console.log("❌ Error fetching clock data:", err);
         toast.error("Failed to load attendance data");
         return null;
       }
@@ -235,7 +235,7 @@ export function useAttendanceSocket({
       const qr = await QRCode.toDataURL(token);
       setQrData(qr);
     } catch (err) {
-      console.error("Error generating QR code:", err);
+      console.log("Error generating QR code:", err);
     }
   };
 
@@ -373,7 +373,7 @@ export function useSiteAttendanceSocket({
 
         return map;
       } catch (err) {
-        console.error("❌ Error fetching clock data:", err);
+        console.log("❌ Error fetching clock data:", err);
         toast.error("Failed to load attendance data");
         return null;
       }
@@ -406,7 +406,7 @@ export function useSiteAttendanceSocket({
       const qr = await QRCode.toDataURL(token);
       setQrData(qr);
     } catch (err) {
-      console.error("Error generating QR code:", err);
+      console.log("Error generating QR code:", err);
     }
   };
 

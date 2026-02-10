@@ -69,7 +69,7 @@ const OfficeEmplyee = ({ searchParams }) => {
     //   try {
     //     return await getOfficeEmployee();
     //   } catch (error) {
-    //     console.error("Error fetching office employees:", error);
+    //     console.log("Error fetching office employees:", error);
     //     return { newData: [], totalCount: 0 };
     //   }
     // },

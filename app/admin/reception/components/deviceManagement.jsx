@@ -62,7 +62,7 @@ const DeviceManagementSection = ({ officeUser }) => {
         onUpdate(); // Refresh the data
       }
     } catch (error) {
-      console.error("Error revoking device:", error);
+      console.log("Error revoking device:", error);
       toast.error("Failed to revoke device.");
     }
   };
@@ -82,7 +82,7 @@ const DeviceManagementSection = ({ officeUser }) => {
         onUpdate(); // Refresh the data
       }
     } catch (error) {
-      console.error("Error toggling device lock:", error);
+      console.log("Error toggling device lock:", error);
       toast.error("Failed to toggle device lock.");
     }
   };

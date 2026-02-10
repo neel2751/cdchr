@@ -156,7 +156,7 @@ const SMTPConfig = ({ queryKey }) => {
         }
       }
     } catch (error) {
-      console.error("Error submitting form:", error);
+      console.log("Error submitting form:", error);
       toast.error("Failed to save SMTP configuration");
     }
   };

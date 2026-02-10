@@ -42,10 +42,11 @@ async function checkRoleMiddleware(req) {
       });
 
       if (!response.ok) {
-        // If 401 (Unauthorized) or 500 (Error), kick them out
-        return NextResponse.redirect(
-          new URL("/unauthorized?action=logout", req.url)
-        );
+        // we have to do next
+        return NextResponse.next();
+        // return NextResponse.redirect(
+        //   new URL("/unauthorized?action=logout", req.url)
+        // );
       }
 
       const { isActive } = await response.json();
@@ -55,7 +56,7 @@ async function checkRoleMiddleware(req) {
         );
       }
     } catch (err) {
-      console.error("Middleware Fetch Error:", err);
+      console.log("Middleware Fetch Error:", err);
       // If the fetch itself fails (network error), don't lock them out
       // unless you want high-security mode.
       return NextResponse.next();

@@ -1,16 +1,12 @@
 self.addEventListener("push", (event) => {
-  let data = {};
+  let payload = { title: "New Notification", body: "Check your dashboard" };
 
-  try {
-    // Try to parse as JSON first
-    data = event.data.json();
-  } catch (e) {
-    // If it's not JSON (like your "Test push" string), use it as the body
-    data = {
-      title: "Attendance Alert",
-      body: event.data.text(),
-      url: "/",
-    };
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (e) {
+      payload.body = event.data.text();
+    }
   }
 
   const options = {

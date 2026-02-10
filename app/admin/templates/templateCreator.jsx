@@ -143,7 +143,7 @@ export default function AdvancedTemplateBuilder({
             field.validationOptions.pattern.value
           );
         } catch (e) {
-          console.error("Invalid Regex in field:", field.labelText);
+          console.log("Invalid Regex in field:", field.labelText);
         }
       }
 

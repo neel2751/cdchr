@@ -51,7 +51,7 @@ function ChatComponent() {
         return newState;
       });
     } catch (error) {
-      console.error("Error fetching AI response:", error);
+      console.log("Error fetching AI response:", error);
       // Optionally add an error message to the chat
       setMessage((prev) => {
         const errorMsg = {

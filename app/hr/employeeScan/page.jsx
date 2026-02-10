@@ -53,7 +53,7 @@ export default function EmployeeClockScanner({ siteId }) {
         setAttendanceData(data || {});
       }
     } catch (err) {
-      console.error("Failed to fetch attendance:", err);
+      console.log("Failed to fetch attendance:", err);
     }
   };
 
@@ -718,7 +718,7 @@ export function ScannerDialog({
 
       setPermissionError(false);
     } catch (err) {
-      console.error("Scanner start failed:", err);
+      console.log("Scanner start failed:", err);
       if (
         err?.name === "NotAllowedError" ||
         err?.message?.includes("permission")
@@ -759,7 +759,7 @@ export function ScannerDialog({
         } catch {}
       }
     } catch (err) {
-      console.error(err);
+      console.log(err);
       toast.error("❌ Scan failed");
     }
   };
@@ -787,7 +787,7 @@ export function ScannerDialog({
           await startScanner(backCamera.id, backCamera.label);
         }
       } catch (err) {
-        console.error("Error fetching cameras:", err);
+        console.log("Error fetching cameras:", err);
         await startScanner(); // fallback
       }
     };
@@ -950,7 +950,7 @@ export function SiteEmployeeScannerDialog({
 
       setPermissionError(false);
     } catch (err) {
-      console.error("Scanner start failed:", err);
+      console.log("Scanner start failed:", err);
       if (
         err?.name === "NotAllowedError" ||
         err?.message?.includes("permission")
@@ -996,7 +996,7 @@ export function SiteEmployeeScannerDialog({
         } catch {}
       }
     } catch (err) {
-      console.error(err);
+      console.log(err);
       toast.error("❌ Scan failed");
     }
   };
@@ -1036,7 +1036,7 @@ export function SiteEmployeeScannerDialog({
           await startScanner(backCamera.id, backCamera.label);
         }
       } catch (err) {
-        console.error("Error fetching cameras:", err);
+        console.log("Error fetching cameras:", err);
         await startScanner(); // fallback
       }
     };

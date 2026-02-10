@@ -29,7 +29,7 @@ const ExpenseChart = memo(() => {
         toast.warn(" No data found");
       }
     } catch (error) {
-      console.error(error);
+      console.log(error);
     }
   }, [filterCategory, refresh]);
   useEffect(() => {

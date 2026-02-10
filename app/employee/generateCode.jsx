@@ -273,7 +273,7 @@ export default function SiteEmployeeScanner() {
         const res = await fetchClockRecordsTest({ employeeId, siteId });
         setAttendanceData(JSON.parse(res.data)[0] || {});
       } catch (err) {
-        console.error("Failed to fetch attendance:", err);
+        console.log("Failed to fetch attendance:", err);
       }
     }
   };

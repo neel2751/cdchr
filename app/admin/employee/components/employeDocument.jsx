@@ -199,7 +199,7 @@ export default function EmployeDocument() {
     const { docType, docName, docImage } = data;
 
     if (!docImage || docImage.length === 0) {
-      console.error("No document uploaded");
+      console.log("No document uploaded");
       return;
     }
 
@@ -234,7 +234,7 @@ export default function EmployeDocument() {
         }
       })
       .catch((error) => {
-        console.error("Error uploading files:", error);
+        console.log("Error uploading files:", error);
         toast.error("An error occurred while uploading files.");
       });
   };

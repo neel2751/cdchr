@@ -56,7 +56,7 @@ export async function GET(req) {
       `${process.env.NEXTAUTH_URL}${returnTo}?connected=1`
     );
   } catch (error) {
-    console.error("OAuth Error:", error.response?.data || error.message);
+    console.log("OAuth Error:", error.response?.data || error.message);
     return new NextResponse("OAuth error", { status: 500 });
   }
 }

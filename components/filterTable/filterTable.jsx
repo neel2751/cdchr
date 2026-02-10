@@ -27,7 +27,7 @@ export const FilterDataTableHead = ({ attendanceData }) => {
 
 export const FilterDataTableBody = ({ attendanceData, showHighlights }) => {
   if (!attendanceData || !Array.isArray(attendanceData)) {
-    console.error("Error: attendanceData is not an array or is empty");
+    console.log("Error: attendanceData is not an array or is empty");
     return null;
   }
 

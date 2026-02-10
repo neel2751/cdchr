@@ -67,7 +67,7 @@ export function useUploader() {
         throw new Error("Upload failed");
       }
     } catch (error) {
-      console.error("Error uploading file:", error);
+      console.log("Error uploading file:", error);
       return { success: false, error: error.message };
     }
   };
@@ -121,7 +121,7 @@ export function useUploader() {
           PartNumber: i + 1,
         });
       } catch (error) {
-        console.error("Error uploading part:", error);
+        console.log("Error uploading part:", error);
         return { success: false, error: error.message };
       }
     }
@@ -150,7 +150,7 @@ export function useUploader() {
         throw new Error("Failed to complete multipart upload");
       }
     } catch (error) {
-      console.error("Error completing multipart upload:", error);
+      console.log("Error completing multipart upload:", error);
       return { success: false, error: error.message };
     }
   };

@@ -42,7 +42,7 @@ export default function QrGenerator({ slug }) {
       triggerDownload(url, `QR_${slug}.svg`);
       URL.revokeObjectURL(url); // Clean up memory
     } catch (err) {
-      console.error("SVG Generation failed", err);
+      console.log("SVG Generation failed", err);
     }
   };
 

@@ -44,7 +44,7 @@ export const options = {
           const newip = await axios
             .get("http://ip-api.com/json/")
             .catch((err) => {
-              console.error("IP API error:", err.message);
+              console.log("IP API error:", err.message);
               return { status: 500, data: {} }; // Fallback if API fails
             });
 

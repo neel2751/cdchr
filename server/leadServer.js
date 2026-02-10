@@ -30,7 +30,7 @@ export async function addLead(data, slug) {
       message: "Lead saving functionality is not implemented yet",
     };
   } catch (error) {
-    console.error("Error saving lead:", error);
+    console.log("Error saving lead:", error);
     return { success: false, message: "Failed to save lead" };
   }
 }
@@ -43,7 +43,7 @@ export async function getLeadsByAgent() {
     const leads = await LeadModel.find({ agentId }).sort({ createdAt: -1 });
     return { success: true, data: JSON.stringify(leads) };
   } catch (error) {
-    console.error("Error fetching leads:", error);
+    console.log("Error fetching leads:", error);
     return { success: false, message: "Failed to fetch leads" };
   }
 }
@@ -79,7 +79,7 @@ export async function performanceOld() {
       data: JSON.stringify(report),
     };
   } catch (error) {
-    console.error("Error fetching performance metrics:", error);
+    console.log("Error fetching performance metrics:", error);
     return { success: false, message: "Failed to fetch performance metrics" };
   }
 }
@@ -119,7 +119,7 @@ export async function performance() {
       data: JSON.stringify(report),
     };
   } catch (error) {
-    console.error("Error fetching performance metrics:", error);
+    console.log("Error fetching performance metrics:", error);
     return { success: false, message: "Failed to fetch performance metrics" };
   }
 }

@@ -63,7 +63,7 @@ const ProjectDashboard = () => {
           : null,
       });
     } catch (error) {
-      console.error("Error loading dashboard:", error);
+      console.log("Error loading dashboard:", error);
     } finally {
       setLoading(false);
     }

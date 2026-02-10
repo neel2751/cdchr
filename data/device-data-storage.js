@@ -187,7 +187,7 @@ class DeviceDataStorage {
         toast.error(result?.message || "Something went wrong");
       }
     } catch (error) {
-      console.error("Error submitting device information:", error);
+      console.log("Error submitting device information:", error);
       return { success: false, error: "Failed to submit device information" };
     }
   }
@@ -203,7 +203,7 @@ class DeviceDataStorage {
       }
       return false;
     } catch (error) {
-      console.error("Error deleting submission:", error);
+      console.log("Error deleting submission:", error);
       return false;
     }
   }
@@ -229,7 +229,7 @@ class DeviceDataStorage {
       }
       return updated;
     } catch (error) {
-      console.error("Error anonymizing user data:", error);
+      console.log("Error anonymizing user data:", error);
       return false;
     }
   }

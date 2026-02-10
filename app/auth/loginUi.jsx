@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { GlobalForm } from "@/components/form/form";
-import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import { CopyCode } from "@/components/clipboard";
 
 export const LOGINFIELD = [
@@ -67,46 +66,50 @@ export const LoginUi = () => {
   // }, [status, callBackcheck]);
 
   const handleSubmit = async (data) => {
-    setIsLoading(true);
-    // add the artifical  delay to simulate the server response
-    // await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (typeof window !== "undefined") {
+      const fingerprintjs = await import("@fingerprintjs/fingerprintjs");
+      const fp = await fingerprintjs.load();
+      const { visitorId: deviceId } = await fp.get();
 
-    const fp = await FingerprintJS.load();
-    const result = await fp.get();
-    const deviceId = result.visitorId;
+      setIsLoading(true);
+      // add the artifical  delay to simulate the server response
+      // await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    try {
-      const res = await signIn("credentials", {
-        redirect: false, // Prevent automatic page reload
-        email: data.email,
-        password: data.password,
-        deviceId, // Send the device ID
-      });
+      try {
+        const res = await signIn("credentials", {
+          redirect: false, // Prevent automatic page reload
+          email: data.email,
+          password: data.password,
+          deviceId, // Send the device ID
+        });
 
-      if (res?.error) {
-        // we have ERROR TYPE from the API
-        try {
-          const cleanJson = res.error.replace(/^Error: /, "");
-          const errorObj = JSON.parse(cleanJson);
+        if (res?.error) {
+          // we have ERROR TYPE from the API
+          try {
+            const cleanJson = res.error.replace(/^Error: /, "");
+            const errorObj = JSON.parse(cleanJson);
 
-          if (errorObj.type === "DEVICE_ERROR") {
-            toast.error("This device is not authorized. Please contact admin.");
-            setUnauthorizedId(errorObj?.detectedId || "");
-          } else {
-            toast.error(errorObj?.message); // Optionally show a toast notification
+            if (errorObj.type === "DEVICE_ERROR") {
+              toast.error(
+                "This device is not authorized. Please contact admin."
+              );
+              setUnauthorizedId(errorObj?.detectedId || "");
+            } else {
+              toast.error(errorObj?.message); // Optionally show a toast notification
+            }
+          } catch (parseError) {
+            toast.error(res.error.replace(/^Error: /, ""));
           }
-        } catch (parseError) {
-          toast.error(res.error.replace(/^Error: /, ""));
+        } else {
+          toast.success("Logged in successfully. Please wait..."); // Optionally show a toast notification
+          window.location.href = res.url || callBackcheck || "/";
         }
-      } else {
-        toast.success("Logged in successfully. Please wait..."); // Optionally show a toast notification
-        window.location.href = res.url || callBackcheck || "/";
+      } catch (err) {
+        console.log("Error during login:", err);
+        toast.error("An unexpected error occurred. Please try again.");
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      console.error("Error during login:", err);
-      toast.error("An unexpected error occurred. Please try again.");
-    } finally {
-      setIsLoading(false);
     }
   };
 

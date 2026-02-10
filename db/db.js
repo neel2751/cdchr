@@ -14,7 +14,7 @@ export async function connect() {
     isConnected = db.connection.readyState === 1;
     console.log("Database connected successfully");
   } catch (error) {
-    console.error("Error connecting to database", error);
+    console.log("Error connecting to database", error);
   }
   // try {
   //   mongoose.connect(process.env.MONGO_DB_URL);

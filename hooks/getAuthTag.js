@@ -25,7 +25,7 @@ export function decryptId(encryptedId, iv, authTag) {
     const decryptedId = JSON.parse(decrypted).id;
     return decryptedId;
   } catch (error) {
-    console.error(error);
+    console.log(error);
     return null;
   }
 }

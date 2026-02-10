@@ -22,7 +22,7 @@ export default function ScanQrcode({ siteId }) {
 
   const stopScanner = () => {
     if (scannerRef.current) {
-      scannerRef.current.clear().catch(console.error);
+      scannerRef.current.clear().catch(console.log());
       const el = document.getElementById("qr-reader");
       if (el) el.innerHTML = "";
       scannerRef.current = null;
@@ -75,7 +75,7 @@ export default function ScanQrcode({ siteId }) {
         }
       }
     } catch (error) {
-      console.error("Error verifying token:", error);
+      console.log("Error verifying token:", error);
       toast.error("❌ Error scanning QR!");
     }
 

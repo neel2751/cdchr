@@ -11,7 +11,6 @@ import {
   EditIcon,
   XIcon,
   SaveIcon,
-  QrCodeIcon,
   Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,9 +48,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import SearchDebounce from "@/components/search/searchDebounce";
 import { PaginationWithLinks } from "@/components/pagination/pagination";
-import { useSession } from "next-auth/react";
 import { handleTimeActionNew } from "../_components/handleTimeAction";
-import Link from "next/link";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import { BreaksCell } from "../siteAssignEmployee/test";
 import { sendNotification } from "@/server/attendanceServer/notificationServer";
@@ -313,12 +310,6 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            {/* <Button asChild size={"sm"} variant={"outline"}>
-              <Link href={"/admin/scan"}>
-                <QrCodeIcon />
-                Open Scan
-              </Link>
-            </Button> */}
             <DateFilter name={"date"} />
           </div>
         </CardHeader>

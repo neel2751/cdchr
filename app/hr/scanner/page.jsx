@@ -38,7 +38,7 @@ export default function ScannerModal({ siteId, open, onClose }) {
         toast.error(response.message || "❌ Error scanning QR!");
       }
     } catch (err) {
-      console.error(err);
+      console.log(err);
       toast.error("❌ Scan failed");
       try {
         await errorAudioRef.current?.play();
@@ -69,7 +69,7 @@ export default function ScannerModal({ siteId, open, onClose }) {
         handleScan,
         () => {}
       )
-      .catch((err) => console.error("Scanner start failed", err));
+      .catch((err) => console.log("Scanner start failed", err));
 
     return () => {
       scanner

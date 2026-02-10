@@ -36,7 +36,7 @@ export default function MarketingExport() {
       document.body.removeChild(link);
       setIsExporting(false);
     } catch (error) {
-      console.error("Error exporting marketing data:", error);
+      console.log("Error exporting marketing data:", error);
       setIsExporting(false);
     } finally {
       setIsExporting(false);

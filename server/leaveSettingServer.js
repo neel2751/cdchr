@@ -36,7 +36,7 @@ export async function getLeaveSettingsClient() {
     }
     return { success: true, data: JSON.stringify(settings) };
   } catch (error) {
-    console.error("Error fetching leave settings:", error);
+    console.log("Error fetching leave settings:", error);
     return { success: false, error: "Failed to fetch leave settings" };
   }
 }
@@ -54,7 +54,7 @@ export async function getLeaveSettings() {
     }
     return { success: true, data: settings };
   } catch (error) {
-    console.error("Error fetching leave settings:", error);
+    console.log("Error fetching leave settings:", error);
     return { success: false, error: "Failed to fetch leave settings" };
   }
 }

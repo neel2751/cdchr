@@ -46,7 +46,7 @@ export async function POST(req) {
 
     return NextResponse.json(role, { status: 200 });
   } catch (error) {
-    console.error(error);
+    console.log(error);
     return NextResponse.json(
       {
         error: "Failed to fetch role",
