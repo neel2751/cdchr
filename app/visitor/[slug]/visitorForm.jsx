@@ -38,6 +38,9 @@ export default function VisitorForm({ fields, slug }) {
       onSubmit={handleSubmit}
       isLoading={isLoading}
       btnName={"Submit"}
+      btnProps={{
+        className: "bg-orange-500 hover:bg-orange-600 text-white w-full",
+      }}
     />
   );
 }

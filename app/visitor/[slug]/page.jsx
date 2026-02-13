@@ -71,6 +71,27 @@ export default async function page({ params }) {
     );
   }
 
+  // if (qrData?.customDomain && qrData.customDomain !== hostname) {
+  //   return (
+  //     <div className="p-4">
+  //       <Card>
+  //         <CardHeader>
+  //           <CardTitle>{`Visitor QR Code Details for ${qrData.title}`}</CardTitle>
+  //           <CardDescription>
+  //             {`This QR code is not valid for this domain. Please use the correct domain to access the visitor form.`}
+  //           </CardDescription>
+  //         </CardHeader>
+  //         <CardContent>
+  //           <p>
+  //             The QR code you scanned is configured for a different domain.
+  //             Please use the correct domain to access the visitor form.
+  //           </p>
+  //         </CardContent>
+  //       </Card>
+  //     </div>
+  //   );
+  // }
+
   return (
     <div className="p-4">
       <Card className={"container mx-auto"}>

@@ -13,14 +13,20 @@ import QrCodeTable from "./qrCodeTable";
 import CreateQrCode from "./createQrCode";
 import { useFetchQuery } from "@/hooks/use-query";
 import { getAllQrCodes } from "@/server/QrCodeServer/qrServer";
+import { Plus } from "lucide-react";
 
 export default function QRCode({ searchParams }) {
   const [open, setOpen] = React.useState(false);
   const [initialValues, setInitialValues] = React.useState(null);
 
+  const query = searchParams?.query || "";
+
+  const queryKey = ["qrCodeList", query];
+
   const { data } = useFetchQuery({
     fetchFn: getAllQrCodes,
-    queryKey: ["qrCodeList"],
+    queryKey,
+    params: { query },
   });
   const { newData } = data || {};
 
@@ -47,7 +53,7 @@ export default function QRCode({ searchParams }) {
               </CardDescription>
             </div>
             <Button onClick={() => setOpen(true)} className="mb-4">
-              Add Visitor
+              <Plus className="w-4 h-4" /> Create QR Code
             </Button>
           </div>
           <SearchDebounce />
@@ -61,6 +67,7 @@ export default function QRCode({ searchParams }) {
         onOpenChange={setOpen}
         initialValues={initialValues}
         title={"Generate Visitor QR Code"}
+        invalidateKeys={queryKey}
         description={
           "Create a QR code for visitors to scan and fill out their details."
         }

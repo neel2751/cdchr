@@ -28,6 +28,7 @@ export function GlobalForm({
   btnName,
   resetForm = true, // Whether to reset form after submission
   isHide = false, // Whether to hide the submit button
+  btnProps = {}, // Additional props for the submit button
 }) {
   // const method = useForm({
   //   defaultValues: initialValues || {},
@@ -260,7 +261,7 @@ export function GlobalForm({
         ))}
         {!isHide && (
           <div className="mt-7">
-            <Button disabled={isLoading} type="submit">
+            <Button {...btnProps} disabled={isLoading} type="submit">
               {isLoading ? (
                 <>
                   <Loader2 className="animate-spin" />

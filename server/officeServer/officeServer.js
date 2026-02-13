@@ -276,16 +276,15 @@ export const GenerateHashPassword = async (password) => {
 
 export const OfficeEmployeeStatus = async (data) => {
   if (!data) return { success: false, message: "Not found" };
+
   try {
     const id = data?.id;
     const isActive = !data?.status;
     const statusDate = data.status ? new Date() : null;
-    const isShowenInWeeklyTimesheet = !data?.isShowenInWeeklyTimesheet;
-    const name = data?.name === "status" ? isActive : isShowenInWeeklyTimesheet;
 
     await OfficeEmployeeModel.updateOne(
       { _id: id },
-      { $set: { [data?.name]: name, statusDate } }
+      { $set: { [data?.name]: isActive, statusDate } }
     );
 
     return {

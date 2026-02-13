@@ -9,6 +9,18 @@ async function checkRoleMiddleware(req) {
   const userRole = token?.role;
   const requires2FA = token?.requiresTwoFactor === true;
 
+  const hostname = req?.headers?.get("host") || "";
+
+  const customBrandDomain = "form.cdcproperty.management";
+  if (hostname === customBrandDomain) {
+    // allow only the visitor path
+    if (requestedPath.startsWith("/visitor")) {
+      return NextResponse.next();
+    }
+
+    return NextResponse.redirect(new URL("/unauthorized", req.url));
+  }
+
   // If no token is found, redirect to login
   if (!userRole || !employeeId) {
     return NextResponse.redirect(new URL("/api/auth/signin", req.url));

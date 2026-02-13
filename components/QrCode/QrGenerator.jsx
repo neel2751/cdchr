@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Download, FileCode, CheckCircle2 } from "lucide-react";
 
 export default function QrGenerator({ slug }) {
-  const downloadUrl = `${process.env.NEXT_PUBLIC_WEB_URL}/visitor/${slug}`;
+  const downloadUrl = `https://form.cdcproperty.management/visitor/${slug}`;
   const [previewData, setPreviewData] = useState("");
 
   useEffect(() => {

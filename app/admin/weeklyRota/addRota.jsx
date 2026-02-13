@@ -111,15 +111,23 @@ export function AddWeeklyRota() {
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-          <WeekRotaTable
-            currentWeek={currentWeek}
-            schedules={schedules}
-            setSchedules={setSchedules}
-            memoizedSchedules={memoizedSchedules}
-            isLoading={isLoading}
-            queryKey={queryKey}
-            handleOnClose={handleOnClose}
-          />
+          {schedules?.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <span className="text-sm text-gray-500">
+                No schedules found for this week.
+              </span>
+            </div>
+          ) : (
+            <WeekRotaTable
+              currentWeek={currentWeek}
+              schedules={schedules}
+              setSchedules={setSchedules}
+              memoizedSchedules={memoizedSchedules}
+              isLoading={isLoading}
+              queryKey={queryKey}
+              handleOnClose={handleOnClose}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </>

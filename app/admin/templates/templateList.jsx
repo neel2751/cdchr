@@ -58,12 +58,14 @@ export default function TemplateLibrary() {
                 <FileText className="w-6 h-6" />
               </div>
               <div className="flex gap-1">
-                <button
+                <Button
                   onClick={() => deleteTemplate(template._id)}
-                  className="p-2 text-gray-400 hover:text-red-500"
+                  variant="outline"
+                  size="icon"
+                  className="text-gray-400 hover:text-red-600 border-gray-300 hover:bg-red-50 hover:border-red-300 cursor-pointer"
                 >
                   <Trash2 className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
             </div>
 

@@ -32,11 +32,7 @@ const Rota = ({ searchParams }) => {
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
   const queryKey = ["weekRotaSuperAdmin", { currentPage, pagePerData }];
-  const {
-    data: queryData,
-    isLoading,
-    isError,
-  } = useFetchQuery({
+  const { data: queryData, isLoading } = useFetchQuery({
     params: {
       page: currentPage,
       pageSize: pagePerData,
@@ -47,6 +43,7 @@ const Rota = ({ searchParams }) => {
 
   const [isOpen, setIsOpen] = useState();
   const { newData, totalCount } = queryData || {};
+
   //   const memoizedSchedules = useMemo(() => newData, [newData]);
   const [schedules, setSchedules] = useState([]);
   const handleOpen = (data) => {
@@ -206,16 +203,24 @@ const Rota = ({ searchParams }) => {
                   </div>
                   <CollapsibleContent className="border-x border-b rounded-b-lg">
                     <CardContent>
-                      <WeekRotaTable
-                        isLoading={isLoading}
-                        currentWeek={item?.weekStartDate}
-                        schedules={schedules}
-                        setSchedules={setSchedules}
-                        queryKey={queryKey}
-                        memoizedSchedules={{
-                          weekId: item._id,
-                        }}
-                      />
+                      {schedules?.length === 0 ? (
+                        <div className="h-20 w-full flex justify-center items-center">
+                          <span className="text-neutral-500">
+                            No schedule for this week
+                          </span>
+                        </div>
+                      ) : (
+                        <WeekRotaTable
+                          isLoading={isLoading}
+                          currentWeek={item?.weekStartDate}
+                          schedules={schedules}
+                          setSchedules={setSchedules}
+                          queryKey={queryKey}
+                          memoizedSchedules={{
+                            weekId: item._id,
+                          }}
+                        />
+                      )}
                     </CardContent>
                   </CollapsibleContent>
                 </Collapsible>

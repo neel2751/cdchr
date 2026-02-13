@@ -41,8 +41,10 @@ export async function createQrCode(data) {
     // we know we have array here but we allow only one image for qr code so we take the first one
     const images = Array.isArray(data.image) ? data.image[0] : data.image;
 
+    const generateFileName = `${Date.now()}-${images.name}`;
+
     const { url, key } = await generatePreSignedUrl({
-      fileName: images.name,
+      fileName: generateFileName,
       contentType: images.type,
       path: "qr-codes",
       access: "public",
@@ -64,7 +66,7 @@ export async function createQrCode(data) {
     const fileUrl = await getPublicUrl({ key, access: "public" });
 
     const mediaData = {
-      fileName: images.name,
+      fileName: generateFileName,
       fileType: images.type,
       fileSize: images.size,
       url: fileUrl.url,
@@ -108,7 +110,9 @@ export async function createQrCode(data) {
   }
 }
 
-export async function getAllQrCodes() {
+export async function getAllQrCodes(filter = {}) {
+  console.log("Fetching QR codes with filter:", filter);
+
   try {
     const { props } = await getServerSideProps();
     const { _id } = props.session.user;
@@ -117,7 +121,17 @@ export async function getAllQrCodes() {
     }
 
     await connect();
-    const qrCodes = await QRCodeModel.find({ agentId: _id })
+
+    const query = { agentId: _id };
+
+    if (filter.query) {
+      query.$or = [
+        { title: { $regex: filter.query, $options: "i" } },
+        { formTitle: { $regex: filter.query, $options: "i" } },
+      ];
+    }
+
+    const qrCodes = await QRCodeModel.find(query)
       .sort({
         createdAt: -1,
       })

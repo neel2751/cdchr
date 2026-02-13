@@ -18,6 +18,7 @@ export default function CreateQrCode({
   title,
   description,
   initialValues,
+  invalidateKeys,
 }) {
   const data = useSelectFormTemplate();
 
@@ -83,6 +84,20 @@ export default function CreateQrCode({
         required: "Form Template ID is required",
       },
     },
+    // {
+    //   name: "customDomain",
+    //   labelText: "Custom Domain (optional)",
+    //   type: "text",
+    //   placeholder: "form.cdcproperty.management",
+    //   validationOptions: {
+    //     pattern: {
+    //       value:
+    //         /^(https?:\/\/)?([a-zA-Z0-9-]+\.)?cdcproperty\.management(\/[a-zA-Z0-9-]+)*\/?$/,
+    //       message:
+    //         "Custom Domain must be a valid subdomain of cdcproperty.management",
+    //     },
+    //   },
+    // },
     {
       name: "image",
       labelText: "Upload Image (optional)",
@@ -95,7 +110,7 @@ export default function CreateQrCode({
 
   const { mutate: handleSubmit } = useSubmitMutation({
     mutationFn: async (data) => await createQrCode(data),
-    invalidateKeys: ["qrCodeList"],
+    invalidateKey: invalidateKeys,
     onSuccessMessage: (message) => message || "QR Code created successfully!",
     onClose: () => onOpenChange(false),
   });

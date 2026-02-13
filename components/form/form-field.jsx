@@ -50,7 +50,6 @@ import { useDropzone } from "react-dropzone";
 import Image from "next/image";
 import { useImageUpload } from "@/hooks/use-image-upload-profile";
 import { formatToDateString, normalizeDateToUTC } from "@/lib/formatDate";
-import { Card, CardDescription, CardHeader, CardTitle } from "../ui/card";
 
 export const FormInput = ({ field, ...props }) => {
   const [showPassword, setShowPassword] = useState(false);

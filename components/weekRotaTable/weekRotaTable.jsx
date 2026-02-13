@@ -115,7 +115,6 @@ const WeekRotaTable = ({
     const data = JSON.parse(response?.data || "{}");
 
     const parsedData = data?.attendanceData?.[0]?.schedule || [];
-    console.log("Auto-fill data:", parsedData);
     if (parsedData.length) {
       setSchedules((prevSchedules) =>
         prevSchedules.map((schedule) => {
