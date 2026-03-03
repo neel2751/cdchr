@@ -111,8 +111,6 @@ export async function createQrCode(data) {
 }
 
 export async function getAllQrCodes(filter = {}) {
-  console.log("Fetching QR codes with filter:", filter);
-
   try {
     const { props } = await getServerSideProps();
     const { _id } = props.session.user;
@@ -181,7 +179,7 @@ export async function getQrCodeBySlug(slug) {
     ];
 
     const qrCode = await QRCodeModel.aggregate(pipeline).then(
-      (results) => results[0] || null
+      (results) => results[0] || null,
     );
     if (!qrCode) {
       return { success: false, message: "QR code not found" };
@@ -338,7 +336,7 @@ export async function editQrCode(data, id) {
         templateId: data.templateId,
         mediaId: data.mediaId,
       },
-      { new: true }
+      { new: true },
     );
 
     if (!updatedQr) {
@@ -365,7 +363,7 @@ export async function deleteQrCode(id) {
     const deleted = await QRCodeModel.findByIdAndUpdate(
       id,
       { isDeleted: true },
-      { new: true }
+      { new: true },
     )
       .then((res) => res)
       .catch((err) => {

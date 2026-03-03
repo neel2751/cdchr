@@ -60,7 +60,12 @@ const EmployeTabel = () => {
                 {!item?.isSuperAdmin ? (
                   <div
                     onClick={() =>
-                      handleAlert(item?._id, "Update", item?.isActive, "status")
+                      handleAlert(
+                        item?._id,
+                        "Update",
+                        item?.isActive,
+                        "isActive",
+                      )
                     }
                   >
                     <TableStatus isActive={item?.isActive} />
@@ -76,7 +81,7 @@ const EmployeTabel = () => {
                       item?._id,
                       "Update",
                       item?.isShowenInWeeklyTimesheet,
-                      "isShowenInWeeklyTimesheet"
+                      "isShowenInWeeklyTimesheet",
                     )
                   }
                 >
@@ -112,13 +117,13 @@ const EmployeTabel = () => {
                 {item?.immigrationType === "British"
                   ? "-"
                   : item?.visaEndDate && item?.visaEndDate
-                  ? isPast(new Date(item?.visaEndDate))
-                    ? "Visa expired"
-                    : `${formatDistanceStrict(
-                        new Date(),
-                        new Date(item.visaEndDate)
-                      )}`
-                  : "-"}
+                    ? isPast(new Date(item?.visaEndDate))
+                      ? "Visa expired"
+                      : `${formatDistanceStrict(
+                          new Date(),
+                          new Date(item.visaEndDate),
+                        )}`
+                    : "-"}
               </TableCell>
               <TableCell>
                 <div className="flex gap-2">
@@ -130,7 +135,7 @@ const EmployeTabel = () => {
                   >
                     <Link
                       href={`/admin/officeEmployee/${encrypt(
-                        item?._id
+                        item?._id,
                       )}/overview`}
                     >
                       <Eye />

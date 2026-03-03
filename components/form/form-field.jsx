@@ -308,7 +308,7 @@ export const FormCheckbox = ({ field }) => {
                         onChange([...currentValue, option.value]);
                       } else {
                         onChange(
-                          currentValue.filter((v) => v !== option.value)
+                          currentValue.filter((v) => v !== option.value),
                         );
                       }
                     }}
@@ -360,7 +360,7 @@ export const FormDate = ({ field }) => {
 
   const years = Array.from(
     { length: endYear - startYear + 1 },
-    (_, k) => startYear + k
+    (_, k) => startYear + k,
   );
 
   return (
@@ -374,7 +374,7 @@ export const FormDate = ({ field }) => {
           const handleMonth = (month) => {
             const newDate = setMonth(
               value || new Date(),
-              months.indexOf(month)
+              months.indexOf(month),
             );
             onChange(normalizeDateToUTC(newDate));
           };
@@ -394,7 +394,7 @@ export const FormDate = ({ field }) => {
                   variant={"outline"}
                   className={cn(
                     "w-full justify-start text-left font-normal",
-                    !value && "text-muted-foreground"
+                    !value && "text-muted-foreground",
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
@@ -446,7 +446,7 @@ export const FormDate = ({ field }) => {
                       onChange(
                         date
                           ? formatToDateString(normalizeDateToUTC(date))
-                          : null
+                          : null,
                       );
                     }
                   }}
@@ -511,7 +511,7 @@ export const FormMultiDate = ({ field }) => {
                   variant="outline"
                   className={cn(
                     "w-full justify-start text-left font-normal",
-                    !value?.length && "text-muted-foreground"
+                    !value?.length && "text-muted-foreground",
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
@@ -626,7 +626,9 @@ export const SearchableSelect = ({ field }) => {
                           value={framework?.value}
                           onSelect={() => {
                             onChange(
-                              framework?.value === value ? "" : framework?.value
+                              framework?.value === value
+                                ? ""
+                                : framework?.value,
                             );
                             setOpen(false);
                           }}
@@ -636,7 +638,7 @@ export const SearchableSelect = ({ field }) => {
                               "mr-2 h-4 w-4",
                               value === framework?.value
                                 ? "opacity-100"
-                                : "opacity-0"
+                                : "opacity-0",
                             )}
                           />
                           {framework?.label}
@@ -724,7 +726,7 @@ export const FormMultipleSelect = ({ field }) => {
                           >
                             {
                               options.find(
-                                (framework) => framework?.value === val
+                                (framework) => framework?.value === val,
                               )?.label
                             }
                             {/* <X
@@ -766,7 +768,7 @@ export const FormMultipleSelect = ({ field }) => {
                                 onChange(
                                   value.includes(framework.value)
                                     ? value.filter((v) => v !== framework.value)
-                                    : [...value, framework.value]
+                                    : [...value, framework.value],
                                 );
                               } else {
                                 onChange([framework.value]);
@@ -779,7 +781,7 @@ export const FormMultipleSelect = ({ field }) => {
                                 Array.isArray(value) &&
                                   value.includes(framework.value)
                                   ? "opacity-100"
-                                  : "opacity-0"
+                                  : "opacity-0",
                               )}
                             />
                             {framework.label}
@@ -838,7 +840,7 @@ export const FormImageUpload = ({ field }) => {
     const newFiles = acceptedFiles.map((file) =>
       Object.assign(file, {
         preview: URL.createObjectURL(file),
-      })
+      }),
     );
 
     if (field.maxFiles === 1) {
@@ -886,9 +888,28 @@ export const FormImageUpload = ({ field }) => {
       );
     }
 
+    if (file?.type?.startsWith("video/")) {
+      return (
+        <video controls className="rounded-md border object-cover size-28">
+          <source src={file.preview} type={file.type} />
+          Your browser does not support the video tag.
+        </video>
+      );
+    }
+
+    if (file?.type?.startsWith("application/pdf")) {
+      return (
+        <iframe
+          src={file.preview}
+          title={file.name}
+          className="rounded-md border object-cover size-28"
+        />
+      );
+    }
+
     return (
-      <div className="w-28 h-28 flex items-center justify-center border rounded-md text-sm">
-        {file.name}
+      <div className="flex flex-col items-center justify-center border rounded-md p-2 size-28 truncate text-xs text-start">
+        <p className="text-xs mt-1 text-center">{file.name}</p>
       </div>
     );
   };
@@ -919,8 +940,8 @@ export const FormImageUpload = ({ field }) => {
                     isDragActive
                       ? "border-indigo-500 bg-indigo-100 animate-pulse"
                       : errors[field?.name]
-                      ? "border-destructive"
-                      : "border-gray-300 bg-white"
+                        ? "border-destructive"
+                        : "border-gray-300 bg-white"
                   }`}
                 >
                   {files.length > 0 ? (

@@ -77,7 +77,7 @@ export const handleOfficeEmployee = async (data, id) => {
         const leaveResult = await syncMissingLeaveTypesNew(
           joinDate,
           dayPerWeek,
-          employeeId
+          employeeId,
         );
         if (!leaveResult?.success)
           return { success: false, message: leaveResult.message };
@@ -277,6 +277,12 @@ export const GenerateHashPassword = async (password) => {
 export const OfficeEmployeeStatus = async (data) => {
   if (!data) return { success: false, message: "Not found" };
 
+  // console.log("Received data for status update:", data); // Debug log
+  // return {
+  //   success: false,
+  //   message: "This API is currently disabled for testing",
+  // }; // Temporary response to disable the API during testing
+
   try {
     const id = data?.id;
     const isActive = !data?.status;
@@ -284,7 +290,7 @@ export const OfficeEmployeeStatus = async (data) => {
 
     await OfficeEmployeeModel.updateOne(
       { _id: id },
-      { $set: { [data?.name]: isActive, statusDate } }
+      { $set: { [data?.name]: isActive, statusDate } },
     );
 
     return {
@@ -306,7 +312,7 @@ export const officeEmployeeDelete = async (data) => {
     const statusDate = new Date();
     await OfficeEmployeeModel.updateOne(
       { _id: id },
-      { $set: { isActive, delete: isDelete, statusDate } }
+      { $set: { isActive, delete: isDelete, statusDate } },
     );
     return {
       success: true,
@@ -322,7 +328,7 @@ export const getSuperAdmins = async () => {
   try {
     const allAdmin = await OfficeEmployeeModel.find(
       { isSuperAdmin: true },
-      { name: 1, email: 1 }
+      { name: 1, email: 1 },
     );
     return {
       success: true,

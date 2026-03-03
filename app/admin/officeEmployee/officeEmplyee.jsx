@@ -155,7 +155,11 @@ const OfficeEmplyee = ({ searchParams }) => {
       invalidateKey: queryKey,
       onSuccessMessage: (response) =>
         `${
-          alert.type === "Delete" ? "Employee Delete" : "Status Update"
+          alert.type === "Delete"
+            ? "Employee Delete"
+            : alert.name === "isActive"
+              ? "Status Updated"
+              : "Timesheet status updated"
         } successfully`,
       onClose: alertClose,
     });
