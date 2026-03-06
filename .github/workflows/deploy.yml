@@ -30,7 +30,7 @@
 #             pm2 restart next-app || pm2 start npm --name "next-app" -- start
 #             pm2 save
 
-name: Deploy to Production
+name: Deploy to Production CDC HR
 
 on:
   push:
