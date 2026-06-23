@@ -5,7 +5,7 @@
 **Software version:** 1.1.0 (Security Hardening release)
 **Build / package version:** 0.1.0
 **Release branch:** `security-hardening`
-**Build reference (commit):** _see git log on branch `security-hardening`_
+**Build reference (commit):** `5cd237b`
 **Build date:** June 2026
 **Document date:** 23 June 2026
 **Vendor / author:** Webmints (Neel Patel)
