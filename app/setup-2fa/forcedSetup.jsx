@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { onEnableChange, enable2FA } from "@/server/2FAServer/TwoAuthserver";
 import { Button } from "@/components/ui/button";
@@ -17,7 +16,6 @@ import { Loader2, ShieldCheck, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ForcedTwoFactorSetup() {
-  const router = useRouter();
   const { update } = useSession();
   const [secret, setSecret] = useState("");
   const [qrCodeUrl, setQrCodeUrl] = useState("");
@@ -53,8 +51,11 @@ export default function ForcedTwoFactorSetup() {
       const res = await enable2FA(code, secret);
       if (res?.success) {
         toast.success("Two-factor authentication enabled");
+        // Wait for the updated JWT cookie, then do a full-page navigation so
+        // middleware re-evaluates with mustSetup2FA cleared (a client-side
+        // push can run before the cookie propagates and bounce back here).
         await update({ twoFactorSetupComplete: true });
-        router.push("/admin/dashboard");
+        window.location.assign("/admin/dashboard");
       } else {
         toast.error(res?.message || "Invalid code, please try again");
       }

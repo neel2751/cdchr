@@ -39,6 +39,16 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  // Bake the client-side obfuscation key into the browser bundle at build time.
+  // NEXT_PUBLIC_* values are inlined during `next build` (not read at runtime),
+  // so this falls back to EMAIL_ENCRYPTION_KEY to guarantee a value is present
+  // even if NEXT_PUBLIC_ALGO_KEY itself is not separately configured.
+  // NOTE: you MUST rebuild (`next build`) after changing these — a restart alone
+  // will not update an already-built bundle.
+  env: {
+    NEXT_PUBLIC_ALGO_KEY:
+      process.env.NEXT_PUBLIC_ALGO_KEY || process.env.EMAIL_ENCRYPTION_KEY,
+  },
   images: {
     remotePatterns: [
       // new URL("https://cdc.construction/images/team/**"),
