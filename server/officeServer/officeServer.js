@@ -7,8 +7,14 @@ import { createObjectId } from "@/lib/mongodb";
 import { getCompanyById } from "../companyServer/companyServer";
 import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
 import { syncMissingLeaveTypesNew } from "../leaveServer/countLeaveServer";
+import { withAudit, recordAudit } from "@/lib/audit";
+import { logVisaExpiryChange } from "../visaServer/visaAudit";
+import { getServerSideProps } from "../session/session";
+import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 
-export const handleOfficeEmployee = async (data, id) => {
+export const handleOfficeEmployee = withAudit(
+  "OfficeEmployee.upsert",
+  async (data, id) => {
   // make dealy for  testing
   // await new Promise((resolve) => setTimeout(resolve, 1000));
   // return;
@@ -37,10 +43,24 @@ export const handleOfficeEmployee = async (data, id) => {
       }
       // if the email is changing we have to convert it to lowercase
       data.email = data.email.toLowerCase();
+      const beforeEmp = updatedEmp.toObject();
       Object.assign(updatedEmp, data);
       const updatedData = await updatedEmp.save();
       if (!updatedData)
         return { success: false, message: "Error Updating Employee" };
+      recordAudit({
+        entityId: id,
+        before: beforeEmp,
+        after: updatedData.toObject(),
+        description: `Updated office employee ${updatedData.name || id}`,
+      });
+      await logVisaExpiryChange({
+        before: beforeEmp?.visaEndDate,
+        after: updatedData?.visaEndDate,
+        employeeType: "OfficeEmploye",
+        entityId: id,
+        name: updatedData?.name,
+      });
       return { success: true, data: JSON.stringify(updatedData) };
     } else {
       const { email, phoneNumber } = data;
@@ -103,6 +123,11 @@ export const handleOfficeEmployee = async (data, id) => {
           const smtp = { ...emailData, toEmail: email, html, subject };
           await userRegisterEmail(smtp);
         }
+        recordAudit({
+          entityId: employeeId,
+          after: result.toObject(),
+          description: `Created office employee ${name}`,
+        });
         return {
           success: true,
           message: "Successfully added office employee",
@@ -121,7 +146,9 @@ export const handleOfficeEmployee = async (data, id) => {
       message: "Something went wrong on Office Employee",
     };
   }
-};
+  },
+  { module: "OfficeEmployee" },
+);
 
 export const getOfficeEmployee = async (filterData) => {
   try {
@@ -147,6 +174,28 @@ export const getOfficeEmployee = async (filterData) => {
     if (filterType) {
       query.immigrationType = filterType;
     }
+
+    // Account status filter (active / inactive). Deleted are already excluded.
+    const accountStatus = filterData?.filter?.status;
+    if (accountStatus === "active") query.isActive = true;
+    else if (accountStatus === "inactive") query.isActive = false;
+
+    // Visa status filter. Requiring a visaEndDate naturally excludes
+    // British / no-visa staff.
+    const visaStatus = filterData?.filter?.visaStatus;
+    if (visaStatus && visaStatus !== "all") {
+      const now = new Date();
+      const horizon = new Date();
+      horizon.setDate(horizon.getDate() + 90);
+      if (visaStatus === "expired") {
+        query.visaEndDate = { $ne: null, $lt: now };
+      } else if (visaStatus === "expiring") {
+        query.visaEndDate = { $ne: null, $gte: now, $lte: horizon };
+      } else if (visaStatus === "valid") {
+        query.visaEndDate = { $ne: null, $gt: horizon };
+      }
+    }
+
     if (sanitizedSearch) {
       query.$or = [
         { name: { $regex: sanitizedSearch, $options: "i" } },
@@ -220,6 +269,35 @@ export const getOfficeEmployee = async (filterData) => {
             {
               $limit: Number(validLimit) || 10,
             },
+            {
+              $lookup: {
+                from: "auditlogs",
+                let: { empId: "$_id" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ["$entityId", "$$empId"] },
+                          { $eq: ["$module", "Visa"] },
+                          { $eq: ["$action", "Visa.reminderSent"] },
+                          { $eq: ["$status", "success"] },
+                        ],
+                      },
+                    },
+                  },
+                  {
+                    $project: {
+                      _id: 0,
+                      milestone: "$metadata.milestone",
+                      visaEndDate: "$metadata.visaEndDate",
+                      createdAt: 1,
+                    },
+                  },
+                ],
+                as: "visaReminders",
+              },
+            },
           ],
         },
       },
@@ -227,6 +305,20 @@ export const getOfficeEmployee = async (filterData) => {
     const officeEmployee = await OfficeEmployeeModel.aggregate(pipeline);
     const totalCount = officeEmployee[0].totalCount[0].count;
     const result = officeEmployee[0].result;
+
+    // Annotate each employee with current account-lock status so admins can see
+    // which accounts are locked out by repeated failed logins.
+    try {
+      const emails = result.map((r) => r?.email).filter(Boolean);
+      const lockMap = await getLockedEmails(emails);
+      for (const r of result) {
+        const key = (r?.email || "").trim().toLowerCase();
+        r.isLocked = Boolean(lockMap[key]);
+        r.lockedUntil = lockMap[key] || null;
+      }
+    } catch (e) {
+      console.log("lock-status annotation failed:", e?.message);
+    }
 
     return {
       success: true,
@@ -274,55 +366,226 @@ export const GenerateHashPassword = async (password) => {
   }
 };
 
-export const OfficeEmployeeStatus = async (data) => {
-  if (!data) return { success: false, message: "Not found" };
+/**
+ * Super-admin password reset for an office employee. Records a full audit entry
+ * capturing who reset it, for whom, the reason, and when (the audit timestamp).
+ * Also clears any active failed-login lockout for the account.
+ */
+export const resetOfficeEmployeePassword = withAudit(
+  "Password.reset",
+  async ({ employeeId, newPassword, reason } = {}) => {
+    const { props } = await getServerSideProps();
+    const actor = props?.session?.user;
 
-  // console.log("Received data for status update:", data); // Debug log
-  // return {
-  //   success: false,
-  //   message: "This API is currently disabled for testing",
-  // }; // Temporary response to disable the API during testing
+    // Only a super admin may reset another user's password.
+    if (actor?.role !== "superAdmin") {
+      return {
+        success: false,
+        message: "Only a super admin can reset passwords",
+      };
+    }
+    if (!employeeId) return { success: false, message: "Employee is required" };
+    if (!newPassword || String(newPassword).length < 8) {
+      return {
+        success: false,
+        message: "New password must be at least 8 characters",
+      };
+    }
+    if (!reason || !String(reason).trim()) {
+      return {
+        success: false,
+        message: "A reason for the reset is required",
+      };
+    }
 
-  try {
-    const id = data?.id;
-    const isActive = !data?.status;
-    const statusDate = data.status ? new Date() : null;
+    try {
+      await connect();
+      const employee = await OfficeEmployeeModel.findById(employeeId).exec();
+      if (!employee) {
+        return { success: false, message: "Employee not found" };
+      }
 
-    await OfficeEmployeeModel.updateOne(
-      { _id: id },
-      { $set: { [data?.name]: isActive, statusDate } },
-    );
+      const hashed = await GenerateHashPassword(String(newPassword));
+      if (!hashed) {
+        return { success: false, message: "Failed to secure the new password" };
+      }
+      employee.password = hashed;
+      await employee.save();
 
-    return {
-      success: true,
-      message: "The Status of the Assign Project has been Updated",
-    };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: `Error Occurred in server problem` };
-  }
-};
+      // Lift any failed-login lockout so the user can sign in with the new password.
+      await clearLockByEmail(employee.email);
 
-export const officeEmployeeDelete = async (data) => {
-  if (!data) return { success: false, message: "Not found" };
-  try {
-    const id = data?.id;
-    const isActive = false;
-    const isDelete = true;
-    const statusDate = new Date();
-    await OfficeEmployeeModel.updateOne(
-      { _id: id },
-      { $set: { isActive, delete: isDelete, statusDate } },
-    );
-    return {
-      success: true,
-      message: "The  Status of the Assign Project has been Updated",
-    };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: `Error Occurred in server problem` };
-  }
-};
+      const targetName = employee.name || employee.firstName || "employee";
+      // who (actor) is captured automatically by withAudit; here we record
+      // for-whom (entityId + target details) and why (reason). When = createdAt.
+      recordAudit({
+        entityId: employeeId,
+        module: "Account",
+        description: `Password reset by ${
+          actor?.name || actor?.email
+        } for ${targetName} <${employee.email}>. Reason: ${String(
+          reason
+        ).trim()}`,
+        after: {
+          target: {
+            id: String(employeeId),
+            name: targetName,
+            email: employee.email,
+          },
+          reason: String(reason).trim(),
+          lockCleared: true,
+        },
+      });
+
+      return { success: true, message: "Password reset successfully" };
+    } catch (error) {
+      console.log("Error in resetOfficeEmployeePassword:", error);
+      return { success: false, message: "Error resetting password" };
+    }
+  },
+  { module: "Account" }
+);
+
+/**
+ * Emergency lockdown of a (potentially compromised) account. Deactivates the
+ * account so future logins are blocked immediately, and — combined with the
+ * middleware active-account check — terminates any live sessions on the next
+ * request. Fully audited with a mandatory reason.
+ */
+export const emergencyLockdownAccount = withAudit(
+  "Account.lockdown",
+  async ({ employeeId, reason } = {}) => {
+    const { props } = await getServerSideProps();
+    const actor = props?.session?.user;
+
+    if (actor?.role !== "superAdmin") {
+      return {
+        success: false,
+        message: "Only a super admin can lock down accounts",
+      };
+    }
+    if (!employeeId) return { success: false, message: "Employee is required" };
+    if (!reason || !String(reason).trim()) {
+      return { success: false, message: "A reason for the lockdown is required" };
+    }
+
+    try {
+      await connect();
+      const employee = await OfficeEmployeeModel.findById(employeeId).exec();
+      if (!employee) return { success: false, message: "Employee not found" };
+
+      // Never let a super admin lock themselves out.
+      if (String(employee._id) === String(actor?._id)) {
+        return {
+          success: false,
+          message: "You cannot lock down your own account",
+        };
+      }
+
+      employee.isActive = false;
+      await employee.save();
+
+      const targetName = employee.name || employee.firstName || "employee";
+      recordAudit({
+        entityId: employeeId,
+        module: "Account",
+        description: `Emergency lockdown by ${
+          actor?.name || actor?.email
+        } for ${targetName} <${employee.email}>. Reason: ${String(
+          reason
+        ).trim()}`,
+        before: { isActive: true },
+        after: {
+          target: {
+            id: String(employeeId),
+            name: targetName,
+            email: employee.email,
+          },
+          isActive: false,
+          reason: String(reason).trim(),
+        },
+      });
+
+      return {
+        success: true,
+        message: "Account locked down. Active sessions will be terminated.",
+      };
+    } catch (error) {
+      console.log("Error in emergencyLockdownAccount:", error);
+      return { success: false, message: "Error locking down account" };
+    }
+  },
+  { module: "Account" },
+);
+
+export const OfficeEmployeeStatus = withAudit(
+  "OfficeEmployee.status",
+  async (data) => {
+    if (!data) return { success: false, message: "Not found" };
+
+    try {
+      const id = data?.id;
+      const isActive = !data?.status;
+      const statusDate = data.status ? new Date() : null;
+
+      const before = await OfficeEmployeeModel.findById(id).lean();
+      await OfficeEmployeeModel.updateOne(
+        { _id: id },
+        { $set: { [data?.name]: isActive, statusDate } },
+      );
+      const after = await OfficeEmployeeModel.findById(id).lean();
+
+      recordAudit({
+        entityId: id,
+        before,
+        after,
+        description: `Set ${data?.name} for office employee ${id}`,
+      });
+
+      return {
+        success: true,
+        message: "The Status of the Assign Project has been Updated",
+      };
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: `Error Occurred in server problem` };
+    }
+  },
+  { module: "OfficeEmployee" },
+);
+
+export const officeEmployeeDelete = withAudit(
+  "OfficeEmployee.delete",
+  async (data) => {
+    if (!data) return { success: false, message: "Not found" };
+    try {
+      const id = data?.id;
+      const isActive = false;
+      const isDelete = true;
+      const statusDate = new Date();
+      const before = await OfficeEmployeeModel.findById(id).lean();
+      await OfficeEmployeeModel.updateOne(
+        { _id: id },
+        { $set: { isActive, delete: isDelete, statusDate } },
+      );
+      const after = await OfficeEmployeeModel.findById(id).lean();
+      recordAudit({
+        entityId: id,
+        before,
+        after,
+        description: `Soft-deleted office employee ${id}`,
+      });
+      return {
+        success: true,
+        message: "The  Status of the Assign Project has been Updated",
+      };
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: `Error Occurred in server problem` };
+    }
+  },
+  { module: "OfficeEmployee" },
+);
 
 export const getSuperAdmins = async () => {
   try {

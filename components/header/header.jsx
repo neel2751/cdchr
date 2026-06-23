@@ -36,9 +36,9 @@ const Header = () => {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      <div className="flex-end ml-auto flex items-center gap-2 pr-4">
+      {/* <div className="flex-end ml-auto flex items-center gap-2 pr-4">
         <OnBoarding />
-      </div>
+      </div> */}
     </header>
   );
 };

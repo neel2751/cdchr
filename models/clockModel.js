@@ -58,8 +58,11 @@ const clockSchema = new Schema(
       default: false,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+clockSchema.index({ employeeId: 1, date: -1, siteId: 1, isDeleted: 1 });
+clockSchema.index({ date: -1, siteId: 1, isDeleted: 1 });
 
 const ClockModel =
   mongoose.models.Clock || mongoose.model("Clock", clockSchema);

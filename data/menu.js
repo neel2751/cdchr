@@ -126,25 +126,37 @@ export const MENU = [
     icon: "Building2",
   },
 
-  {
-    name: "Visitor Management",
-    path: "/admin/leads",
-    role: ["superAdmin", "admin"],
-    icon: "SquareChartGantt",
-  },
+  // {
+  //   name: "Visitor Management",
+  //   path: "/admin/leads",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "SquareChartGantt",
+  // },
 
-  {
-    name: "QR Code Management",
-    path: "/admin/qr",
-    role: ["superAdmin", "admin"],
-    icon: "ScanQrCode",
-  },
+  // {
+  //   name: "QR Code Management",
+  //   path: "/admin/qr",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "ScanQrCode",
+  // },
 
+  // {
+  //   name: "Form Template",
+  //   path: "/admin/templates",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "FileText",
+  // },
   {
-    name: "Form Template",
-    path: "/admin/templates",
-    role: ["superAdmin", "admin"],
-    icon: "FileText",
+    name: "Audit Logs",
+    path: "/admin/auditLogs",
+    role: ["superAdmin"],
+    icon: "ScrollText",
+  },
+  {
+    name: "Media Management",
+    path: "/admin/document",
+    role: ["superAdmin"],
+    icon: "FolderOpen",
   },
 ];
 
@@ -166,6 +178,24 @@ export const COMMONMENUITEMS = [
     path: "/admin/siteAssign",
     role: ["superAdmin", "admin", "user"],
     icon: "RadioIcon",
+  },
+  {
+    name: "My Attendance",
+    path: "/admin/my-attendance",
+    role: ["user"],
+    icon: "CalendarClock",
+  },
+  {
+    name: "My Weekly Shifts",
+    path: "/admin/my-weekly-shifts",
+    role: ["user"],
+    icon: "CalendarDays",
+  },
+  {
+    name: "My Leaves",
+    path: "/admin/my-leaves",
+    role: ["user"],
+    icon: "Stamp",
   },
 ];
 

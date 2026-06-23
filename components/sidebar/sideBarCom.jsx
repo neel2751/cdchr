@@ -81,9 +81,11 @@ const SideBarHeaderCom = () => {
 const SideBarMenu = () => {
   const pathName = usePathname();
   const { data: sessionData } = useSession();
+  const currentRole = sessionData?.user?.role;
+  const currentUserId = sessionData?.user?._id;
 
   // Memoize the path to avoid recalculation
-  const path = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
+  const rootPath = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
 
   // Fetch employee menu (React Query / SWR style)
   const { data: menuItems = [], isLoading } = useFetchSelectQuery({
@@ -94,12 +96,45 @@ const SideBarMenu = () => {
   // Merge menus and memoize to prevent recalculation on re-render
   const menu = useMemo(
     () => mergeAndFilterMenus(COMMONMENUITEMS, menuItems),
-    [menuItems]
+    [menuItems],
   );
 
+  const personalMenu = useMemo(() => {
+    if (currentRole !== "user" || !currentUserId) return [];
+
+    return [
+      {
+        name: "My Attendance",
+        path: "/admin/my-attendance",
+        icon: "CalendarClock",
+      },
+      {
+        name: "My Weekly Shifts",
+        path: "/admin/my-weekly-shifts",
+        icon: "CalendarDays",
+      },
+      {
+        name: "My Leaves",
+        path: "/admin/my-leaves",
+        icon: "Stamp",
+      },
+    ];
+  }, [currentRole, currentUserId]);
+
+  const mergedMenu = useMemo(() => {
+    if (!personalMenu.length) return menu;
+
+    const existingPaths = new Set(menu.map((item) => item?.path));
+    const uniquePersonalMenu = personalMenu.filter(
+      (item) => !existingPaths.has(item.path),
+    );
+
+    return [...uniquePersonalMenu, ...menu];
+  }, [personalMenu, menu]);
+
   // Determine current menus and reports
-  const currentMenu = useMemo(() => getMenu(path), [path]);
-  const currentReport = useMemo(() => getReportMenu(path), [path]);
+  const currentMenu = useMemo(() => getMenu(rootPath), [rootPath]);
+  const currentReport = useMemo(() => getReportMenu(rootPath), [rootPath]);
 
   return (
     <SidebarContent>
@@ -115,7 +150,7 @@ const SideBarMenu = () => {
         </SidebarGroup>
       ) : (
         <SidebarGroup>
-          <SideBarMenuCom menuItems={menu} path={path} />
+          <SideBarMenuCom menuItems={mergedMenu} path={pathName} />
         </SidebarGroup>
       )}
 
@@ -235,7 +270,7 @@ const SideBarFooterCom = () => {
                   <Link
                     className="flex items-center gap-2 w-full"
                     href={`/admin/account/${encrypt(
-                      session?.user?._id
+                      session?.user?._id,
                     )}/overview`}
                   >
                     <BadgeCheck />

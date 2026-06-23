@@ -14,8 +14,12 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
 import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
+import { withAudit, recordAudit } from "@/lib/audit";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
-export const updateClockManuallyById = async ({
+export const updateClockManuallyById = withAudit(
+  "Clock.update",
+  async ({
   id = null,
   employeeId,
   siteId,
@@ -65,13 +69,22 @@ export const updateClockManuallyById = async ({
     //   };
     // }
     let updated;
+    let beforeDoc = null;
 
     if (id) {
+      beforeDoc = await model.findById(createObjectId(id)).lean();
       updated = await model.findByIdAndUpdate(createObjectId(id), updateQuery, {
         new: true,
       });
     } else {
       const normalizedDate = date;
+      beforeDoc = await model
+        .findOne({
+          employeeId: createObjectId(employeeId),
+          ...(type === "site" && { siteId: createObjectId(siteId) }),
+          date: normalizedDate,
+        })
+        .lean();
       updated = await model.findOneAndUpdate(
         {
           employeeId: createObjectId(employeeId),
@@ -87,13 +100,22 @@ export const updateClockManuallyById = async ({
             date: normalizedDate,
           },
         },
-        { new: true, upsert: true }
+        { new: true, upsert: true },
       );
     }
 
     if (!updated) {
       return { success: false, message: "Clock entry not found or failed" };
     }
+
+    recordAudit({
+      entityId: updated._id,
+      before: beforeDoc,
+      after: updated.toObject ? updated.toObject() : updated,
+      description: id
+        ? `Edited ${type} attendance time for clock ${updated._id}`
+        : `Created ${type} attendance entry for employee ${employeeId}`,
+    });
 
     return {
       success: true,
@@ -103,22 +125,26 @@ export const updateClockManuallyById = async ({
     console.log("Error in updateClockManuallyById:", err);
     return { success: false, message: "Failed to update or create clock" };
   }
-};
+  },
+  { module: "Clock" },
+);
 
-export const updateClockManuallyByIdNew = async ({
-  id = null,
-  employeeId,
-  siteId = null,
-  date,
-  clockIn,
-  clockOut,
-  breaks = [], // now supports multiple breaks
-  status,
-  actions = [],
-  employeeType = "site", // 'site' or 'office'
-}) => {
-  try {
-    await connect();
+export const updateClockManuallyByIdNew = withAudit(
+  "Clock.update",
+  async ({
+    id = null,
+    employeeId,
+    siteId = null,
+    date,
+    clockIn,
+    clockOut,
+    breaks = [], // now supports multiple breaks
+    status,
+    actions = [],
+    employeeType = "site", // 'site' or 'office'
+  }) => {
+    try {
+      await connect();
 
     if (!id && (!employeeId || !date)) {
       return {
@@ -138,9 +164,19 @@ export const updateClockManuallyByIdNew = async ({
     if (clockOut !== undefined) updateFields.clockOut = clockOut;
     if (status !== undefined) updateFields.status = status;
 
-    if (breaks && breaks.length > 0) {
-      for (let i = 0; i < breaks.length; i++) {
-        const b = breaks[i];
+    if (Array.isArray(breaks) && breaks.length > 0) {
+      const normalizedBreaks = breaks
+        .map((b) => ({
+          breakIn:
+            typeof b?.breakIn === "string" ? b.breakIn.trim() : b?.breakIn,
+          breakOut:
+            typeof b?.breakOut === "string" ? b.breakOut.trim() : b?.breakOut,
+        }))
+        // Ignore fully empty rows from UI editors
+        .filter((b) => Boolean(b.breakIn || b.breakOut));
+
+      for (let i = 0; i < normalizedBreaks.length; i++) {
+        const b = normalizedBreaks[i];
 
         // If breakOut exists but breakIn does NOT → REJECT
         if (b.breakOut && !b.breakIn) {
@@ -166,7 +202,7 @@ export const updateClockManuallyByIdNew = async ({
       }
 
       // If all good → allow saving breaks
-      updateFields.breaks = breaks;
+      updateFields.breaks = normalizedBreaks;
     }
 
     if (employeeType) updateFields.employeeType = employeeType;
@@ -198,13 +234,15 @@ export const updateClockManuallyByIdNew = async ({
     // 👉 END DUPLICATE CHECK
 
     let updatedDoc;
+    let beforeDoc = null;
 
     if (id) {
       // update by ID directly
+      beforeDoc = await ClockRecordModel.findById(createObjectId(id)).lean();
       updatedDoc = await ClockRecordModel.findByIdAndUpdate(
         createObjectId(id),
         updateQuery,
-        { new: true }
+        { new: true },
       );
     } else {
       // update or insert by employeeId + date (+ optional siteId)
@@ -225,13 +263,48 @@ export const updateClockManuallyByIdNew = async ({
             ...(siteId ? { siteId: createObjectId(siteId) } : {}),
           },
         },
-        { new: true, upsert: true }
+        { new: true, upsert: true },
       );
     }
 
     if (!updatedDoc) {
       return { success: false, message: "Failed to update or create record" };
     }
+
+    // Resolve a human-readable employee name so the audit log clearly shows
+    // whose attendance time was changed.
+    const empIdForName = employeeId || updatedDoc?.employeeId;
+    let employeeName = "";
+    try {
+      if (empIdForName && isValidObjectId(empIdForName)) {
+        if (employeeType === "office") {
+          const emp = await OfficeEmployeeModel.findById(
+            createObjectId(empIdForName),
+          )
+            .select("name")
+            .lean();
+          employeeName = emp?.name || "";
+        } else {
+          const emp = await EmployeModel.findById(createObjectId(empIdForName))
+            .select("firstName lastName")
+            .lean();
+          employeeName = emp
+            ? `${emp.firstName || ""} ${emp.lastName || ""}`.trim()
+            : "";
+        }
+      }
+    } catch {
+      // name is best-effort; fall back to the id below
+    }
+
+    recordAudit({
+      entityId: updatedDoc._id,
+      before: beforeDoc,
+      after: updatedDoc.toObject ? updatedDoc.toObject() : updatedDoc,
+      description: `${id ? "Edited" : "Created"} ${employeeType} attendance time for ${
+        employeeName || empIdForName
+      }`,
+    });
 
     return {
       success: true,
@@ -240,14 +313,19 @@ export const updateClockManuallyByIdNew = async ({
         : "Clock record created successfully",
       // data: updatedDoc,
     };
-  } catch (err) {
-    console.error("Error in updateClockManuallyById:", err);
-    return { success: false, message: "Error updating or creating clock" };
-  }
-};
+    } catch (err) {
+      console.error("Error in updateClockManuallyById:", err);
+      return { success: false, message: "Error updating or creating clock" };
+    }
+  },
+  { module: "Clock" },
+);
 
-export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
-  return withTransaction(async (session) => {
+export const moveEmployeeToNewSite = withAudit(
+  "SiteAssignment.moveEmployee",
+  async ({ employeeId, toSiteId, date }) => {
+    let movedFromSiteId = null;
+    const result = await withTransaction(async (session) => {
     const { props } = await getServerSideProps();
     const movedBy = props?.session?.user?._id;
     const assignDate = new Date(date);
@@ -265,8 +343,9 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
     }
 
     const fromSiteId = fromAssignment.siteId;
+    movedFromSiteId = fromSiteId;
     const assignedEmployee = fromAssignment.assignedEmployees.find((e) =>
-      e.employeeId.equals(eid)
+      e.employeeId.equals(eid),
     );
 
     if (assignedEmployee?.isLocked) {
@@ -282,14 +361,14 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
 
     if (toAssignmentExists) {
       throw new Error(
-        "Employee is already assigned to the target site on this date."
+        "Employee is already assigned to the target site on this date.",
       );
     }
     // Step 3: Remove employee from the current site assignment
     await SiteAssignmentModel.updateOne(
       { siteId: fromSiteId, assignDate },
       { $pull: { assignedEmployees: { employeeId: eid } } },
-      { session }
+      { session },
     );
 
     // Step 4: Add to new site (safe insert/update)
@@ -311,7 +390,7 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
             },
           },
         },
-        { session }
+        { session },
       );
     } else {
       const newAssignment = new SiteAssignmentModel({
@@ -344,11 +423,24 @@ export async function moveEmployeeToNewSite({ employeeId, toSiteId, date }) {
     await SiteClockModel.updateMany(
       { employeeId: eid, date: assignDate },
       { $set: { siteId: toSid } },
-      { session }
+      { session },
     );
     return { success: true, message: "Employee moved successfully." };
-  });
-}
+    });
+
+    if (result?.success) {
+      recordAudit({
+        entityId: employeeId,
+        before: { employeeId, siteId: movedFromSiteId, date },
+        after: { employeeId, siteId: toSiteId, date },
+        description: `Moved employee ${employeeId} from site ${movedFromSiteId} to site ${toSiteId} on ${date}`,
+      });
+    }
+
+    return result;
+  },
+  { module: "SiteAssignment" },
+);
 
 export async function reportAllAttendanceData() {
   try {
@@ -450,6 +542,11 @@ export async function reportAllAttendanceData() {
     ].join("\n");
 
     // 6. Return Response
+    await logCsvExport({
+      source: "attendanceExportAll",
+      label: "All attendance",
+      rowCount: rows.length,
+    });
     return {
       success: true,
       data: csvContent,
@@ -513,6 +610,11 @@ export async function OldAttendanceData() {
     ].join("\n");
 
     // 5. Return CSV
+    await logCsvExport({
+      source: "oldAttendanceExport",
+      label: "Legacy attendance",
+      rowCount: rows.length,
+    });
     return {
       success: true,
       data: csvContent,

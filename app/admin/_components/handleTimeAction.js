@@ -166,16 +166,18 @@ export const handleTimeActionNew = async ({
         payload.status = "on-break";
         break;
       case "breakOut":
-        // find last break without breakOut
+        // find last open break (has breakIn and no breakOut)
         const lastBreakIndex = updatedBreaks
-          .map((b) => b.breakOut === null)
+          .map((b) => Boolean(b?.breakIn) && !b?.breakOut)
           .lastIndexOf(true);
+
         if (lastBreakIndex >= 0) {
           updatedBreaks[lastBreakIndex].breakOut = now;
         } else {
-          // if no break exists, push a new one (optional fallback)
-          updatedBreaks.push({ breakIn: null, breakOut: now });
+          toast.error("⚠️ No open break found. Please do Break In first.");
+          return;
         }
+
         payload.breaks = updatedBreaks;
         payload.status = "break-ended";
         break;

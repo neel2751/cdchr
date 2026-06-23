@@ -288,11 +288,13 @@ export default function SiteEmployeeScanner() {
       // 👇 make sure event matches what server emits
       socketRef.current.on("refresh-clock-table", (updatedEmployeeId) => {
         console.log("Received refresh-clock-table for:", updatedEmployeeId);
-        fetchAttendance(); // ✅ refetch and update screen
+        if (!updatedEmployeeId || updatedEmployeeId === employeeId) {
+          fetchAttendance(); // refetch only when this employee changed
+        }
       });
 
       socketRef.current.on("disconnect", () =>
-        console.log("Socket disconnected")
+        console.log("Socket disconnected"),
       );
     }
 

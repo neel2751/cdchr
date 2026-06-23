@@ -11,8 +11,14 @@ const useAuthTag = async (searchParams) => {
 export default useAuthTag;
 export function decryptId(encryptedId, iv, authTag) {
   try {
+    // Key is sourced exclusively from environment configuration (no in-code
+    // fallback). Mirrors lib/algo.js: NEXT_PUBLIC_ALGO_KEY (client-inlined) with
+    // a fallback to the server-only variable.
     const key =
-      "52bdc56fb0440989d14fad277de68f2221727ae3501ffe3d37607e5684d4be88";
+      process.env.NEXT_PUBLIC_ALGO_KEY || process.env.EMAIL_ENCRYPTION_KEY;
+    if (!key || key.length !== 64) {
+      throw new Error("Encryption key is not configured");
+    }
     const cipherKey = Buffer.from(key, "hex");
     const decipher = createDecipheriv(
       "aes-256-gcm",

@@ -20,6 +20,7 @@ import { fetchFilterClockRecordData } from "@/server/siteAssignmentServer/siteAs
 import { calculateDuration } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
 const FilterAttendance = ({ searchParams }) => {
   const query = searchParams?.query || "";
@@ -166,6 +167,15 @@ const FilterAttendance = ({ searchParams }) => {
     document.body.appendChild(link); // Required for FF
     link.click(); // This will download the data file named "attendance_data.csv".
     document.body.removeChild(link); // Cleanup
+
+    // Record the export for the compliance audit trail (who exported, range, rows)
+    logCsvExport({
+      source: "filterAttendance",
+      label: "Filtered site attendance",
+      dateFrom: format(date.from, "yyyy-MM-dd"),
+      dateTo: format(date.to, "yyyy-MM-dd"),
+      rowCount: filteredData?.length ?? 0,
+    }).catch(() => {});
   };
   return (
     <div className="p-4">

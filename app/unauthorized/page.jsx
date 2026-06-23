@@ -65,6 +65,12 @@ export default async function UnauthPage({ searchParams }) {
             </Link>
           </Button>
         )
+      ) : action === "logout" ? (
+        // Account deactivated / locked down — sign the user out completely.
+        <Logout
+          size={"lg"}
+          className="px-6 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+        />
       ) : (
         <Button asChild>
           <Link

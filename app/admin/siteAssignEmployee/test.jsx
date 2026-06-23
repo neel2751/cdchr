@@ -11,6 +11,7 @@ import {
   EditIcon,
   XIcon,
   SaveIcon,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,11 +52,19 @@ import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import OfficeQRCode from "@/app/hr/code/code";
 import { checkPermission } from "@/server/permissionServer/permissionServer";
 import { PaginationWithLinks } from "@/components/filters/pagination/pagination-client";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const EmployeeSiteManagement = () => {
   const { filter: searchParams, searchParams: siteId } = useCommonContext();
   const queryClient = useQueryClient();
   const [showEditForm, setShowEditForm] = useState({});
+  const [moveSiteByEmployee, setMoveSiteByEmployee] = useState({});
   const query = searchParams?.query;
   const date = searchParams?.assignDate;
   const currentPage = parseInt(searchParams?.page || "1");
@@ -65,14 +74,15 @@ const EmployeeSiteManagement = () => {
     siteId: (siteId && siteId[0]) || null,
   });
 
-  const { attendanceList, socket, total, queryKey } = useSiteAttendanceSocket({
-    ...filter,
-    currentPage,
-    pagePerData,
-    query,
-    fromDate: date,
-    toDate: date,
-  });
+  const { attendanceList, socket, total, queryKey, summary } =
+    useSiteAttendanceSocket({
+      ...filter,
+      currentPage,
+      pagePerData,
+      query,
+      fromDate: date,
+      toDate: date,
+    });
 
   const { data: sites = [] } = useFetchSelectQuery({
     queryKey: ["selectSiteProject"],
@@ -117,7 +127,7 @@ const EmployeeSiteManagement = () => {
     siteId,
     actionType,
     employeeType,
-    breaks = []
+    breaks = [],
   ) => {
     // Automatically detect type (no need to pass "site" anymore)
     const result = await handleTimeActionNew({
@@ -252,6 +262,8 @@ const EmployeeSiteManagement = () => {
     const res = await moveEmployeeToNewSite({ employeeId, toSiteId, date });
     if (res.success) {
       toast.success(res.message);
+      queryClient.invalidateQueries({ queryKey });
+      setMoveSiteByEmployee((prev) => ({ ...prev, [employeeId]: "" }));
     } else {
       toast.error(res.message || "Something went wrong");
     }
@@ -303,19 +315,14 @@ const EmployeeSiteManagement = () => {
           <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Total Employees</CardTitle>
-              <span className="text-2xl font-semibold">
-                {attendanceList?.length}
-              </span>
+              <span className="text-2xl font-semibold">{total || 0}</span>
             </CardHeader>
           </Card>
           <Card className="bg-green-50 text-green-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Present Today</CardTitle>
               <span className="text-2xl font-semibold">
-                {
-                  attendanceList.filter((emp) => emp.clockIn && !emp.clockOut)
-                    .length
-                }
+                {summary?.presentToday || 0}
               </span>
             </CardHeader>
           </Card>
@@ -323,24 +330,25 @@ const EmployeeSiteManagement = () => {
             <CardHeader>
               <CardTitle>On Break</CardTitle>
               <span className="text-2xl font-semibold">
-                {
-                  attendanceList.filter((emp) => emp.breakIn && !emp.breakOut)
-                    .length
-                }
+                {summary?.onBreak || 0}
               </span>
             </CardHeader>
           </Card>
           <Card className="bg-purple-50 text-purple-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Avarage Hours</CardTitle>
-              <span className="text-2xl font-semibold">00:00</span>
+              <span className="text-2xl font-semibold">
+                {minutesToHHMM(
+                  Math.max(0, Math.round(summary?.averageMinutes || 0)),
+                )}
+              </span>
             </CardHeader>
           </Card>
           <Card className="bg-red-50 text-red-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Clocked Out</CardTitle>
               <span className="text-2xl font-semibold">
-                {attendanceList.filter((emp) => emp.clockOut).length}
+                {summary?.clockedOut || 0}
               </span>
             </CardHeader>
           </Card>
@@ -361,6 +369,12 @@ const EmployeeSiteManagement = () => {
               View all employees assigned to sites today •{" "}
               {format(new Date(), "PPP")}
             </CardDescription>
+            {(role === "superAdmin" || role === "admin") && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Use Move to site in Actions to correct wrong site assignment for
+                the selected date.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <SearchDebounce />
@@ -403,8 +417,8 @@ const EmployeeSiteManagement = () => {
                     const status = !assignment.clockIn
                       ? "assigned"
                       : assignment.clockIn && !assignment.clockOut
-                      ? "checked-in"
-                      : "clocked-out";
+                        ? "checked-in"
+                        : "clocked-out";
 
                     const statusConfig = getStatusBadge(status);
 
@@ -413,6 +427,9 @@ const EmployeeSiteManagement = () => {
                     const lastBreak = breaks.length
                       ? breaks[breaks.length - 1]
                       : null;
+                    const hasOpenBreak = Boolean(
+                      lastBreak?.breakIn && !lastBreak?.breakOut,
+                    );
 
                     // calculate total break hours
                     const breakMinutes = breaks.reduce((sum, br) => {
@@ -432,20 +449,27 @@ const EmployeeSiteManagement = () => {
 
                         {/* STATUS */}
                         <TableCell>
-                          <Badge className={statusConfig?.color}>
-                            <div className="flex items-center gap-1">
-                              {status === "checked-in" && (
-                                <CheckCircle className="h-3 w-3" />
-                              )}
-                              {status === "clocked-out" && (
-                                <CheckCircle className="h-3 w-3" />
-                              )}
-                              {status === "assigned" && (
-                                <Clock className="h-3 w-3" />
-                              )}
-                              {statusConfig?.text}
-                            </div>
-                          </Badge>
+                          <div className="flex flex-col gap-1 items-start">
+                            <Badge className={statusConfig?.color}>
+                              <div className="flex items-center gap-1">
+                                {status === "checked-in" && (
+                                  <CheckCircle className="h-3 w-3" />
+                                )}
+                                {status === "clocked-out" && (
+                                  <CheckCircle className="h-3 w-3" />
+                                )}
+                                {status === "assigned" && (
+                                  <Clock className="h-3 w-3" />
+                                )}
+                                {statusConfig?.text}
+                              </div>
+                            </Badge>
+                            {hasOpenBreak && (
+                              <Badge className="bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                Open Break
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
 
                         {/* CLOCK IN */}
@@ -505,7 +529,7 @@ const EmployeeSiteManagement = () => {
                         <TableCell>
                           {calculateDuration(
                             assignment.clockIn,
-                            assignment.clockOut
+                            assignment.clockOut,
                           ) || "-"}
                         </TableCell>
 
@@ -519,17 +543,17 @@ const EmployeeSiteManagement = () => {
                               calculateTotalPay(
                                 calculateDuration(
                                   assignment.clockIn,
-                                  assignment.clockOut
+                                  assignment.clockOut,
                                 ),
-                                assignment.payRate
-                              )
+                                assignment.payRate,
+                              ),
                             ) || "-"}
                           </TableCell>
                         )}
 
                         {/* ACTION BUTTONS (CLOCK IN/OUT/BREAK IN/OUT/EDIT/DELETE) */}
                         <TableCell>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             {/* Only show SAVE + CANCEL if row is being edited and has a clock record */}
                             {assignment.clockRecordId &&
                             showEditForm?._id === assignment._id ? (
@@ -563,7 +587,7 @@ const EmployeeSiteManagement = () => {
                                         assignment.siteId,
                                         "clockIn",
                                         assignment.employeeType,
-                                        breaks
+                                        breaks,
                                       )
                                     }
                                   >
@@ -585,7 +609,7 @@ const EmployeeSiteManagement = () => {
                                           assignment.siteId,
                                           "breakIn",
                                           assignment.employeeType,
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
@@ -608,7 +632,7 @@ const EmployeeSiteManagement = () => {
                                           assignment.siteId,
                                           "breakOut",
                                           assignment.employeeType,
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
@@ -630,7 +654,7 @@ const EmployeeSiteManagement = () => {
                                           assignment.siteId,
                                           "clockOut",
                                           assignment.employeeType,
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
@@ -638,28 +662,89 @@ const EmployeeSiteManagement = () => {
                                     </Button>
                                   )}
 
-                                {/* EDIT / DELETE only after Clock Out */}
+                                {assignment.clockRecordId && (
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => setShowEditForm(assignment)}
+                                  >
+                                    <EditIcon />
+                                  </Button>
+                                )}
+
                                 {assignment.clockOut && (
-                                  <>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() =>
-                                        setShowEditForm(assignment)
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() =>
+                                      handleRemoveAssignment(assignment._id)
+                                    }
+                                  >
+                                    <Trash2 />
+                                  </Button>
+                                )}
+
+                                {(role === "superAdmin" ||
+                                  role === "admin") && (
+                                  <div className="flex items-center gap-2 min-w-[240px]">
+                                    <Select
+                                      value={
+                                        moveSiteByEmployee[
+                                          assignment.employeeId
+                                        ] || ""
+                                      }
+                                      onValueChange={(value) =>
+                                        setMoveSiteByEmployee((prev) => ({
+                                          ...prev,
+                                          [assignment.employeeId]: value,
+                                        }))
                                       }
                                     >
-                                      <EditIcon />
-                                    </Button>
+                                      <SelectTrigger className="h-8 min-w-[170px]">
+                                        <SelectValue placeholder="Move to site" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {sites
+                                          .filter(
+                                            (s) =>
+                                              s?.value &&
+                                              s.value !== assignment.siteId,
+                                          )
+                                          .map((site) => (
+                                            <SelectItem
+                                              key={site.value}
+                                              value={site.value}
+                                            >
+                                              {site.label}
+                                            </SelectItem>
+                                          ))}
+                                      </SelectContent>
+                                    </Select>
                                     <Button
-                                      size="icon"
+                                      size="sm"
                                       variant="outline"
+                                      disabled={
+                                        !moveSiteByEmployee[
+                                          assignment.employeeId
+                                        ]
+                                      }
                                       onClick={() =>
-                                        handleRemoveAssignment(assignment._id)
+                                        handleMoveEmployee(
+                                          assignment.employeeId,
+                                          moveSiteByEmployee[
+                                            assignment.employeeId
+                                          ],
+                                          date ||
+                                            new Date()
+                                              .toISOString()
+                                              .split("T")[0],
+                                        )
                                       }
                                     >
-                                      <Trash2 />
+                                      <ArrowRightLeft className="h-4 w-4" />
+                                      Move
                                     </Button>
-                                  </>
+                                  </div>
                                 )}
                               </>
                             )}

@@ -16,6 +16,7 @@ import { formatCurrency } from "@/utils/time";
 import { format } from "date-fns";
 import { DownloadCloud } from "lucide-react";
 import React from "react";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
 export default function SiteAttedanceData() {
   const { slug, searchParams } = useSiteEmployee();
@@ -74,6 +75,12 @@ export default function SiteAttedanceData() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    logCsvExport({
+      source: "employeeAttendanceData",
+      label: "Employee attendance data",
+      rowCount: attendanceTableData.length,
+    }).catch(() => {});
   };
 
   const totalHour = attendanceTableData.reduce((acc, item) => {

@@ -19,6 +19,16 @@ const ReceiptFileSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    isArchived: {
+      type: Boolean,
+      default: false,
+    },
+    archivedAt: Date,
+    deletedAt: Date,
     uploadedAt: Date,
     uploadedBy: mongoose.Types.ObjectId,
   },

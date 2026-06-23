@@ -144,6 +144,15 @@ export const LoginUi = () => {
             btnName={"Login"}
           />
 
+          <div className="mt-3 text-right text-sm">
+            <a
+              href="/forgot-password"
+              className="text-indigo-600 hover:underline"
+            >
+              Forgot password?
+            </a>
+          </div>
+
           {unauthorizedId && (
             <div className="mt-6 p-4 bg-yellow-50 border border-yellow-400 rounded-md">
               <p className="text-yellow-800 font-bold">UNAUTHORIZED DEVICE</p>

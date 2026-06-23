@@ -5,7 +5,7 @@ import { getServerSideProps } from "../session/session";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import ClockModel from "@/models/clockModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
-import { createObjectId } from "@/lib/mongodb";
+import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { decrypt } from "@/lib/algo";
 import { addDays, startOfWeek } from "date-fns";
 import { formatDate, getUKTime } from "@/utils/time";
@@ -18,7 +18,7 @@ export default async function fetchEmployeeWithHoliday() {
 
     const now = new Date();
     const startOfUtcDay = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
 
     await connect();
@@ -92,7 +92,7 @@ export default async function fetchEmployeeWithHoliday() {
   } catch (error) {
     console.log(
       "FetchEmployeeWithHoliday function from TimeOffServer File",
-      error
+      error,
     );
   }
 }
@@ -140,7 +140,7 @@ export async function getEmployeeTodayAttendanceData(employeeId) {
   } catch (error) {
     console.error(
       `Error fetching today's attendance for employee ${employeeId}:`,
-      error
+      error,
     );
     return { success: false, message: "Something went wrong" };
   }
@@ -158,7 +158,7 @@ export async function getEmployeeTodayAttendanceDataForAdmin(employeeId) {
   } catch (error) {
     console.error(
       `Error fetching today's attendance for employee ${employeeId}:`,
-      error
+      error,
     );
     return null;
   }
@@ -322,10 +322,22 @@ export async function fetchOfficeEmployeeClockCount({
     const { props } = await getServerSideProps();
     const { user } = props?.session || {};
     const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
-    console.log("employeeOid", employeeOid);
+    let resolvedEmployeeId = user?._id || null;
 
-    if (!employeeOid) {
+    if (isAdmin && employeeId) {
+      if (isValidObjectId(employeeId)) {
+        resolvedEmployeeId = employeeId;
+      } else {
+        try {
+          const decrypted = decrypt(employeeId);
+          resolvedEmployeeId = isValidObjectId(decrypted) ? decrypted : null;
+        } catch {
+          resolvedEmployeeId = null;
+        }
+      }
+    }
+
+    if (!resolvedEmployeeId || !isValidObjectId(resolvedEmployeeId)) {
       return { success: false, message: "Invalid employee ID" };
     }
 
@@ -344,227 +356,128 @@ export async function fetchOfficeEmployeeClockCount({
       : normalizeDateToUTC(new Date(toEndDate));
 
     const matchConditions = {
-      date: { $gte: start, $lt: end },
+      employeeId: createObjectId(resolvedEmployeeId),
+      date: { $gte: start, $lte: end },
       isDeleted: false,
     };
 
-    if (employeeId) {
-      matchConditions.employeeId = createObjectId(employeeOid);
-    }
-
     const skip = (page - 1) * limit;
 
-    const clockRecords = await ClockModel.aggregate([
-      { $match: matchConditions },
+    const toMinutes = (time) => {
+      if (!time || typeof time !== "string") return null;
+      const parts = time.split(":");
+      if (parts.length !== 2) return null;
+      const hh = Number(parts[0]);
+      const mm = Number(parts[1]);
+      if (
+        Number.isNaN(hh) ||
+        Number.isNaN(mm) ||
+        hh < 0 ||
+        hh > 23 ||
+        mm < 0 ||
+        mm > 59
+      )
+        return null;
+      return hh * 60 + mm;
+    };
 
-      // 1️⃣ Convert HH:mm to minutes safely
-      {
-        $addFields: {
-          clockInMinutes: convertTimeToMinutes("clockIn"),
-          clockOutMinutes: convertTimeToMinutes("clockOut"),
-          breakInMinutes: convertTimeToMinutes("breakIn"),
-          breakOutMinutes: convertTimeToMinutes("breakOut"),
-        },
-      },
+    const toHHMM = (mins) => {
+      const total = Math.max(0, Math.round(mins || 0));
+      const hh = Math.floor(total / 60);
+      const mm = total % 60;
+      return `${hh}:${String(mm).padStart(2, "0")}`;
+    };
 
-      // 2️⃣ Compute durations
-      {
-        $addFields: {
-          totalMinutesPerDay: {
-            $subtract: ["$clockOutMinutes", "$clockInMinutes"],
-          },
-          breakMinutesPerDay: {
-            $subtract: ["$breakOutMinutes", "$breakInMinutes"],
-          },
-        },
-      },
+    const docs = await ClockRecordModel.find(matchConditions)
+      .sort({ date: -1, createdAt: -1 })
+      .lean();
 
-      // 3️⃣ Format per-day hours
-      {
-        $addFields: {
-          totalHoursPerDay: {
-            $concat: [
-              {
-                $toString: { $floor: { $divide: ["$totalMinutesPerDay", 60] } },
-              },
-              ":",
-              {
-                $cond: [
-                  { $lt: [{ $mod: ["$totalMinutesPerDay", 60] }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $mod: ["$totalMinutesPerDay", 60] } },
-                    ],
-                  },
-                  { $toString: { $mod: ["$totalMinutesPerDay", 60] } },
-                ],
-              },
-            ],
-          },
-          breakHoursPerDay: {
-            $concat: [
-              {
-                $toString: { $floor: { $divide: ["$breakMinutesPerDay", 60] } },
-              },
-              ":",
-              {
-                $cond: [
-                  { $lt: [{ $mod: ["$breakMinutesPerDay", 60] }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $mod: ["$breakMinutesPerDay", 60] } },
-                    ],
-                  },
-                  { $toString: { $mod: ["$breakMinutesPerDay", 60] } },
-                ],
-              },
-            ],
-          },
-        },
-      },
+    const employee = await OfficeEmployeeModel.findById(
+      createObjectId(resolvedEmployeeId),
+      "name",
+    ).lean();
 
-      // 4️⃣ Group by employee
-      {
-        $group: {
-          _id: "$employeeId",
-          records: { $push: "$$ROOT" },
-          totalMinutes: { $sum: "$totalMinutesPerDay" },
-          avgMinutes: { $avg: "$totalMinutesPerDay" },
-          avgClockInMinutes: { $avg: "$clockInMinutes" },
-          avgClockOutMinutes: { $avg: "$clockOutMinutes" },
-          avgBreakMinutes: { $avg: "$breakMinutesPerDay" },
-        },
-      },
+    const recordsMapped = docs.map((doc) => {
+      const clockInMin = toMinutes(doc.clockIn);
+      const clockOutMin = toMinutes(doc.clockOut);
+      const totalMinutesPerDay =
+        clockInMin !== null && clockOutMin !== null
+          ? Math.max(clockOutMin - clockInMin, 0)
+          : 0;
 
-      // 5️⃣ Lookup employee details
-      {
-        $lookup: {
-          from: "officeemployes",
-          localField: "_id",
-          foreignField: "_id",
-          as: "employeeDetails",
-        },
-      },
-      { $unwind: "$employeeDetails" },
+      const breaks = Array.isArray(doc.breaks) ? doc.breaks : [];
+      const breakMinutesPerDay = breaks.reduce((sum, br) => {
+        const bi = toMinutes(br?.breakIn);
+        const bo = toMinutes(br?.breakOut);
+        if (bi === null || bo === null) return sum;
+        return sum + Math.max(bo - bi, 0);
+      }, 0);
 
-      // 6️⃣ Project final summary
-      {
-        $project: {
-          employeeId: "$_id",
-          name: "$employeeDetails.name",
-          startDate: start,
-          endDate: end,
-          records: { $slice: ["$records", skip, limit] },
-          totalRecords: { $size: "$records" },
-          totalHours: {
-            $concat: [
-              { $toString: { $floor: { $divide: ["$totalMinutes", 60] } } },
-              ":",
-              {
-                $cond: [
-                  { $lt: [{ $mod: ["$totalMinutes", 60] }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $mod: ["$totalMinutes", 60] } },
-                    ],
-                  },
-                  { $toString: { $mod: ["$totalMinutes", 60] } },
-                ],
-              },
-            ],
-          },
-          avgHours: {
-            $concat: [
-              { $toString: { $floor: { $divide: ["$avgMinutes", 60] } } },
-              ":",
-              {
-                $cond: [
-                  { $lt: [{ $floor: { $mod: ["$avgMinutes", 60] } }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $floor: { $mod: ["$avgMinutes", 60] } } },
-                    ],
-                  },
-                  { $toString: { $floor: { $mod: ["$avgMinutes", 60] } } },
-                ],
-              },
-            ],
-          },
-          avgClockIn: {
-            $concat: [
-              {
-                $toString: { $floor: { $divide: ["$avgClockInMinutes", 60] } },
-              },
-              ":",
-              {
-                $let: {
-                  vars: {
-                    roundedMinutes: {
-                      $round: [{ $mod: ["$avgClockInMinutes", 60] }, 0],
-                    },
-                  },
-                  in: {
-                    $cond: [
-                      { $lt: ["$$roundedMinutes", 10] },
-                      { $concat: ["0", { $toString: "$$roundedMinutes" }] },
-                      { $toString: "$$roundedMinutes" },
-                    ],
-                  },
-                },
-              },
-            ],
-          },
-          avgClockOut: {
-            $concat: [
-              {
-                $toString: { $floor: { $divide: ["$avgClockOutMinutes", 60] } },
-              },
-              ":",
-              {
-                $let: {
-                  vars: {
-                    roundedMinutes: {
-                      $round: [{ $mod: ["$avgClockOutMinutes", 60] }, 0],
-                    },
-                  },
-                  in: {
-                    $cond: [
-                      { $lt: ["$$roundedMinutes", 10] },
-                      { $concat: ["0", { $toString: "$$roundedMinutes" }] },
-                      { $toString: "$$roundedMinutes" },
-                    ],
-                  },
-                },
-              },
-            ],
-          },
-          avgBreakHours: {
-            $concat: [
-              { $toString: { $floor: { $divide: ["$avgBreakMinutes", 60] } } },
-              ":",
-              {
-                $cond: [
-                  { $lt: [{ $mod: ["$avgBreakMinutes", 60] }, 10] },
-                  {
-                    $concat: [
-                      "0",
-                      { $toString: { $mod: ["$avgBreakMinutes", 60] } },
-                    ],
-                  },
-                  { $toString: { $mod: ["$avgBreakMinutes", 60] } },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    ]);
+      return {
+        ...doc,
+        breakIn: breaks?.[0]?.breakIn || null,
+        breakOut: breaks?.length ? breaks[breaks.length - 1]?.breakOut : null,
+        totalHoursPerDay: toHHMM(totalMinutesPerDay),
+        breakHoursPerDay: toHHMM(breakMinutesPerDay),
+        _clockInMinutes: clockInMin,
+        _clockOutMinutes: clockOutMin,
+        _totalMinutesPerDay: totalMinutesPerDay,
+        _breakMinutesPerDay: breakMinutesPerDay,
+      };
+    });
 
-    return { success: true, data: JSON.stringify(clockRecords[0]) || null };
+    const totalRecords = recordsMapped.length;
+    const paginatedRecords = recordsMapped.slice(skip, skip + limit);
+
+    const totalMinutes = recordsMapped.reduce(
+      (sum, r) => sum + r._totalMinutesPerDay,
+      0,
+    );
+    const avgMinutes = totalRecords > 0 ? totalMinutes / totalRecords : 0;
+    const avgBreakMinutes =
+      totalRecords > 0
+        ? recordsMapped.reduce((sum, r) => sum + r._breakMinutesPerDay, 0) /
+          totalRecords
+        : 0;
+
+    const clockInSamples = recordsMapped
+      .map((r) => r._clockInMinutes)
+      .filter((v) => v !== null);
+    const clockOutSamples = recordsMapped
+      .map((r) => r._clockOutMinutes)
+      .filter((v) => v !== null);
+
+    const avgClockIn =
+      clockInSamples.length > 0
+        ? toHHMM(
+            clockInSamples.reduce((sum, v) => sum + v, 0) /
+              clockInSamples.length,
+          )
+        : "0:00";
+
+    const avgClockOut =
+      clockOutSamples.length > 0
+        ? toHHMM(
+            clockOutSamples.reduce((sum, v) => sum + v, 0) /
+              clockOutSamples.length,
+          )
+        : "0:00";
+
+    const result = {
+      employeeId: resolvedEmployeeId,
+      name: employee?.name || "N/A",
+      startDate: start,
+      endDate: end,
+      records: paginatedRecords,
+      totalRecords,
+      totalHours: toHHMM(totalMinutes),
+      avgHours: toHHMM(avgMinutes),
+      avgClockIn,
+      avgClockOut,
+      avgBreakHours: toHHMM(avgBreakMinutes),
+    };
+
+    return { success: true, data: JSON.stringify(result) };
   } catch (error) {
     console.error("Error fetching live office clock count:", error);
     return { success: false, message: "Something went wrong" };
@@ -882,14 +795,199 @@ export async function fetchLiveOfficeClock({
             { $limit: pageSize }, // Limit results for pagination
           ],
           totalCount: [{ $count: "count" }],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalEmployees: { $sum: 1 },
+                presentToday: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          {
+                            $regexMatch: {
+                              input: { $ifNull: ["$clockIn", ""] },
+                              regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                            },
+                          },
+                          {
+                            $not: {
+                              $regexMatch: {
+                                input: { $ifNull: ["$clockOut", ""] },
+                                regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                              },
+                            },
+                          },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                onBreak: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $gt: [
+                          {
+                            $size: {
+                              $filter: {
+                                input: "$breaks",
+                                as: "b",
+                                cond: {
+                                  $and: [
+                                    {
+                                      $regexMatch: {
+                                        input: { $ifNull: ["$$b.breakIn", ""] },
+                                        regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                      },
+                                    },
+                                    {
+                                      $not: {
+                                        $regexMatch: {
+                                          input: {
+                                            $ifNull: ["$$b.breakOut", ""],
+                                          },
+                                          regex:
+                                            "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                        },
+                                      },
+                                    },
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                          0,
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                clockedOut: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $regexMatch: {
+                          input: { $ifNull: ["$clockOut", ""] },
+                          regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                        },
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                totalWorkedMinutes: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          {
+                            $regexMatch: {
+                              input: { $ifNull: ["$clockIn", ""] },
+                              regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                            },
+                          },
+                          {
+                            $regexMatch: {
+                              input: { $ifNull: ["$clockOut", ""] },
+                              regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                            },
+                          },
+                          { $ne: ["$date", null] },
+                        ],
+                      },
+                      {
+                        $divide: [
+                          {
+                            $subtract: [
+                              {
+                                $dateFromString: {
+                                  dateString: {
+                                    $concat: [
+                                      {
+                                        $dateToString: {
+                                          date: "$date",
+                                          format: "%Y-%m-%d",
+                                        },
+                                      },
+                                      "T",
+                                      "$clockOut",
+                                      ":00",
+                                    ],
+                                  },
+                                },
+                              },
+                              {
+                                $dateFromString: {
+                                  dateString: {
+                                    $concat: [
+                                      {
+                                        $dateToString: {
+                                          date: "$date",
+                                          format: "%Y-%m-%d",
+                                        },
+                                      },
+                                      "T",
+                                      "$clockIn",
+                                      ":00",
+                                    ],
+                                  },
+                                },
+                              },
+                            ],
+                          },
+                          60000,
+                        ],
+                      },
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                totalEmployees: 1,
+                presentToday: 1,
+                onBreak: 1,
+                clockedOut: 1,
+                averageMinutes: {
+                  $cond: [
+                    { $gt: ["$clockedOut", 0] },
+                    { $divide: ["$totalWorkedMinutes", "$clockedOut"] },
+                    0,
+                  ],
+                },
+              },
+            },
+          ],
         },
       },
       {
         $addFields: {
           total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
+          summary: {
+            $ifNull: [
+              { $arrayElemAt: ["$summary", 0] },
+              {
+                totalEmployees: 0,
+                presentToday: 0,
+                onBreak: 0,
+                clockedOut: 0,
+                averageMinutes: 0,
+              },
+            ],
+          },
         },
       },
-      { $project: { total: 1, data: 1 } },
+      { $project: { total: 1, data: 1, summary: 1 } },
     ];
 
     const aggregationResult = await OfficeEmployeeModel.aggregate(pipeline);
@@ -899,6 +997,13 @@ export async function fetchLiveOfficeClock({
       success: true,
       data: JSON.stringify(result.data),
       totalCount: result.total || 0,
+      summary: result.summary || {
+        totalEmployees: 0,
+        presentToday: 0,
+        onBreak: 0,
+        clockedOut: 0,
+        averageMinutes: 0,
+      },
     };
   } catch (error) {
     console.error("Error fetching live office clock data:", error);
@@ -1425,7 +1530,7 @@ export async function fetchAverageDailyHours({ employeeId = null }) {
     const avgDailyRemainingMinutes = avgDailyMinutes % 60;
     const avgDailyMinutesStr = String(avgDailyRemainingMinutes).padStart(
       2,
-      "0"
+      "0",
     );
     // const avgDailyMinutes = `${avgDailyHours}:${avgDailyMinutesStr}`;
 
@@ -1693,7 +1798,7 @@ export async function fetchOvertimeHours({ employeeId = null }) {
     const overtimeRemainingMinutes = totalOvertimeMinutes % 60;
     const overtimeMinutesStr = String(overtimeRemainingMinutes).padStart(
       2,
-      "0"
+      "0",
     );
     // const totalOvertime = `${overtimeHours}:${overtimeMinutesStr}`;
     console.log("Overtime Hours Calculation:", {

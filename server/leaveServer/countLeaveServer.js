@@ -191,7 +191,7 @@ async function countPaternityLeave() {
 export async function syncMissingLeaveTypesNew(
   joinDate,
   dayPerWeek,
-  employeeId
+  employeeId,
 ) {
   try {
     if (!joinDate || !dayPerWeek || !employeeId)
@@ -206,7 +206,7 @@ export async function syncMissingLeaveTypesNew(
     const settings = await getLeaveSettings();
     const currentYear = getLeaveYearString(
       new Date(),
-      settings.leaveYearStartMonth
+      settings.leaveYearStartMonth,
     );
 
     const leaveData = await getLeaveData(employeeId, currentYear, true);
@@ -217,7 +217,7 @@ export async function syncMissingLeaveTypesNew(
       const storeLeaveData = await countLeaveNewFirstTime(
         joinDate,
         dayPerWeek,
-        employeeId
+        employeeId,
       );
 
       if (!storeLeaveData?.success) return storeLeaveData;
@@ -237,7 +237,7 @@ export async function countLeaveNewFirstTime(
   joinDate,
   dayPerWeek,
   employeeId,
-  targetDate
+  targetDate,
 ) {
   try {
     await connect();
@@ -250,7 +250,7 @@ export async function countLeaveNewFirstTime(
 
     const leaveYear = getLeaveYearString(
       baseDate,
-      settings.data?.leaveYearStartMonth
+      settings.data?.leaveYearStartMonth,
     );
     const existing = await CommonLeaveModel.findOne({ employeeId, leaveYear });
     if (existing) {
@@ -282,7 +282,7 @@ export async function countLeaveNewFirstTime(
   } catch (error) {
     console.log(
       "countLeaveFirstTime function under countLeaveServer file",
-      error
+      error,
     );
     return { success: false, message: "Something went wrong" };
   }
@@ -305,7 +305,7 @@ export async function generateLeaveForNewYear({
   // derive previous year string from target year
   const prevLeaveYear = getPreviousLeaveYearString(
     targetLeaveYear,
-    settings?.data?.leaveYearStartMonth
+    settings?.data?.leaveYearStartMonth,
   );
 
   const previousLeave = await CommonLeaveModel.findOne({
@@ -328,7 +328,7 @@ export async function generateLeaveForNewYear({
     }
 
     const prevType = previousLeave.leaveData.find(
-      (l) => l.leaveType === leave.leaveType
+      (l) => l.leaveType === leave.leaveType,
     );
 
     if (!prevType || prevType.remaining <= 0) {
@@ -446,7 +446,7 @@ export async function generateDefaultLeaves(joinDate, dayPerWeek) {
         remaining: annualCount,
         type: "days",
         isPaid: true,
-      })
+      }),
     );
   }
 
@@ -476,7 +476,7 @@ export async function generateDefaultLeaves(joinDate, dayPerWeek) {
         type: "days",
         isPaid: false,
         isHide: false,
-      })
+      }),
     );
   }
 
@@ -497,7 +497,7 @@ export async function storeCommonLeaveNew(joinDate, dayPerWeek, employeeId) {
     const leaveData = await countLeaveNewFirstTime(
       joinDate,
       dayPerWeek,
-      employeeId
+      employeeId,
     );
     if (!leaveData?.success) return leaveData;
     return leaveData;
@@ -519,10 +519,10 @@ async function checkWithStoreLeaveType(leaveData, employeeId, leaveYear) {
   try {
     const allLeave = await LeaveCategoryModel.find();
     const existingLeave = leaveData?.data?.leaveData.map(
-      (leave) => leave.leaveType
+      (leave) => leave.leaveType,
     );
     const missingLeaveTypes = allLeave.filter(
-      (globalLeave) => !existingLeave?.includes(globalLeave.leaveType)
+      (globalLeave) => !existingLeave?.includes(globalLeave.leaveType),
     );
     const newData = missingLeaveTypes.map(
       (item) =>
@@ -535,7 +535,7 @@ async function checkWithStoreLeaveType(leaveData, employeeId, leaveYear) {
           paid: 1,
           isPaid: item?.isPaid === "Paid" ? true : false,
           isHide: item?.isHide === "Hide" ? true : false,
-        })
+        }),
     );
 
     if (missingLeaveTypes.length > 0) {
@@ -543,7 +543,7 @@ async function checkWithStoreLeaveType(leaveData, employeeId, leaveYear) {
         { employeeId, leaveYear },
         {
           $push: { leaveData: { $each: newData } },
-        }
+        },
       );
       return { success: true, message: "Missing leave types synced" };
     } else {
@@ -599,7 +599,7 @@ export async function addOneCommonLeaveToOneEmployee({
       { employeeId: employeeObjectId, leaveYear },
       {
         $push: { leaveData: leaveData },
-      }
+      },
     );
     return { success: true, message: "Missing leave types synced" };
   } catch (error) {
@@ -610,7 +610,7 @@ export async function addOneCommonLeaveToOneEmployee({
 
 // Generate new leave year for all employees
 export async function generateNewLeaveYearForAllEmployees(
-  targetDate = new Date()
+  targetDate = new Date(),
 ) {
   try {
     await connect();
@@ -618,17 +618,27 @@ export async function generateNewLeaveYearForAllEmployees(
     const settings = await getLeaveSettings();
     const leaveYear = getLeaveYearString(
       targetDate,
-      settings.data?.leaveYearStartMonth
+      settings.data?.leaveYearStartMonth,
     );
     const employee = await OfficeEmployeeModel.find({
       isActive: true,
-      isDeleted: false,
+      delete: false,
     }).lean();
 
     let created = 0;
     let skipped = 0;
+    let notEligible = 0;
+    let failed = 0;
 
     for (const emp of employee) {
+      const dayPerWeek = emp.dayPerWeek || emp.daysPerWeek;
+
+      // Keep consistent with per-employee UI eligibility
+      if (!emp?.joinDate || !dayPerWeek || !emp?.employeType) {
+        notEligible++;
+        continue;
+      }
+
       const existing = await CommonLeaveModel.findOne({
         employeeId: emp._id,
         leaveYear,
@@ -639,30 +649,123 @@ export async function generateNewLeaveYearForAllEmployees(
         continue;
       }
 
-      const leaveData = await generateLeaveForNewYear({
-        employeeId: emp._id,
-        joinDate: emp.joinDate,
-        dayPerWeek: emp.daysPerWeek,
-        targetLeaveYear,
-      });
+      try {
+        const leaveData = await generateLeaveForNewYear({
+          employeeId: emp._id,
+          joinDate: emp.joinDate,
+          dayPerWeek,
+          targetLeaveYear: leaveYear,
+        });
 
-      await CommonLeaveModel.create({
-        employeeId: emp._id,
-        leaveYear: targetLeaveYear,
-        leaveData,
-        submitedBy: null,
-        submitedDate: new Date(),
-      });
+        await CommonLeaveModel.create({
+          employeeId: emp._id,
+          leaveYear,
+          leaveData,
+          submitedBy: null,
+          submitedDate: new Date(),
+        });
 
-      created++;
+        created++;
+      } catch (e) {
+        failed++;
+      }
     }
     return {
       success: true,
-      message: `Leave year generation completed. Created: ${created}, Skipped: ${skipped}`,
+      message: `Leave sync completed. Created: ${created}, Skipped: ${skipped}, Not eligible: ${notEligible}, Failed: ${failed}`,
+      data: JSON.stringify({
+        leaveYear,
+        created,
+        skipped,
+        notEligible,
+        failed,
+      }),
     };
   } catch (error) {
     console.log("Error in generateNewLeaveYearForAllEmployees", error);
     return { success: false, message: "Something went wrong" };
+  }
+}
+
+export async function syncLeaveAllEmployeesForCurrentYear(
+  targetDate = new Date(),
+) {
+  return generateNewLeaveYearForAllEmployees(targetDate);
+}
+
+export async function getLeaveYearSyncStatus(targetDate = new Date()) {
+  try {
+    await connect();
+
+    const settings = await getLeaveSettings();
+    const leaveYear = getLeaveYearString(
+      targetDate,
+      settings?.data?.leaveYearStartMonth,
+    );
+
+    const employeeFilter = {
+      isActive: true,
+      delete: false,
+      joinDate: { $ne: null },
+      employeType: { $exists: true, $ne: "" },
+      dayPerWeek: { $exists: true, $ne: null },
+    };
+
+    const totalEligibleEmployees =
+      await OfficeEmployeeModel.countDocuments(employeeFilter);
+
+    const syncedEmployees = await CommonLeaveModel.aggregate([
+      { $match: { leaveYear } },
+      {
+        $lookup: {
+          from: "officeemployes",
+          localField: "employeeId",
+          foreignField: "_id",
+          as: "employee",
+        },
+      },
+      { $unwind: "$employee" },
+      {
+        $match: {
+          "employee.isActive": true,
+          "employee.delete": false,
+          "employee.joinDate": { $ne: null },
+          "employee.employeType": { $exists: true, $ne: "" },
+          "employee.dayPerWeek": { $exists: true, $ne: null },
+        },
+      },
+      { $group: { _id: "$employeeId" } },
+      { $count: "count" },
+    ]);
+
+    const syncedCount = syncedEmployees?.[0]?.count || 0;
+    const pendingEmployees = Math.max(totalEligibleEmployees - syncedCount, 0);
+
+    const payload = {
+      leaveYear,
+      totalEligibleEmployees,
+      syncedEmployees: syncedCount,
+      pendingEmployees,
+      showSyncAllButton: pendingEmployees > 0,
+    };
+
+    return {
+      success: true,
+      data: JSON.stringify(payload),
+    };
+  } catch (error) {
+    console.log("Error in getLeaveYearSyncStatus", error);
+    return {
+      success: false,
+      message: "Failed to fetch leave sync status",
+      data: JSON.stringify({
+        leaveYear: "",
+        totalEligibleEmployees: 0,
+        syncedEmployees: 0,
+        pendingEmployees: 0,
+        showSyncAllButton: false,
+      }),
+    };
   }
 }
 
@@ -681,7 +784,7 @@ export async function previewCarryForwardForCompany() {
     const currentLeaveYear = getLeaveYearString(new Date(), startMonth);
     const previousLeaveYear = getPreviousLeaveYearString(
       currentLeaveYear,
-      startMonth
+      startMonth,
     );
 
     // Get all active employees
@@ -704,14 +807,14 @@ export async function previewCarryForwardForCompany() {
       // Generate base new year leaves (without saving)
       const baseLeaves = await generateDefaultLeaves(
         emp.joinDate,
-        emp.dayPerWeek
+        emp.dayPerWeek,
       );
 
       for (const leave of baseLeaves) {
         const rule = rules.find((r) => r.leaveType === leave.leaveType);
 
         const prevType = prevLeave.leaveData.find(
-          (l) => l.leaveType === leave.leaveType
+          (l) => l.leaveType === leave.leaveType,
         );
 
         let willCarry = 0;
@@ -796,7 +899,7 @@ export async function previewCarryForwardPerCompany(targetDate = new Date()) {
     }
     // based on the employeeId find the employee Name
     const employee = await OfficeEmployeeModel.findById(
-      empLeave.employeeId
+      empLeave.employeeId,
     ).lean();
 
     if (carried.length > 0) {

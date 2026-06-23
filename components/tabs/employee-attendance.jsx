@@ -122,7 +122,7 @@ export default function OfficeEmployeeAttendance() {
             attendanceCount?.records?.map((record, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between border-b last:border-b-0 pb-2 last:pb-0"
+                className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b last:border-b-0 pb-3 last:pb-0"
               >
                 <div>
                   <CardTitle className="text-slate-600">
@@ -137,7 +137,7 @@ export default function OfficeEmployeeAttendance() {
                     {record?.breakHoursPerDay?.split(":")[1]} minutes
                   </CardDescription>
                 </div>
-                <div className="flex flex-col items-end">
+                <div className="flex flex-col items-start sm:items-end">
                   <span className="text-sm text-gray-600">
                     Clock In:{" "}
                     <span className="font-semibold text-blue-600">

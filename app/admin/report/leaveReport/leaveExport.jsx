@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import React, { useMemo } from "react";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
 export default function LeaveExport({ rawData }) {
   const data = useMemo(() => {
@@ -66,6 +67,12 @@ export default function LeaveExport({ rawData }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url); // Clean up memory
+
+    logCsvExport({
+      source: "leaveReport",
+      label: "Leave report",
+      rowCount: data.length,
+    }).catch(() => {});
   };
 
   return (

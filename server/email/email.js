@@ -19,7 +19,7 @@ export const sendGlobalMail = async (data) => {
   });
   try {
     const mailOptions = {
-      from: `"IT ✌️" ${process.env.EMAIL_USERNAME}`,
+      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
       to: data?.email ?? "patelneel1732@gmail.com",
       subject: "New Login Attempt",
       // text: "Hello from Node.js",
@@ -46,7 +46,7 @@ export const sendMail = async (data) => {
   });
   try {
     const mailOptions = {
-      from: `"CDC HR✌️" ${process.env.EMAIL_USERNAME}`,
+      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
       to: data?.email ?? "patelneel1732@gmail.com",
       subject: "New Login Attempt",
       // text: "Hello from Node.js",
@@ -73,7 +73,7 @@ export const sendMultipleEmail = async (data) => {
       // tls: { rejectUnauthorized: false },
     });
     const mailOptions = {
-      from: `"Neel✌️" ${process.env.EMAIL_USERNAME}`,
+      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
       to: data?.email ?? "patelneel1732@gmail.com",
       subject:
         data?.subject || "Creative Design & Construction Subject by Default",
@@ -145,7 +145,7 @@ export const emailWeekRotaReminder = async (weekId, weekDate) => {
             $push: {
               reminderData: data,
             },
-          }
+          },
         );
       } else {
         const data = {

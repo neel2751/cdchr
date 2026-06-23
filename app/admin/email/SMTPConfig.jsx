@@ -139,7 +139,7 @@ const SMTPConfig = ({ queryKey }) => {
       // alert dialog like if isTest is not true are you sure you don't want to test the connection
       if (!data.isTest) {
         const confirmSave = confirm(
-          "Are you sure you want to save without testing the connection?"
+          "Are you sure you want to save without testing the connection?",
         );
         if (!confirmSave) return;
 

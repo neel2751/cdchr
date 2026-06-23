@@ -1,3 +1,5 @@
+"use client";
+
 import EmployeeOverview from "@/components/tabs/employee-overview";
 // import LeaveRequests from "@/components/tabs/leave-requests";
 import { useCommonContext } from "@/context/commonContext";
@@ -204,7 +206,7 @@ const EmployeeLeaveDeatails = () => {
                                 <SelectItem key={item} value={item}>
                                   {item}
                                 </SelectItem>
-                              )
+                              ),
                             )}
                           </SelectContent>
                         </Select>
@@ -326,7 +328,7 @@ const LeaveRequestCard = ({ data, handleEdit, handleDelete, queryKey }) => {
       </CardHeader>
 
       {["Approved", "Rejected", "Expired", "Cancelled"].includes(
-        data?.leaveStatus
+        data?.leaveStatus,
       ) ? (
         <></>
       ) : isPast(data?.leaveStartDate) ? (

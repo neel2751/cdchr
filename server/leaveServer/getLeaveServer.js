@@ -11,6 +11,7 @@ import { getLeaveYearString } from "@/helper/getLeaveYearString";
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import { getLeaveSettings } from "../leaveSettingServer";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import { withAudit, recordAudit } from "@/lib/audit";
 
 export async function getLeaveRequestData(leaveYear) {
   try {
@@ -327,29 +328,46 @@ export async function getLeaveRequestDataAdmin(filterData) {
   }
 }
 
-export async function handleEmployeeLeaveStatus(data) {
-  try {
-    const { props } = await getServerSideProps();
-    const { _id: approvedBy } = props?.session?.user;
-    const approvedDate = new Date();
-    const newData = { ...data, approvedBy, approvedDate };
-    if (data?.leaveStatus === "Approved") {
-      const updatedLeave = await LeaveRequestModel.updateOne(
-        { _id: data.leaveId },
-        {
-          $set: newData,
-        }
-      );
-      return { success: true, message: "Leave status updated successfully" };
-    } else {
-      await rejectLeaveRequest(data?.leaveId, approvedBy, data?.adminComment);
-      return { success: true, message: "Leave Rejected Successfully..." };
+export const handleEmployeeLeaveStatus = withAudit(
+  "Leave.status",
+  async (data) => {
+    try {
+      const { props } = await getServerSideProps();
+      const { _id: approvedBy } = props?.session?.user;
+      const approvedDate = new Date();
+      const newData = { ...data, approvedBy, approvedDate };
+      const before = await LeaveRequestModel.findById(data?.leaveId).lean();
+      if (data?.leaveStatus === "Approved") {
+        const updatedLeave = await LeaveRequestModel.updateOne(
+          { _id: data.leaveId },
+          {
+            $set: newData,
+          }
+        );
+        recordAudit({
+          entityId: data?.leaveId,
+          before,
+          after: await LeaveRequestModel.findById(data?.leaveId).lean(),
+          description: `Approved leave request ${data?.leaveId}`,
+        });
+        return { success: true, message: "Leave status updated successfully" };
+      } else {
+        await rejectLeaveRequest(data?.leaveId, approvedBy, data?.adminComment);
+        recordAudit({
+          entityId: data?.leaveId,
+          before,
+          after: await LeaveRequestModel.findById(data?.leaveId).lean(),
+          description: `Rejected leave request ${data?.leaveId}`,
+        });
+        return { success: true, message: "Leave Rejected Successfully..." };
+      }
+    } catch (error) {
+      console.log("Error updating leave request status", error);
+      return { success: false, message: "Error updating leave request status" };
     }
-  } catch (error) {
-    console.log("Error updating leave request status", error);
-    return { success: false, message: "Error updating leave request status" };
-  }
-}
+  },
+  { module: "Leave" },
+);
 
 async function rejectLeaveRequest(requestId, adminId, adminComment = "") {
   return await withTransaction(async (session) => {
