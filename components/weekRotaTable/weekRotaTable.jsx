@@ -30,6 +30,16 @@ import {
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import { Input } from "../ui/input";
+import { Textarea } from "../ui/textarea";
+import { Label } from "../ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 
 const WeekRotaTable = ({
   currentWeek,
@@ -49,6 +59,12 @@ const WeekRotaTable = ({
     fetchFn: getSelectProjects,
     queryKey: ["selectProjects"],
   });
+
+  // When editing an already-submitted rota we require a documented reason for
+  // the change (UK data-accuracy). These drive that confirmation dialog.
+  const [reasonOpen, setReasonOpen] = React.useState(false);
+  const [reason, setReason] = React.useState("");
+  const [pendingSchedules, setPendingSchedules] = React.useState(null);
 
   const findMostCommonCategory = (schedule = []) => {
     const frequency = schedule.reduce((acc, dayEntry) => {
@@ -205,19 +221,44 @@ const WeekRotaTable = ({
   };
 
   const { mutate: handleSubmit, isPending } = useSubmitMutation({
-    mutationFn: async (data) =>
+    mutationFn: async (payload) =>
       await handleWeeklyRotaWithStatus(
-        data,
+        payload?.data,
         format(currentWeek, "yyyy-MM-dd"),
-        memoizedSchedules?.weekId
+        memoizedSchedules?.weekId,
+        payload?.reason
       ),
     invalidateKey: queryKey,
     onSuccessMessage: () =>
       memoizedSchedules?.weekId
         ? "Weekly Rota Updated"
         : "Weekly Rota Submited",
-    onClose: () => handleOnClose(),
+    onClose: () => {
+      setReasonOpen(false);
+      setReason("");
+      setPendingSchedules(null);
+      handleOnClose();
+    },
   });
+
+  // Editing an existing week → ask for a reason first; first-time submit goes
+  // straight through.
+  const finalizeSubmit = (validatedSchedules) => {
+    if (memoizedSchedules?.weekId) {
+      setPendingSchedules(validatedSchedules);
+      setReasonOpen(true);
+    } else {
+      handleSubmit({ data: validatedSchedules });
+    }
+  };
+
+  const confirmReasonAndSubmit = () => {
+    if (!reason.trim()) {
+      toast.warning("Please enter a reason for changing this rota");
+      return;
+    }
+    handleSubmit({ data: pendingSchedules, reason: reason.trim() });
+  };
 
   const submitSchedules = () => {
     if (!schedules.length) {
@@ -288,7 +329,7 @@ const WeekRotaTable = ({
     setSchedules((prev) =>
       prev.map((schedule) => ({ ...schedule, status: "Submitted" }))
     );
-    handleSubmit(updatedSchedules);
+    finalizeSubmit(updatedSchedules);
   };
 
   // Generate current week's dates with day labels
@@ -507,6 +548,59 @@ const WeekRotaTable = ({
             </Button>
           ))} */}
       </div>
+
+      <Dialog
+        open={reasonOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReasonOpen(false);
+            setReason("");
+            setPendingSchedules(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reason for changing this rota</DialogTitle>
+            <DialogDescription>
+              This rota has already been submitted. For record-keeping, please
+              explain why you are changing it. Your name, the time, and this
+              reason are saved to the audit log and version history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="rota-change-reason">Reason</Label>
+            <Textarea
+              id="rota-change-reason"
+              placeholder="e.g. Corrected Tuesday site for John after manager request"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setReasonOpen(false);
+                setReason("");
+                setPendingSchedules(null);
+              }}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmReasonAndSubmit}
+              disabled={isPending || !reason.trim()}
+            >
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

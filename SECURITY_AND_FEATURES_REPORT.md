@@ -228,6 +228,26 @@ company** operating the system.
 - Audit logs are indexed for efficient compliance review by actor, module, entity
   and action.
 
+#### 4.7.1 Weekly Rota — change accountability & version history
+The weekly rota (staff working-time schedule) is treated as a record that must
+remain accurate and reconstructable over time:
+- **Every create and edit is audit-logged** (`WeeklyRota.save`) with the actor,
+  timestamp, IP, a summary of how many employees changed, and — for edits — a
+  **mandatory reason**. Editing an already-submitted rota is rejected unless a
+  reason is supplied.
+- **Immutable version history:** each create/edit also writes an append-only
+  snapshot of the full rota content to a dedicated version store, numbered
+  `v1, v2, v3 …`. Snapshots are never overwritten or deleted, so the exact state
+  of a rota at any past point — and every correction since — can be reconstructed.
+  This prevents a later edit from silently rewriting what a rota previously said.
+- Rotas that pre-date versioning are **back-filled**: the first time an older
+  rota is edited, its current content is captured as `v1` before the new version
+  is recorded, so no prior content is lost.
+- Authorised staff (`admin` / `superAdmin`) can review the full timeline —
+  version number, change type, who, when, the reason, and a read-only view of
+  each historical snapshot — directly in the rota screen.
+- Version snapshots are **retained indefinitely** to support UK record-keeping.
+
 ### 4.8 Background Jobs & Internal Endpoints
 - Scheduled jobs (e.g. visa-expiry reminders) run server-side and their trigger
   endpoints are **protected by a shared secret** (`CRON_SECRET`); requests without
