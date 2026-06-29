@@ -146,145 +146,148 @@ export const getAllEmployees = async (filterData) => {
 export const handleEmploye = withAudit(
   "Employee.upsert",
   async (data, isChecked, id) => {
-  if (!data) return { status: false, message: "Please Provide Informations" };
-  // if (!images) return { status: true, message: "success" };
-  const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
-  const Payrate = payRateValidation.test(String(Number(data?.payRate)));
-  if (Payrate === false) return { status: false, message: "Invalid Pay Rate" };
-  try {
-    const employeType = data?.paymentType === "Monthly" ? "Payroll" : "CIS";
-    await connect(); //connect to the database
-    const {
-      address,
-      streetAddress,
-      city,
-      zipCode,
-      country,
-      accountName,
-      accountNumber,
-      sortCode,
-      payRate,
-    } = data;
-    const eAddress = {
-      address: address || "",
-      streetAddress: streetAddress || "",
-      city: city || "",
-      zipCode: zipCode || "",
-      country: country || "",
-    };
-    const bankDetail = {
-      accountName: accountName || "",
-      accountNumber: accountNumber || "",
-      sortCode: sortCode || "",
-    };
-    if (id) {
-      // We have to check email and phone  before updating the Employee's information because they are required fields in MongoDB
-      const isExists = await EmployePhoneAndEmailExists(
-        id,
-        data.phone,
-        data.email
-      );
-      if (!isExists.status)
-        return { success: isExists.status, message: isExists.message };
-      const beforeEmp = await EmployeModel.findById(id).lean();
-      let res = await EmployeModel.findByIdAndUpdate(
-        id,
-        {
-          $set: {
-            ...data,
-            eAddress: eAddress,
-            bankDetail: bankDetail,
-            employeType,
+    if (!data) return { status: false, message: "Please Provide Informations" };
+    // if (!images) return { status: true, message: "success" };
+    const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
+    const Payrate = payRateValidation.test(String(Number(data?.payRate)));
+    if (Payrate === false)
+      return { status: false, message: "Invalid Pay Rate" };
+    try {
+      const employeType = data?.paymentType === "Monthly" ? "Payroll" : "CIS";
+      await connect(); //connect to the database
+      const {
+        address,
+        streetAddress,
+        city,
+        zipCode,
+        country,
+        accountName,
+        accountNumber,
+        sortCode,
+        payRate,
+      } = data;
+      const eAddress = {
+        address: address || "",
+        streetAddress: streetAddress || "",
+        city: city || "",
+        zipCode: zipCode || "",
+        country: country || "",
+      };
+      const bankDetail = {
+        accountName: accountName || "",
+        accountNumber: accountNumber || "",
+        sortCode: sortCode || "",
+      };
+      if (id) {
+        // We have to check email and phone  before updating the Employee's information because they are required fields in MongoDB
+        const isExists = await EmployePhoneAndEmailExists(
+          id,
+          data.phone,
+          data.email,
+        );
+        if (!isExists.status)
+          return { success: isExists.status, message: isExists.message };
+        const beforeEmp = await EmployeModel.findById(id).lean();
+        let res = await EmployeModel.findByIdAndUpdate(
+          id,
+          {
+            $set: {
+              ...data,
+              eAddress: eAddress,
+              bankDetail: bankDetail,
+              employeType,
+            },
           },
-        },
-        { new: true }
-      );
-      if (!res) return { success: false, message: "Somthing Went Wrong..." };
-      recordAudit({
-        entityId: id,
-        before: beforeEmp,
-        after: res.toObject(),
-        description: `Updated field employee ${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
-      });
-      await logVisaExpiryChange({
-        before: beforeEmp?.eVisaExp,
-        after: res?.eVisaExp,
-        employeeType: "Employe",
-        entityId: id,
-        name: `${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
-      });
-      if (isChecked) {
-        const attendanceRecords = await AttendanceModel.find({
-          "employeAttendance.employeeId": id,
+          { new: true },
+        );
+        if (!res) return { success: false, message: "Somthing Went Wrong..." };
+        recordAudit({
+          entityId: id,
+          before: beforeEmp,
+          after: res.toObject(),
+          description:
+            `Updated field employee ${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
         });
-        for (const record of attendanceRecords) {
-          for (const attendee of record.employeAttendance) {
-            if (attendee.employeeId.toString() === id) {
-              attendee.aPayRate = payRate; // Update aPayRate
-              attendee.totalPay = attendee.totalHours * payRate;
+        await logVisaExpiryChange({
+          before: beforeEmp?.eVisaExp,
+          after: res?.eVisaExp,
+          employeeType: "Employe",
+          entityId: id,
+          name: `${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
+        });
+        if (isChecked) {
+          const attendanceRecords = await AttendanceModel.find({
+            "employeAttendance.employeeId": id,
+          });
+          for (const record of attendanceRecords) {
+            for (const attendee of record.employeAttendance) {
+              if (attendee.employeeId.toString() === id) {
+                attendee.aPayRate = payRate; // Update aPayRate
+                attendee.totalPay = attendee.totalHours * payRate;
+              }
             }
+            // Save the updated attendance record
+            await record.save();
           }
-          // Save the updated attendance record
-          await record.save();
         }
-      }
-      return { success: true, message: "Employee Record Update..." };
-    } else {
-      //create new employee
-      const isExists = await EmployePhoneAndEmailExists(
-        id,
-        data.phone,
-        data.email
-      );
-      const password = await GenerateHashPassword("Cdc@1234");
-      if (!isExists.status) return isExists;
-      const addEmploye = await EmployeModel.create({
-        ...data,
-        eAddress: eAddress,
-        bankDetail: bankDetail,
-        employeType,
-        password,
-      }); // create new employee
-      if (!addEmploye)
-        return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
-      recordAudit({
-        entityId: addEmploye._id,
-        after: addEmploye.toObject(),
-        description: `Created field employee ${addEmploye.firstName} ${addEmploye.lastName}`,
-      });
-      if (addEmploye) {
-        const { firstName, lastName, email } = addEmploye; // get the employee id
-        const type = "HR";
-        const response = await getSMTPForFeature(type);
-        if (response?.success) {
-          const emailData = JSON.parse(response?.data);
-          // register email we have to send the welcome mail with email and password with site link
-          const html = `<p>Dear ${firstName} ${lastName},</p>
+        return { success: true, message: "Employee Record Update..." };
+      } else {
+        //create new employee
+        const isExists = await EmployePhoneAndEmailExists(
+          id,
+          data.phone,
+          data.email,
+        );
+
+        const password = await GenerateHashPassword("Interior@1234");
+        if (!isExists.status) return isExists;
+        const addEmploye = await EmployeModel.create({
+          ...data,
+          eAddress: eAddress,
+          bankDetail: bankDetail,
+          employeType,
+          password,
+        }); // create new employee
+        if (!addEmploye)
+          return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
+        recordAudit({
+          entityId: addEmploye._id,
+          after: addEmploye.toObject(),
+          description: `Created field employee ${addEmploye.firstName} ${addEmploye.lastName}`,
+        });
+        if (addEmploye) {
+          const { firstName, lastName, email } = addEmploye; // get the employee id
+          const type = "HR";
+          const response = await getSMTPForFeature(type);
+          if (response?.success) {
+            const emailData = JSON.parse(response?.data);
+            // register email we have to send the welcome mail with email and password with site link
+            const html = `<p>Dear ${firstName} ${lastName},</p>
           <p>Welcome to our team! We are excited to have you on board.</p>
           <p>Your login details are as follows:</p>
           <p>Email: ${email}</p>
-          <p>Password: Cdc@1234</p>
+          <p>Password: ${password}</p>
           <p>Please log in to your account using the following link:</p>
-          <p><a href="https://hr.cdc.construction/employee">Click here to login</a></p>
+          <p><a href="${process.env.NEXT_PUBLIC_WEB_URL}">Click here to login</a></p>
           <p>Thank you for joining us!</p>
           <p>Best regards,</p>
           <p>Hr Management</p>`;
-          const subject = "Welcome to Our Team";
-          const smtp = { ...emailData, toEmail: email, html, subject };
-          await userRegisterEmail(smtp);
-        } else {
-          const data = {
-            success: true,
-            message: `Employee added successfully`,
-          };
-          return data;
+            const subject = "Welcome to Our Team";
+            const smtp = { ...emailData, toEmail: email, html, subject };
+            await userRegisterEmail(smtp);
+          } else {
+            const data = {
+              success: true,
+              message: `Employee added successfully`,
+            };
+            return data;
+          }
         }
       }
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
     }
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
-  }
   },
   { module: "Employee" },
 );
@@ -359,7 +362,10 @@ export const employeeStatus = withAudit(
       const isActive = !data?.status;
       const statusDate = data.status ? new Date() : null;
       const before = await EmployeModel.findById(id).lean();
-      await EmployeModel.updateOne({ _id: id }, { $set: { isActive, statusDate } });
+      await EmployeModel.updateOne(
+        { _id: id },
+        { $set: { isActive, statusDate } },
+      );
       const after = await EmployeModel.findById(id).lean();
       recordAudit({
         entityId: id,
@@ -391,7 +397,7 @@ export const employeeDelete = withAudit(
       const before = await EmployeModel.findById(id).lean();
       await EmployeModel.updateOne(
         { _id: id },
-        { $set: { isActive, delete: isDelete, statusDate } }
+        { $set: { isActive, delete: isDelete, statusDate } },
       );
       const after = await EmployeModel.findById(id).lean();
       recordAudit({
@@ -433,7 +439,7 @@ export async function changeSiteEmployeePassword(data) {
     // if the user is not superAdmin or admin, check for current password
     const isMatch = await isMatchedPassword(
       currentPassword,
-      updatedEmp.password
+      updatedEmp.password,
     );
     if (!isMatch) {
       return { success: false, message: "Current Password is Incorrect" };
@@ -505,7 +511,7 @@ export const resetSiteEmployeePassword = withAudit(
         description: `Password reset by ${
           actor?.name || actor?.email
         } for ${targetName} <${employee.email}>. Reason: ${String(
-          reason
+          reason,
         ).trim()}`,
         after: {
           target: {

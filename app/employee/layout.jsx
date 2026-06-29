@@ -27,7 +27,8 @@ export default function Layout({ children }) {
                 >
                   <Image
                     src={
-                      "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      "/images/interiorlogo.svg"
                     }
                     alt="CDC HR"
                     width={100}

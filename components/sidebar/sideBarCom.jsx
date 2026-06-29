@@ -51,15 +51,17 @@ const SideBarHeaderCom = () => {
                 size="lg"
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <div className="flex aspect-square size-8 items-center border border-neutral-200 p-1 justify-center rounded-lg text-sidebar-primary-foreground">
+                <div className="flex aspect-square size-8 items-center border border-neutral-200 justify-center rounded-lg text-sidebar-primary-foreground">
                   <Image
                     // src="/images/cdc.svg"
                     src={
-                      "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      "/images/interiorlogo.svg"
                     }
                     alt="Logo"
                     width={30}
                     height={30}
+                    className="rounded-lg"
                   />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -203,11 +205,12 @@ const SideBarFooterCom = () => {
                 size="lg"
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <Avatar className="h-8 w-8 rounded-lg border p-1">
+                <Avatar className="h-8 w-8 rounded-lg border p-1 bg-black">
                   <AvatarImage
                     // src={session?.user?.image || "/images/cdc.svg"}
                     src={
-                      "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      "/images/interiorlogo.svg"
                     }
                     alt={session?.user?.name || "HR"}
                   />

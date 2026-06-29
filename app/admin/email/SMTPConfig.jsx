@@ -76,6 +76,7 @@ const SMTPConfig = ({ queryKey }) => {
         { value: "outlook.office365.com", label: "Microsoft" },
         { value: "smtp.mail.yahoo.com", label: "Yahoo" },
         { value: "smtp.zoho.eu", label: "Zoho" },
+        { value: "smtppro.zoho.eu", label: "Zoho Pro" },
         { value: "other", label: "Custom SMTP" },
       ],
       placeholder: "Enter SMTP host",

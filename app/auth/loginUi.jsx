@@ -91,7 +91,7 @@ export const LoginUi = () => {
 
             if (errorObj.type === "DEVICE_ERROR") {
               toast.error(
-                "This device is not authorized. Please contact admin."
+                "This device is not authorized. Please contact admin.",
               );
               setUnauthorizedId(errorObj?.detectedId || "");
             } else {
@@ -124,7 +124,8 @@ export const LoginUi = () => {
               width={20}
               className="h-10 w-10"
               // src="/images/cdc.svg"
-              src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+              // src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+              src="/images/interiorlogo.svg"
               alt="CDC"
             />
             <span className="text-gray-800 font-semibold text-lg whitespace-nowrap">

@@ -102,7 +102,7 @@ export async function sendVisaReminderCore({
     companyName,
   });
 
-  const smtpRes = await getSMTPForFeature("IT");
+  const smtpRes = await getSMTPForFeature("HR");
   if (!smtpRes?.success) {
     await logAuditDirect({
       actor,
@@ -128,8 +128,7 @@ export async function sendVisaReminderCore({
   // sends (admin ticks the box); always copied on the automated cron run.
   const hrEmail = smtp?.toEmail;
   const copyHr = channel === "auto" ? true : Boolean(ccHr);
-  const cc =
-    copyHr && hrEmail && hrEmail !== toEmail ? [hrEmail] : [];
+  const cc = copyHr && hrEmail && hrEmail !== toEmail ? [hrEmail] : [];
 
   const sendRes = await sendMail({
     host: smtp.host,
