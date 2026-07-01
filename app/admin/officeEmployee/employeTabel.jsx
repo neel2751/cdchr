@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { format, formatDistanceStrict, isPast } from "date-fns";
+import { format } from "date-fns";
 import {
   Edit,
   Eye,
@@ -27,7 +27,14 @@ import { Badge } from "@/components/ui/badge";
 import EmployeeSheet from "./employeeSheet";
 import Link from "next/link";
 import { encrypt } from "@/lib/algo";
-import { daysUntil, getMilestone, milestoneLabel } from "@/lib/visaMilestones";
+import {
+  daysUntil,
+  getMilestone,
+  milestoneLabel,
+  formatVisaRemaining,
+  getVisaUrgencyLevel,
+  VISA_URGENCY_TEXT,
+} from "@/lib/visaMilestones";
 
 const EmployeTabel = () => {
   const {
@@ -76,6 +83,17 @@ const EmployeTabel = () => {
             const milestone =
               item?.immigrationType !== "British" && item?.visaEndDate
                 ? getMilestone(daysUntil(item?.visaEndDate))
+                : null;
+            const visaUrgency =
+              item?.immigrationType !== "British"
+                ? getVisaUrgencyLevel(item?.visaEndDate)
+                : null;
+            const visaText = visaUrgency
+              ? VISA_URGENCY_TEXT[visaUrgency]
+              : "text-neutral-700";
+            const visaRemaining =
+              item?.immigrationType !== "British"
+                ? formatVisaRemaining(item?.visaEndDate)
                 : null;
             const sentMilestones = (item?.visaReminders || [])
               .filter((r) => r.visaEndDate === visaIso)
@@ -154,29 +172,18 @@ const EmployeTabel = () => {
                   : item?.visaStartDate &&
                     format(new Date(item?.visaStartDate), "PPP")}
               </TableCell>
-              <TableCell
-                className={`${
-                  isPast(new Date(item?.visaEndDate) || new Date(), new Date())
-                    ? "text-rose-600"
-                    : "text-neutral-700"
-                }`}
-              >
+              <TableCell className={visaText}>
                 {item?.immigrationType === "British"
                   ? "-"
                   : item?.visaEndDate &&
                     format(new Date(item.visaEndDate), "PPP")}
               </TableCell>
-              <TableCell>
-                {item?.immigrationType === "British"
+              <TableCell className={visaText}>
+                {item?.immigrationType === "British" || !visaRemaining
                   ? "-"
-                  : item?.visaEndDate && item?.visaEndDate
-                    ? isPast(new Date(item?.visaEndDate))
-                      ? "Visa expired"
-                      : `${formatDistanceStrict(
-                          new Date(),
-                          new Date(item.visaEndDate),
-                        )}`
-                    : "-"}
+                  : visaRemaining === "Expired"
+                    ? "Visa expired"
+                    : visaRemaining}
               </TableCell>
               <TableCell>
                 <div className="flex gap-2">

@@ -852,7 +852,11 @@ export const FormImageUpload = ({ field }) => {
     }
   };
 
-  const handleRemove = (index) => {
+  const handleRemove = (event, index) => {
+    // Stop the click from reaching the dropzone root, which would otherwise
+    // open the file picker instead of removing the selected file.
+    event?.stopPropagation();
+    event?.preventDefault();
     if (field.maxFiles === 1) {
       setValue(field.name, null, { shouldValidate: true });
     } else {
