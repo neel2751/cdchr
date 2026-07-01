@@ -101,14 +101,21 @@ export const handleOfficeEmployee = withAudit(
         );
         if (!leaveResult?.success)
           return { success: false, message: leaveResult.message };
-        const companyData = await getCompanyById(company);
-        const cData = JSON.parse(companyData?.data);
-        const type = "HR";
-        const response = await getSMTPForFeature(type);
-        if (response?.success) {
-          const emailData = JSON.parse(response?.data);
-          // register email we have to send the welcome mail with email and password with site link
-          const html = `<p>Dear ${name},</p>
+        // Previous / historical employees are entered with a visa end date that
+        // is already in the past — we are only recording their data, so we must
+        // NOT email them login credentials.
+        const visaEnd = data?.visaEndDate ? new Date(data.visaEndDate) : null;
+        const isPreviousEmployee =
+          visaEnd && !Number.isNaN(visaEnd.getTime()) && visaEnd < new Date();
+        if (!isPreviousEmployee) {
+          const companyData = await getCompanyById(company);
+          const cData = JSON.parse(companyData?.data);
+          const type = "HR";
+          const response = await getSMTPForFeature(type);
+          if (response?.success) {
+            const emailData = JSON.parse(response?.data);
+            // register email we have to send the welcome mail with email and password with site link
+            const html = `<p>Dear ${name},</p>
           <p>Welcome to our team! We are excited to have you on board.</p>
           <p>Your login details are as follows:</p>
           <p>Email: ${email}</p>
@@ -118,10 +125,11 @@ export const handleOfficeEmployee = withAudit(
           <p>Thank you for joining us!</p>
           <p>Best regards,</p>
           <p>Hr Management</p>`;
-          // we have to add the company name on this subject
-          const subject = `Weclome to our ${cData.name} family`;
-          const smtp = { ...emailData, toEmail: email, html, subject };
-          await userRegisterEmail(smtp);
+            // we have to add the company name on this subject
+            const subject = `Weclome to our ${cData.name} family`;
+            const smtp = { ...emailData, toEmail: email, html, subject };
+            await userRegisterEmail(smtp);
+          }
         }
         recordAudit({
           entityId: employeeId,

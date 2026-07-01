@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { isFuture } from "date-fns";
 import { Plus } from "lucide-react";
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -130,12 +129,8 @@ const Employee = ({ searchParams }) => {
     setIsEdit(true);
   };
   const onSubmit = (data) => {
-    // console.log(data);
-    // return;
-
-    if (data?.visaEndDate && !isFuture(new Date(data.eVisaExp))) {
-      return toast.error("Visa Expiry should be greater than start date");
-    }
+    // Previous / historical employees are entered with a visa expiry that has
+    // already passed, so we no longer block past visa dates here.
     if (isChecked) {
       if (data?.payRate === initialValues?.payRate) {
         return toast.error(

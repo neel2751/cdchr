@@ -10,7 +10,6 @@ import {
   resetOfficeEmployeePassword,
   emergencyLockdownAccount,
 } from "@/server/officeServer/officeServer";
-import { isFuture } from "date-fns";
 import { Plus } from "lucide-react";
 import React, { useState } from "react";
 import EmployeTabel from "./employeTabel";
@@ -140,9 +139,8 @@ const OfficeEmplyee = ({ searchParams }) => {
   });
 
   const onSubmit = (data) => {
-    if (data?.visaEndDate && !isFuture(new Date(data.visaEndDate))) {
-      return toast.error("Visa End date should be greater than today");
-    }
+    // Previous / historical employees are entered with a visa end date that has
+    // already passed, so we no longer block past visa end dates here.
     handleSubmit(data);
   };
 
