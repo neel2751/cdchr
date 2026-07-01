@@ -125,7 +125,7 @@ export const LoginUi = () => {
               className="h-10 w-10"
               // src="/images/cdc.svg"
               // src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-              src="/images/interiorlogo.svg"
+              src="/images/Interiorlogo.svg"
               alt="CDC"
             />
             <span className="text-gray-800 font-semibold text-lg whitespace-nowrap">

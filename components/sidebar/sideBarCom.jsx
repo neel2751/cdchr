@@ -56,7 +56,7 @@ const SideBarHeaderCom = () => {
                     // src="/images/cdc.svg"
                     src={
                       // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                      "/images/interiorlogo.svg"
+                      "/images/Interiorlogo.svg"
                     }
                     alt="Logo"
                     width={30}
@@ -210,7 +210,7 @@ const SideBarFooterCom = () => {
                     // src={session?.user?.image || "/images/cdc.svg"}
                     src={
                       // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                      "/images/interiorlogo.svg"
+                      "/images/Interiorlogo.svg"
                     }
                     alt={session?.user?.name || "HR"}
                   />
@@ -239,7 +239,8 @@ const SideBarFooterCom = () => {
                     <AvatarImage
                       // src={session?.user?.image || "/images/cdc.svg"}
                       src={
-                        "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                        // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                        "/images/Interiorlogo.svg"
                       }
                       alt={session?.user?.name || "HR"}
                     />
