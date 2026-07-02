@@ -30,10 +30,12 @@ export const getAllEmployees = async (filterData) => {
     query.immigrationType = immigrationType;
   }
 
-  // Account status filter (active / inactive). Deleted already excluded.
+  // Account status filter. The default view shows only active employees;
+  // "inactive" shows deactivated accounts and "all" reveals everyone.
+  // Deleted records are always excluded (query.delete = false above).
   const accountStatus = filterData?.filter?.status;
-  if (accountStatus === "active") query.isActive = true;
-  else if (accountStatus === "inactive") query.isActive = false;
+  if (accountStatus === "inactive") query.isActive = false;
+  else if (accountStatus !== "all") query.isActive = true;
 
   // Visa status filter on eVisaExp. Requiring a date excludes British/no-visa.
   const visaStatus = filterData?.filter?.visaStatus;

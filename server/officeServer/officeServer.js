@@ -183,10 +183,12 @@ export const getOfficeEmployee = async (filterData) => {
       query.immigrationType = filterType;
     }
 
-    // Account status filter (active / inactive). Deleted are already excluded.
+    // Account status filter. The default view shows only active employees;
+    // "inactive" shows deactivated accounts and "all" reveals everyone.
+    // Deleted records are always excluded (query.delete = false above).
     const accountStatus = filterData?.filter?.status;
-    if (accountStatus === "active") query.isActive = true;
-    else if (accountStatus === "inactive") query.isActive = false;
+    if (accountStatus === "inactive") query.isActive = false;
+    else if (accountStatus !== "all") query.isActive = true;
 
     // Visa status filter. Requiring a visaEndDate naturally excludes
     // British / no-visa staff.

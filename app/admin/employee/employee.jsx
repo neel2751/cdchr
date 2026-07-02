@@ -40,9 +40,9 @@ const VISA_STATUS_OPTIONS = [
   { label: "Valid", value: "valid" },
 ];
 const ACCOUNT_STATUS_OPTIONS = [
-  { label: "All Accounts", value: "" },
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
+  { label: "All Accounts", value: "all" },
 ];
 
 const Employee = ({ searchParams }) => {
@@ -57,7 +57,8 @@ const Employee = ({ searchParams }) => {
     type: "",
     employeType: "",
     visaStatus: "",
-    status: "",
+    // Default to active-only; switch to "inactive" or "all" to see the rest.
+    status: "active",
   });
   const query = searchParams.query;
   const queryKey = ["employee", { query, currentPage, pagePerData, filter }];
@@ -309,9 +310,7 @@ const Employee = ({ searchParams }) => {
                     <SelectFilter
                       value={filter.status}
                       frameworks={ACCOUNT_STATUS_OPTIONS}
-                      placeholder={
-                        filter.status === "" ? "All Accounts" : "Account status"
-                      }
+                      placeholder="Account status"
                       onChange={(e) => setFilter({ ...filter, status: e })}
                       noData="No Data found"
                     />
