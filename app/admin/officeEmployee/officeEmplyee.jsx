@@ -39,13 +39,10 @@ const VISA_STATUS_OPTIONS = [
   { label: "Expired", value: "expired" },
   { label: "Valid", value: "valid" },
 ];
-const ACCOUNT_STATUS_OPTIONS = [
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-  { label: "All Accounts", value: "all" },
-];
-
-const OfficeEmplyee = ({ searchParams }) => {
+const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
+  // "active" = the main Office Management page (active staff only);
+  // "previous" = the Previous Office Employees page (inactive staff only).
+  const isPrevious = variant === "previous";
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
   const query = searchParams.query;
@@ -58,8 +55,9 @@ const OfficeEmplyee = ({ searchParams }) => {
     role: "",
     type: "",
     visaStatus: "",
-    // Default to active-only; switch to "inactive" or "all" to see the rest.
-    status: "active",
+    // Locked per page: the main list shows active staff, the Previous
+    // Office Employees page shows inactive staff. No in-page status toggle.
+    status: isPrevious ? "inactive" : "active",
   });
   const queryKey = [
     "officeEmployee",
@@ -278,7 +276,11 @@ const OfficeEmplyee = ({ searchParams }) => {
             <CompanyWiseCountCard data={companyWiseEmployeeCount} />
             <CardHeader>
               <div className="mb-4">
-                <CardTitle>Office Management</CardTitle>
+                <CardTitle>
+                  {isPrevious
+                    ? "Previous Office Employees"
+                    : "Office Management"}
+                </CardTitle>
               </div>
               <div className="flex items-center justify-between">
                 <SearchDebounce />
@@ -329,19 +331,12 @@ const OfficeEmplyee = ({ searchParams }) => {
                       noData="No Data found"
                     />
                   </div>
-                  <div>
-                    <SelectFilter
-                      value={filter?.status || ""}
-                      frameworks={ACCOUNT_STATUS_OPTIONS}
-                      placeholder="Account status"
-                      onChange={(e) => setFilter({ ...filter, status: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <Button onClick={handleAdd}>
-                    <Plus />
-                    Add
-                  </Button>
+                  {!isPrevious && (
+                    <Button onClick={handleAdd}>
+                      <Plus />
+                      Add
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>

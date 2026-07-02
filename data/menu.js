@@ -34,6 +34,12 @@ export const MENU = [
     icon: "Briefcase",
   },
   {
+    name: "Previous Office Staff",
+    path: "/admin/previousOfficeEmployee",
+    role: ["superAdmin"],
+    icon: "Archive",
+  },
+  {
     name: "Office Attendance",
     path: "/admin/attendance",
     role: ["superAdmin", "admin"], // admin, manager, user
@@ -56,6 +62,12 @@ export const MENU = [
     path: "/admin/employee",
     role: ["superAdmin"],
     icon: "ClipboardIcon",
+  },
+  {
+    name: "Previous Employees",
+    path: "/admin/previousEmployee",
+    role: ["superAdmin"],
+    icon: "UserX",
   },
   {
     name: "Site Project",

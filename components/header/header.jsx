@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "../ui/breadcrumb";
 import OnBoarding from "../onboarding/onBoarding";
+import NotificationBell from "../notification/notificationBell";
 
 const Header = () => {
   const pathName = usePathname();
@@ -36,9 +37,9 @@ const Header = () => {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      {/* <div className="flex-end ml-auto flex items-center gap-2 pr-4">
-        <OnBoarding />
-      </div> */}
+      <div className="ml-auto flex items-center gap-2 pr-4">
+        <NotificationBell />
+      </div>
     </header>
   );
 };

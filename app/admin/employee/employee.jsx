@@ -39,13 +39,10 @@ const VISA_STATUS_OPTIONS = [
   { label: "Expired", value: "expired" },
   { label: "Valid", value: "valid" },
 ];
-const ACCOUNT_STATUS_OPTIONS = [
-  { label: "Active", value: "active" },
-  { label: "Inactive", value: "inactive" },
-  { label: "All Accounts", value: "all" },
-];
-
-const Employee = ({ searchParams }) => {
+const Employee = ({ searchParams, variant = "active" }) => {
+  // "active" = the main Employee List page (active staff only);
+  // "previous" = the Previous Employees page (inactive staff only).
+  const isPrevious = variant === "previous";
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
   const [initialValues, setInitialValues] = useState({});
@@ -57,8 +54,9 @@ const Employee = ({ searchParams }) => {
     type: "",
     employeType: "",
     visaStatus: "",
-    // Default to active-only; switch to "inactive" or "all" to see the rest.
-    status: "active",
+    // Locked per page: the main list shows active staff, the Previous
+    // Employees page shows inactive staff. No in-page status toggle.
+    status: isPrevious ? "inactive" : "active",
   });
   const query = searchParams.query;
   const queryKey = ["employee", { query, currentPage, pagePerData, filter }];
@@ -250,7 +248,9 @@ const Employee = ({ searchParams }) => {
           <Card>
             <CardHeader>
               <div className="mb-4">
-                <CardTitle>Employee List</CardTitle>
+                <CardTitle>
+                  {isPrevious ? "Previous Employees" : "Employee List"}
+                </CardTitle>
               </div>
               <div className="flex items-center justify-between">
                 <SearchDebounce />
@@ -306,19 +306,12 @@ const Employee = ({ searchParams }) => {
                       noData="No Data found"
                     />
                   </div>
-                  <div>
-                    <SelectFilter
-                      value={filter.status}
-                      frameworks={ACCOUNT_STATUS_OPTIONS}
-                      placeholder="Account status"
-                      onChange={(e) => setFilter({ ...filter, status: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <Button onClick={handleOpen}>
-                    <Plus />
-                    Add
-                  </Button>
+                  {!isPrevious && (
+                    <Button onClick={handleOpen}>
+                      <Plus />
+                      Add
+                    </Button>
+                  )}
                   <Dialog open={open} onOpenChange={handleClose}>
                     <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
                       <DialogHeader>

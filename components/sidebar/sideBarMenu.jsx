@@ -17,6 +17,8 @@ import {
   ScanQrCode,
   ScrollText,
   FolderOpen,
+  Archive,
+  UserX,
 } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Collapsible } from "../ui/collapsible";
@@ -43,6 +45,8 @@ const ICON_MAP = {
   ScrollText: ScrollText,
   FolderOpen: FolderOpen,
   ClockCheck: CalendarClock,
+  Archive: Archive,
+  UserX: UserX,
 };
 
 export default function SideBarMenuCom({ menuItems, path }) {
