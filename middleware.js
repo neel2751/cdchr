@@ -1,6 +1,6 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import { MENU, COMMONMENUITEMS } from "./data/menu";
+import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
 
 async function checkRoleMiddleware(req) {
   const requestedPath = req?.nextUrl?.pathname;
@@ -179,11 +179,12 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL(dashboardPath, req.url));
   }
 
-  const isAccessible = roleData?.permissions?.some((path) =>
-    requestedPath.startsWith(path)
-  );
+  // Derived pages (e.g. "previous employees") inherit the permission of their
+  // parent page, so an admin who can access the active list can also access the
+  // matching "previous" list without a separate permission grant.
+  const requiredPath = DERIVED_ACCESS[menuItem?.path] || menuItem?.path;
 
-  if (!isAccessible || !roleData?.permissions.includes(menuItem?.path)) {
+  if (!roleData?.permissions?.includes(requiredPath)) {
     return NextResponse.redirect(new URL(dashboardPath, req.url));
   }
 

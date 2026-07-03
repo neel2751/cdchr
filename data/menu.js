@@ -34,12 +34,6 @@ export const MENU = [
     icon: "Briefcase",
   },
   {
-    name: "Previous Office Staff",
-    path: "/admin/previousOfficeEmployee",
-    role: ["superAdmin"],
-    icon: "Archive",
-  },
-  {
     name: "Office Attendance",
     path: "/admin/attendance",
     role: ["superAdmin", "admin"], // admin, manager, user
@@ -62,12 +56,6 @@ export const MENU = [
     path: "/admin/employee",
     role: ["superAdmin"],
     icon: "ClipboardIcon",
-  },
-  {
-    name: "Previous Employees",
-    path: "/admin/previousEmployee",
-    role: ["superAdmin"],
-    icon: "UserX",
   },
   {
     name: "Site Project",
@@ -170,7 +158,30 @@ export const MENU = [
     role: ["superAdmin"],
     icon: "FolderOpen",
   },
+  // Kept at the bottom: former/inactive staff listings. Access is derived from
+  // the matching active page (see DERIVED_ACCESS) so admins who can see the
+  // active list automatically get the "previous" list without a separate grant.
+  {
+    name: "Previous Office Staff",
+    path: "/admin/previousOfficeEmployee",
+    role: ["superAdmin", "admin"],
+    icon: "Archive",
+  },
+  {
+    name: "Previous Employees",
+    path: "/admin/previousEmployee",
+    role: ["superAdmin", "admin"],
+    icon: "UserX",
+  },
 ];
+
+// Pages whose access mirrors a parent page's permission. An admin who can access
+// the parent path automatically gets the derived path (used by the sidebar
+// builder and the middleware route guard).
+export const DERIVED_ACCESS = {
+  "/admin/previousOfficeEmployee": "/admin/officeEmployee",
+  "/admin/previousEmployee": "/admin/employee",
+};
 
 export const COMMONMENUITEMS = [
   {

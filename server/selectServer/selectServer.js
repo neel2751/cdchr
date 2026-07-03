@@ -9,7 +9,7 @@ import RoleBasedModel from "@/models/rolebasedModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import ProjectSiteModel from "@/models/siteProjectModel";
 import { getServerSideProps } from "../session/session";
-import { COMMONMENUITEMS, MENU, PERSONAL_MENU } from "@/data/menu";
+import { COMMONMENUITEMS, MENU, PERSONAL_MENU, DERIVED_ACCESS } from "@/data/menu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
@@ -352,7 +352,12 @@ export const getEmployeeMenu = async () => {
         return { success: false, message: "No Data Found" };
       } else {
         const menuItem = mergeAndFilterMenus(COMMONMENUITEMS, MENU).filter(
-          (ie) => menu?.permissions?.includes(ie?.path)
+          (ie) =>
+            menu?.permissions?.includes(ie?.path) ||
+            // Derived pages (e.g. "previous employees") appear when the admin
+            // can access the matching parent page.
+            (DERIVED_ACCESS[ie?.path] &&
+              menu?.permissions?.includes(DERIVED_ACCESS[ie?.path])),
         );
         const data = {
           success: true,
