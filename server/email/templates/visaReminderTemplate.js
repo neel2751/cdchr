@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import { milestoneLabel } from "@/lib/visaMilestones";
+import { formatVisaRemaining } from "@/lib/visaMilestones";
 
 /**
  * Build the subject + HTML body for a visa-expiry reminder email.
@@ -24,15 +24,18 @@ export function visaReminderTemplate({
     ? format(new Date(visaEndDate), "PPP")
     : "the recorded date";
 
+  // Use the actual time remaining (e.g. "1 month 5 days") rather than the
+  // reminder milestone bucket — a visa ~45 days out sits in the "3 months"
+  // bucket, which would otherwise wrongly read "expires in 3 months".
+  const remaining = formatVisaRemaining(visaEndDate) || `${daysRemaining} days`;
+
   const subject = expired
     ? `Urgent: your visa has expired (${prettyDate})`
-    : `Action required: your visa expires in ${milestoneLabel(
-        milestone,
-      )} on ${prettyDate}`;
+    : `Action required: your visa expires in ${remaining} on ${prettyDate}`;
 
   const headline = expired
     ? "Your visa has expired"
-    : `Your visa expires in ${milestoneLabel(milestone)}`;
+    : `Your visa expires in ${remaining}`;
 
   const body = expired
     ? `<p>Our records show your visa expired on <strong>${prettyDate}</strong>. Please contact the HR team immediately to provide updated documentation.</p>`
