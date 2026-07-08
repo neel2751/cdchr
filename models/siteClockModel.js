@@ -62,8 +62,11 @@ const siteClockSchema = new mongoose.Schema(
       default: false,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+siteClockSchema.index({ employeeId: 1, siteId: 1, date: -1, isDeleted: 1 });
+siteClockSchema.index({ siteId: 1, date: -1, isDeleted: 1 });
 
 const SiteClockModel =
   mongoose.models.SiteClock || mongoose.model("SiteClock", siteClockSchema);

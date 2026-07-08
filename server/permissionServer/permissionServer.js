@@ -3,66 +3,92 @@
 import { connect } from "@/db/db";
 import RoleBasedModel from "@/models/rolebasedModel";
 import { getServerSideProps } from "../session/session";
+import { withAudit, recordAudit } from "@/lib/audit";
 
-export async function assignPermission(data, id) {
-  try {
-    await connect();
-    if (id) {
-      const existingAssignment = await RoleBasedModel.find({
-        employeeId: data?.employeeId, // exclude the current project site
-        _id: { $ne: id }, // Exclude the current assignment
-      });
-      if (existingAssignment.length > 0) {
+export const assignPermission = withAudit(
+  "Permission.assign",
+  async (data, id) => {
+    try {
+      await connect();
+      if (id) {
+        const existingAssignment = await RoleBasedModel.find({
+          employeeId: data?.employeeId, // exclude the current project site
+          _id: { $ne: id }, // Exclude the current assignment
+        });
+        if (existingAssignment.length > 0) {
+          return {
+            success: false,
+            message: " Employee already has a role-based assignment",
+          };
+        }
+        const before = await RoleBasedModel.findById(id).lean();
+        const role = await RoleBasedModel.findByIdAndUpdate(id, data, {
+          new: true,
+        });
+        recordAudit({
+          entityId: id,
+          before,
+          after: role?.toObject ? role.toObject() : role,
+          description: `Updated role/permission for employee ${data?.employeeId}`,
+        });
         return {
-          success: false,
-          message: " Employee already has a role-based assignment",
+          success: true,
+          message: "Permission update successfully",
         };
+      } else {
+        // first we have to find the if user already has the permission
+        const user = await RoleBasedModel.findOne({
+          employeeId: data.employeeId,
+        });
+        // we have to return message user already has the permission
+        if (user) {
+          return { success: false, message: "User already has the permission" };
+        }
+        // if user does not have the permission we have to assign the permission
+        const result = await RoleBasedModel.create(data);
+        recordAudit({
+          entityId: result?._id,
+          after: result?.toObject ? result.toObject() : result,
+          description: `Assigned role/permission to employee ${data?.employeeId}`,
+        });
+        return { success: true, message: "Permission assigned successfully" };
       }
-      const role = await RoleBasedModel.findByIdAndUpdate(id, data, {
-        new: true,
-      });
-      return {
-        success: true,
-        message: "Permission update successfully",
-      };
-    } else {
+    } catch (error) {
+      console.log(" Error in assignPermission function", error);
+      return { success: false, message: "Error assigning permission" };
+    }
+  },
+  { module: "Permission" },
+);
+
+export const removePermission = withAudit(
+  "Permission.remove",
+  async (data) => {
+    try {
+      await connect();
       // first we have to find the if user already has the permission
-      const user = await RoleBasedModel.findOne({
-        employeeId: data.employeeId,
-      });
+      const user = await RoleBasedModel.findOne({ employeeId: data.employeeId });
       // we have to return message user already has the permission
-      if (user) {
-        return { success: false, message: "User already has the permission" };
+      if (!user) {
+        return { sucess: false, message: "User does not have the permission" };
       }
       // if user does not have the permission we have to assign the permission
-      const result = await RoleBasedModel.create(data);
-      return { success: true, message: "Permission assigned successfully" };
+      const result = await RoleBasedModel.deleteOne({
+        employeeId: data.employeeId,
+      });
+      recordAudit({
+        entityId: user?._id,
+        before: user?.toObject ? user.toObject() : user,
+        description: `Removed role/permission from employee ${data?.employeeId}`,
+      });
+      return { sucess: true, message: "Permission removed successfully" };
+    } catch (error) {
+      console.log(" Error in removePermission function", error);
+      return { sucess: false, message: "Error removing permission" };
     }
-  } catch (error) {
-    console.log(" Error in assignPermission function", error);
-    return { success: false, message: "Error assigning permission" };
-  }
-}
-
-export async function removePermission(data) {
-  try {
-    await connect();
-    // first we have to find the if user already has the permission
-    const user = await RoleBasedModel.findOne({ employeeId: data.employeeId });
-    // we have to return message user already has the permission
-    if (!user) {
-      return { sucess: false, message: "User does not have the permission" };
-    }
-    // if user does not have the permission we have to assign the permission
-    const result = await RoleBasedModel.deleteOne({
-      employeeId: data.employeeId,
-    });
-    return { sucess: true, message: "Permission removed successfully" };
-  } catch (error) {
-    console.log(" Error in removePermission function", error);
-    return { sucess: false, message: "Error removing permission" };
-  }
-}
+  },
+  { module: "Permission" },
+);
 
 export async function getAllPermission(filterData) {
   console.log(filterData);

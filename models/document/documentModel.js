@@ -40,6 +40,12 @@ const DocumentFileSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isArchived: {
+    type: Boolean,
+    default: false,
+  },
+  archivedAt: Date,
+  deletedAt: Date,
   uploadedAt: Date,
   uploadedBy: mongoose.Types.ObjectId,
 });

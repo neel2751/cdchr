@@ -353,17 +353,32 @@ export async function testSMTPEmailAdvance(smtpId) {
   }
 }
 export async function getSMTPForFeature(feature) {
-  // Get primary EmailUsage for the feature
-  const smtp = await EmailAccountModel.findOne({
+  await connect();
+  // Prefer the account marked primary for this feature.
+  let smtp = await EmailAccountModel.findOne({
     feature,
     isPrimary: true,
     isDeleted: false,
     isActive: true,
   }).lean(); // Use lean() for better performance if you don't need mongoose doc methods
+
+  // Fallback: an account can be configured with the feature (e.g. "HR")
+  // without being explicitly marked primary. Rather than failing the send,
+  // use any active account for that feature (newest / any primary first).
+  if (!smtp) {
+    smtp = await EmailAccountModel.findOne({
+      feature,
+      isDeleted: false,
+      isActive: true,
+    })
+      .sort({ isPrimary: -1, updatedAt: -1 })
+      .lean();
+  }
+
   if (!smtp) {
     return {
       success: false,
-      message: `No primary SMTP found for feature: ${feature}`,
+      message: `No SMTP account configured for feature: ${feature}`,
     };
   }
   // Decrypt password before use

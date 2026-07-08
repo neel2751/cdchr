@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { isFuture } from "date-fns";
 import { Plus } from "lucide-react";
 import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +18,7 @@ import {
   employeeStatus,
   getAllEmployees,
   handleEmploye,
+  resetSiteEmployeePassword,
 } from "@/server/employeServer/employeServer";
 import { EMPLOYEFIELD } from "@/data/fields/fields";
 import Pagination from "@/lib/pagination";
@@ -29,8 +29,20 @@ import { useSubmitMutation } from "@/hooks/use-mutate";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import Alert from "@/components/alert/alert";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
+import { sendVisaReminderManually } from "@/server/visaServer/visaServer";
+import VisaReminderDialog from "../_components/visaReminderDialog";
+import ResetPasswordDialog from "../_components/resetPasswordDialog";
 
-const Employee = ({ searchParams }) => {
+const VISA_STATUS_OPTIONS = [
+  { label: "All Visa", value: "" },
+  { label: "Expiring (≤90d)", value: "expiring" },
+  { label: "Expired", value: "expired" },
+  { label: "Valid", value: "valid" },
+];
+const Employee = ({ searchParams, variant = "active" }) => {
+  // "active" = the main Employee List page (active staff only);
+  // "previous" = the Previous Employees page (inactive staff only).
+  const isPrevious = variant === "previous";
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
   const [initialValues, setInitialValues] = useState({});
@@ -41,6 +53,10 @@ const Employee = ({ searchParams }) => {
   const [filter, setFilter] = useState({
     type: "",
     employeType: "",
+    visaStatus: "",
+    // Locked per page: the main list shows active staff, the Previous
+    // Employees page shows inactive staff. No in-page status toggle.
+    status: isPrevious ? "inactive" : "active",
   });
   const query = searchParams.query;
   const queryKey = ["employee", { query, currentPage, pagePerData, filter }];
@@ -112,12 +128,8 @@ const Employee = ({ searchParams }) => {
     setIsEdit(true);
   };
   const onSubmit = (data) => {
-    // console.log(data);
-    // return;
-
-    if (data?.visaEndDate && !isFuture(new Date(data.eVisaExp))) {
-      return toast.error("Visa Expiry should be greater than start date");
-    }
+    // Previous / historical employees are entered with a visa expiry that has
+    // already passed, so we no longer block past visa dates here.
     if (isChecked) {
       if (data?.payRate === initialValues?.payRate) {
         return toast.error(
@@ -157,6 +169,51 @@ const Employee = ({ searchParams }) => {
     setAlert({ id, type, status });
   };
 
+  const [reminderTarget, setReminderTarget] = useState(null);
+
+  const { mutate: sendVisaReminder, isPending: isSendingReminder } =
+    useSubmitMutation({
+      mutationFn: async (payload) => sendVisaReminderManually(payload),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) => message,
+      onClose: () => setReminderTarget(null),
+    });
+
+  const onSendVisaReminder = (item) =>
+    setReminderTarget({
+      employeeId: item?._id,
+      employeeType: "Employe",
+      name: `${item?.firstName || ""} ${item?.lastName || ""}`.trim(),
+      visaEndDate: item?.eVisaExp,
+    });
+
+  const confirmVisaReminder = (ccHr) => {
+    if (!reminderTarget) return;
+    sendVisaReminder({
+      employeeId: reminderTarget.employeeId,
+      employeeType: reminderTarget.employeeType,
+      ccHr,
+    });
+  };
+
+  const [resetTarget, setResetTarget] = useState(null);
+
+  const { mutate: resetPassword, isPending: isResettingPassword } =
+    useSubmitMutation({
+      mutationFn: async ({ employeeId, newPassword, reason }) =>
+        resetSiteEmployeePassword({ employeeId, newPassword, reason }),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) => message || "Password reset successfully",
+      onClose: () => setResetTarget(null),
+    });
+
+  const onResetPassword = (item) => setResetTarget(item);
+
+  const confirmResetPassword = ({ newPassword, reason }) => {
+    if (!resetTarget?._id) return;
+    resetPassword({ employeeId: resetTarget._id, newPassword, reason });
+  };
+
   const handleOpen = () => {
     setInitialValues({});
     setOpen(true);
@@ -182,13 +239,18 @@ const Employee = ({ searchParams }) => {
           currentPage,
           pagePerData,
           totalCount,
+          onSendVisaReminder,
+          isSendingReminder,
+          onResetPassword,
         }}
       >
         <div className="overflow-hidden">
           <Card>
             <CardHeader>
               <div className="mb-4">
-                <CardTitle>Employee List</CardTitle>
+                <CardTitle>
+                  {isPrevious ? "Previous Employees" : "Employee List"}
+                </CardTitle>
               </div>
               <div className="flex items-center justify-between">
                 <SearchDebounce />
@@ -233,10 +295,23 @@ const Employee = ({ searchParams }) => {
                       noData="No Data found"
                     />
                   </div>
-                  <Button onClick={handleOpen}>
-                    <Plus />
-                    Add
-                  </Button>
+                  <div>
+                    <SelectFilter
+                      value={filter.visaStatus}
+                      frameworks={VISA_STATUS_OPTIONS}
+                      placeholder={
+                        filter.visaStatus === "" ? "All Visa" : "Visa status"
+                      }
+                      onChange={(e) => setFilter({ ...filter, visaStatus: e })}
+                      noData="No Data found"
+                    />
+                  </div>
+                  {!isPrevious && (
+                    <Button onClick={handleOpen}>
+                      <Plus />
+                      Add
+                    </Button>
+                  )}
                   <Dialog open={open} onOpenChange={handleClose}>
                     <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
                       <DialogHeader>
@@ -276,6 +351,22 @@ const Employee = ({ searchParams }) => {
             onClose={alertClose}
             onConfirm={handleStatus}
             isPending={isStatusPending}
+          />
+          <VisaReminderDialog
+            target={reminderTarget}
+            onOpenChange={(o) => {
+              if (!o) setReminderTarget(null);
+            }}
+            onConfirm={confirmVisaReminder}
+            isPending={isSendingReminder}
+          />
+          <ResetPasswordDialog
+            target={resetTarget}
+            onOpenChange={(o) => {
+              if (!o) setResetTarget(null);
+            }}
+            onConfirm={confirmResetPassword}
+            isPending={isResettingPassword}
           />
         </div>
       </CommonContext.Provider>

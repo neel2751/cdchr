@@ -4,6 +4,7 @@ import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import QRCode from "qrcode";
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
 const port = 3000;
@@ -13,11 +14,40 @@ const handler = app.getRequestHandler();
 
 const SECRET = process.env.NEXTAUTH_SECRET || ""; // Replace with env variable in prod
 
+const qrRenderOptions = {
+  errorCorrectionLevel: "M",
+  margin: 1,
+  width: 220,
+};
+
+async function buildQrPayload(token) {
+  try {
+    const qrDataUrl = await QRCode.toDataURL(token, qrRenderOptions);
+    return { token, qrDataUrl };
+  } catch (err) {
+    console.error("Failed to pre-render QR payload:", err);
+    return { token };
+  }
+}
+
+// Restrict real-time (Socket.IO) connections to known origins instead of a
+// wildcard. Origins are configured via SOCKET_CORS_ORIGINS (comma-separated)
+// and fall back to the app's own URL; localhost is allowed in development only.
+const allowedSocketOrigins = [
+  ...(process.env.SOCKET_CORS_ORIGINS || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+  process.env.NEXTAUTH_URL,
+  process.env.NEXT_PUBLIC_WEB_URL,
+  ...(dev ? ["http://localhost:3000"] : []),
+].filter(Boolean);
+
 app.prepare().then(() => {
   const server = createServer((req, res) => handler(req, res));
   const io = new Server(server, {
     cors: {
-      origin: "*",
+      origin: allowedSocketOrigins.length ? allowedSocketOrigins : false,
       credentials: true,
     },
   });
@@ -37,13 +67,13 @@ app.prepare().then(() => {
     /** ============================
      * Office device generates QR
      * ============================ */
-    socket.on("generate-office-qr", ({ action, siteId }) => {
+    socket.on("generate-office-qr", async ({ action, siteId }) => {
       const token = jwt.sign({ action, siteId }, SECRET, { expiresIn: "30s" });
       const expiresAt = Date.now() + 30000;
 
       officeTokens.set(token, { action, siteId, expiresAt });
 
-      socket.emit("new-office-qr", token);
+      socket.emit("new-office-qr", await buildQrPayload(token));
 
       // Automatically delete token after expiration
       setTimeout(() => {
@@ -72,7 +102,7 @@ app.prepare().then(() => {
 
       // Record attendance
       console.log(
-        `Employee ${employeeId} performed ${data.action} at site ${data.siteId}`
+        `Employee ${employeeId} performed ${data.action} at site ${data.siteId}`,
       );
 
       socket.emit("scan-success", { action: data.action });
@@ -95,7 +125,7 @@ app.prepare().then(() => {
     socket.on("start-token-generation", (employeeId) => {
       if (completedEmployees.has(employeeId)) {
         console.log(
-          `Employee ${employeeId} already completed token generation.`
+          `Employee ${employeeId} already completed token generation.`,
         );
         socket.emit("token-limit-reached"); // Inform client about the limit
         return;
@@ -109,7 +139,7 @@ app.prepare().then(() => {
 
       let count = 0;
 
-      const sendToken = () => {
+      const sendToken = async () => {
         if (count >= tokenLimit) {
           clearInterval(interval);
           activeEmployees.delete(employeeId);
@@ -123,13 +153,15 @@ app.prepare().then(() => {
         const token = jwt.sign({ employeeId }, SECRET, {
           expiresIn: `${tokenExpiration}s`,
         });
-        socket.emit("new-qr-token", token);
+        socket.emit("new-qr-token", await buildQrPayload(token));
         count++;
         console.log(`Token ${count}/${tokenLimit} sent to ${employeeId}`);
       };
 
-      sendToken(); // Immediate first token
-      const interval = setInterval(sendToken, tokenInterval);
+      void sendToken(); // Immediate first token
+      const interval = setInterval(() => {
+        void sendToken();
+      }, tokenInterval);
       activeEmployees.set(employeeId, { count, interval, socketId: socket.id });
     });
 
@@ -147,7 +179,7 @@ app.prepare().then(() => {
 
       let count = 0;
 
-      const sendToken = () => {
+      const sendToken = async () => {
         if (count >= tokenLimit) {
           clearInterval(interval);
           activeEmployees.delete(employeeId);
@@ -160,18 +192,20 @@ app.prepare().then(() => {
         const token = jwt.sign({ employeeId, action, siteId }, SECRET, {
           expiresIn: `${tokenExpiration}s`,
         });
-        socket.emit("new-qr-token", token);
+        socket.emit("new-qr-token", await buildQrPayload(token));
         count++;
         console.log(
-          `Manual token ${count}/${tokenLimit} sent to ${employeeId}`
+          `Manual token ${count}/${tokenLimit} sent to ${employeeId}`,
         );
       };
 
       // Send first token immediately
-      sendToken();
+      void sendToken();
 
       // Start interval for rest
-      const interval = setInterval(sendToken, tokenInterval);
+      const interval = setInterval(() => {
+        void sendToken();
+      }, tokenInterval);
       activeEmployees.set(employeeId, { count, interval, socketId: socket.id });
     });
 
@@ -223,5 +257,48 @@ app.prepare().then(() => {
 
   server.listen(port, () => {
     console.log("> Ready on http://localhost:" + port);
+    scheduleVisaReminders(port);
   });
 });
+
+// Daily visa-expiry reminder job. Dependency-free scheduler: triggers the
+// internal API route (which runs inside Next, so DB + path aliases resolve)
+// once a day at 09:00. Requires CRON_SECRET to be set.
+function scheduleVisaReminders(serverPort) {
+  const RUN_HOUR = 9;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[visa-cron] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/visa-reminders`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      console.log("[visa-cron] run complete:", JSON.stringify(json));
+    } catch (err) {
+      console.error("[visa-cron] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[visa-cron] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}

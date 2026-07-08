@@ -20,6 +20,7 @@ export default function OfficeQRCode({ siteId, className }) {
   const [qrData, setQrData] = useState(""); // Data URL for QR
   const [tokenExpired, setTokenExpired] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const currentTokenRef = useRef("");
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -29,15 +30,28 @@ export default function OfficeQRCode({ siteId, className }) {
       console.log("Office device connected");
     });
 
-    socketRef.current.on("new-office-qr", async (token) => {
-      const qrUrl = await QRCode.toDataURL(token);
-      setQrData(qrUrl);
+    socketRef.current.on("new-office-qr", async (payload) => {
+      const token = typeof payload === "string" ? payload : payload?.token;
+      const preRendered = typeof payload === "object" ? payload?.qrDataUrl : "";
+      currentTokenRef.current = token || "";
+
+      if (preRendered) {
+        setQrData(preRendered);
+      } else if (token) {
+        const qrUrl = await QRCode.toDataURL(token);
+        setQrData(qrUrl);
+      } else {
+        setQrData("");
+      }
+
       setTokenExpired(false);
       setIsDialogOpen(true); // show dialog when QR generated
       console.log("Received new QR token:", token);
     });
 
     socketRef.current.on("office-qr-used", (token) => {
+      if (token && currentTokenRef.current && token !== currentTokenRef.current)
+        return;
       console.log("QR was used, removing:", token);
       setQrData("");
       setTokenExpired(true);
@@ -45,6 +59,8 @@ export default function OfficeQRCode({ siteId, className }) {
     });
 
     socketRef.current.on("office-qr-expired", (token) => {
+      if (token && currentTokenRef.current && token !== currentTokenRef.current)
+        return;
       console.log("QR expired:", token);
       setQrData("");
       setTokenExpired(true);
@@ -59,6 +75,7 @@ export default function OfficeQRCode({ siteId, className }) {
   const generateQRCode = () => {
     setQrData("");
     setTokenExpired(false);
+    currentTokenRef.current = "";
     setIsDialogOpen(true);
     socketRef.current.emit("generate-office-qr", { siteId });
   };
@@ -70,7 +87,7 @@ export default function OfficeQRCode({ siteId, className }) {
         onClick={generateQRCode}
         className={cn(
           "h-12 text-base bg-indigo-600 hover:bg-indigo-700",
-          className
+          className,
         )}
       >
         <QrCode />

@@ -67,6 +67,12 @@ export default function AddSiteAssignment({ queryKey }) {
         required: "Select atleast one employee",
       },
     },
+    {
+      name: "moveExisting",
+      labelText:
+        "If employee is already assigned on the same date, move them to this site",
+      type: "checkbox",
+    },
   ];
 
   return (

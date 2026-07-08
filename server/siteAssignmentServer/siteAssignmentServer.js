@@ -11,9 +11,12 @@ import EmployeModel from "@/models/employeModel";
 import { decrypt } from "@/lib/algo";
 import { fetchLiveOfficeClock } from "../timeOffServer/timeOffServer";
 import ClockRecordModel from "@/models/clockInModel";
+import { withAudit, recordAudit } from "@/lib/audit";
 
 // Assign or update today's site assignment
-export const assignEmployeesToSite = async (data) => {
+export const assignEmployeesToSite = withAudit(
+  "SiteAssignment.assign",
+  async (data) => {
   try {
     const { props } = await getServerSideProps();
     const { _id: adminId } = props?.session?.user;
@@ -25,37 +28,100 @@ export const assignEmployeesToSite = async (data) => {
       };
     }
 
-    const { siteId, employee: employeeIds, assignDate } = data;
+    const {
+      siteId,
+      employee: employeeIds,
+      assignDate,
+      moveExisting = false,
+    } = data;
+
+    if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
+      return { success: false, message: "Select at least one employee" };
+    }
 
     const today = new Date(assignDate).toISOString().split("T")[0];
     const date = new Date(`${today}T00:00:00.000Z`);
+    const uniqueEmployeeIds = [...new Set(employeeIds)];
 
-    // 🔒 Step 1: Check if any of these employees are already assigned on that date
+    // Step 1: Check existing same-date assignments for the selected employees
     const conflictingAssignments = await SiteAssignmentModel.find({
       assignDate: date,
-      "assignedEmployees.employeeId": { $in: employeeIds.map(createObjectId) },
+      "assignedEmployees.employeeId": {
+        $in: uniqueEmployeeIds.map(createObjectId),
+      },
     });
 
-    const alreadyAssignedEmployeeIds = new Set();
+    const assignedInOtherSite = new Set();
+    const assignedInSameSite = new Set();
+    const lockedForMove = new Set();
+    const employeesToMove = [];
 
     for (const doc of conflictingAssignments) {
       for (const ae of doc.assignedEmployees) {
-        if (employeeIds.includes(ae.employeeId.toString())) {
-          alreadyAssignedEmployeeIds.add(ae.employeeId.toString());
+        const eid = ae.employeeId.toString();
+        if (!uniqueEmployeeIds.includes(eid)) continue;
+
+        if (doc.siteId.toString() === siteId.toString()) {
+          assignedInSameSite.add(eid);
+          continue;
         }
+
+        assignedInOtherSite.add(eid);
+
+        if (ae.isLocked) {
+          lockedForMove.add(eid);
+          continue;
+        }
+
+        employeesToMove.push({
+          fromSiteId: doc.siteId,
+          employeeId: eid,
+        });
       }
     }
 
-    if (alreadyAssignedEmployeeIds.size > 0) {
+    if (assignedInOtherSite.size > 0 && !moveExisting) {
       return {
         success: false,
-        message: `Employees already assigned on ${today}: ${[
-          ...alreadyAssignedEmployeeIds,
+        message:
+          "Some employees are already assigned to another site on this date. Enable move option to reassign them.",
+      };
+    }
+
+    if (lockedForMove.size > 0) {
+      return {
+        success: false,
+        message: `Cannot move locked employees on ${today}: ${[
+          ...lockedForMove,
         ].join(", ")}`,
       };
     }
 
-    // 🔄 Step 2: Proceed to create or update the assignment
+    if (moveExisting && employeesToMove.length > 0) {
+      for (const moveItem of employeesToMove) {
+        await SiteAssignmentModel.updateOne(
+          {
+            siteId: moveItem.fromSiteId,
+            assignDate: date,
+          },
+          {
+            $pull: {
+              assignedEmployees: {
+                employeeId: createObjectId(moveItem.employeeId),
+              },
+            },
+          },
+        );
+
+        await SiteAssignmentModel.deleteOne({
+          siteId: moveItem.fromSiteId,
+          assignDate: date,
+          assignedEmployees: { $size: 0 },
+        });
+      }
+    }
+
+    // Step 2: Create/update target site assignment
     const existingAssignment = await SiteAssignmentModel.findOne({
       siteId,
       assignDate: date,
@@ -65,7 +131,7 @@ export const assignEmployeesToSite = async (data) => {
       const newAssignment = new SiteAssignmentModel({
         siteId,
         assignDate: date,
-        assignedEmployees: employeeIds.map((id) => ({
+        assignedEmployees: uniqueEmployeeIds.map((id) => ({
           employeeId: createObjectId(id),
           assignedBy: adminId,
         })),
@@ -74,18 +140,36 @@ export const assignEmployeesToSite = async (data) => {
       const res = await newAssignment.save();
       if (!res)
         return { success: false, message: "Problem while assigning site" };
+
+      recordAudit({
+        entityId: res._id,
+        after: res.toObject(),
+        description: `Assigned ${uniqueEmployeeIds.length} employee(s) to site ${siteId} on ${today}`,
+      });
+
+      if (moveExisting && employeesToMove.length > 0) {
+        return {
+          success: true,
+          message: "Site assigned and employee(s) moved successfully",
+        };
+      }
+
       return { success: true, message: "Site assigned successfully" };
     }
 
-    // Add only new employees to existing document
-    const newAssignments = employeeIds.filter(
-      (id) =>
-        !existingAssignment.assignedEmployees.some(
-          (ae) => ae.employeeId.toString() === id
-        )
+    const alreadyInTarget = new Set(
+      existingAssignment.assignedEmployees.map((ae) =>
+        ae.employeeId.toString(),
+      ),
     );
 
-    newAssignments.forEach((id) => {
+    const beforeAssignment = existingAssignment.toObject();
+
+    const employeesToAdd = uniqueEmployeeIds.filter(
+      (id) => !alreadyInTarget.has(id),
+    );
+
+    employeesToAdd.forEach((id) => {
       existingAssignment.assignedEmployees.push({
         employeeId: createObjectId(id),
         assignedBy: adminId,
@@ -95,12 +179,36 @@ export const assignEmployeesToSite = async (data) => {
     const res = await existingAssignment.save();
     if (!res)
       return { success: false, message: "Problem while assigning site" };
+
+    recordAudit({
+      entityId: existingAssignment._id,
+      before: beforeAssignment,
+      after: res.toObject(),
+      description: `Assigned ${employeesToAdd.length} employee(s) to site ${siteId} on ${today}`,
+    });
+
+    if (moveExisting && employeesToMove.length > 0) {
+      return {
+        success: true,
+        message: "Site assigned and employee(s) moved successfully",
+      };
+    }
+
+    if (employeesToAdd.length === 0 && assignedInSameSite.size > 0) {
+      return {
+        success: true,
+        message: "Selected employees are already assigned to this site",
+      };
+    }
+
     return { success: true, message: "Site assigned successfully" };
   } catch (error) {
     console.log(error);
     return { success: false, message: "Something went wrong" };
   }
-};
+  },
+  { module: "SiteAssignment" },
+);
 
 export const getTodayAssignedEmployeesBySite = async (siteId) => {
   const today = new Date().setHours(0, 0, 0, 0);
@@ -535,17 +643,203 @@ export async function fetchAssignedWithClocks({
           { $limit: pageSize },
         ],
         totalCount: [...basePipeline, { $count: "count" }],
+        summary: [
+          ...basePipeline,
+          {
+            $group: {
+              _id: null,
+              totalEmployees: { $sum: 1 },
+              presentToday: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockIn", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        {
+                          $not: {
+                            $regexMatch: {
+                              input: { $ifNull: ["$clockOut", ""] },
+                              regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              onBreak: {
+                $sum: {
+                  $cond: [
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: "$breaks",
+                              as: "b",
+                              cond: {
+                                $and: [
+                                  {
+                                    $regexMatch: {
+                                      input: { $ifNull: ["$$b.breakIn", ""] },
+                                      regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                    },
+                                  },
+                                  {
+                                    $not: {
+                                      $regexMatch: {
+                                        input: {
+                                          $ifNull: ["$$b.breakOut", ""],
+                                        },
+                                        regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                      },
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              clockedOut: {
+                $sum: {
+                  $cond: [
+                    {
+                      $regexMatch: {
+                        input: { $ifNull: ["$clockOut", ""] },
+                        regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                      },
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              totalWorkedMinutes: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockIn", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockOut", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        { $ne: ["$date", null] },
+                      ],
+                    },
+                    {
+                      $divide: [
+                        {
+                          $subtract: [
+                            {
+                              $dateFromString: {
+                                dateString: {
+                                  $concat: [
+                                    {
+                                      $dateToString: {
+                                        date: "$date",
+                                        format: "%Y-%m-%d",
+                                      },
+                                    },
+                                    "T",
+                                    "$clockOut",
+                                    ":00",
+                                  ],
+                                },
+                              },
+                            },
+                            {
+                              $dateFromString: {
+                                dateString: {
+                                  $concat: [
+                                    {
+                                      $dateToString: {
+                                        date: "$date",
+                                        format: "%Y-%m-%d",
+                                      },
+                                    },
+                                    "T",
+                                    "$clockIn",
+                                    ":00",
+                                  ],
+                                },
+                              },
+                            },
+                          ],
+                        },
+                        60000,
+                      ],
+                    },
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalEmployees: 1,
+              presentToday: 1,
+              onBreak: 1,
+              clockedOut: 1,
+              averageMinutes: {
+                $cond: [
+                  { $gt: ["$clockedOut", 0] },
+                  { $divide: ["$totalWorkedMinutes", "$clockedOut"] },
+                  0,
+                ],
+              },
+            },
+          },
+        ],
       },
     },
     {
       $addFields: {
         total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
+        summary: {
+          $ifNull: [
+            { $arrayElemAt: ["$summary", 0] },
+            {
+              totalEmployees: 0,
+              presentToday: 0,
+              onBreak: 0,
+              clockedOut: 0,
+              averageMinutes: 0,
+            },
+          ],
+        },
       },
     },
     {
       $project: {
         data: 1,
         total: 1,
+        summary: 1,
       },
     },
   ];
@@ -1793,17 +2087,203 @@ export async function fetchAssignedWithClocksNew({
           { $limit: pageSize },
         ],
         totalCount: [...basePipeline, { $count: "count" }],
+        summary: [
+          ...basePipeline,
+          {
+            $group: {
+              _id: null,
+              totalEmployees: { $sum: 1 },
+              presentToday: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockIn", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        {
+                          $not: {
+                            $regexMatch: {
+                              input: { $ifNull: ["$clockOut", ""] },
+                              regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                            },
+                          },
+                        },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              onBreak: {
+                $sum: {
+                  $cond: [
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: "$breaks",
+                              as: "b",
+                              cond: {
+                                $and: [
+                                  {
+                                    $regexMatch: {
+                                      input: { $ifNull: ["$$b.breakIn", ""] },
+                                      regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                    },
+                                  },
+                                  {
+                                    $not: {
+                                      $regexMatch: {
+                                        input: {
+                                          $ifNull: ["$$b.breakOut", ""],
+                                        },
+                                        regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                                      },
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              clockedOut: {
+                $sum: {
+                  $cond: [
+                    {
+                      $regexMatch: {
+                        input: { $ifNull: ["$clockOut", ""] },
+                        regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                      },
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              totalWorkedMinutes: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockIn", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        {
+                          $regexMatch: {
+                            input: { $ifNull: ["$clockOut", ""] },
+                            regex: "^([01]\\d|2[0-3]):([0-5]\\d)$",
+                          },
+                        },
+                        { $ne: ["$date", null] },
+                      ],
+                    },
+                    {
+                      $divide: [
+                        {
+                          $subtract: [
+                            {
+                              $dateFromString: {
+                                dateString: {
+                                  $concat: [
+                                    {
+                                      $dateToString: {
+                                        date: "$date",
+                                        format: "%Y-%m-%d",
+                                      },
+                                    },
+                                    "T",
+                                    "$clockOut",
+                                    ":00",
+                                  ],
+                                },
+                              },
+                            },
+                            {
+                              $dateFromString: {
+                                dateString: {
+                                  $concat: [
+                                    {
+                                      $dateToString: {
+                                        date: "$date",
+                                        format: "%Y-%m-%d",
+                                      },
+                                    },
+                                    "T",
+                                    "$clockIn",
+                                    ":00",
+                                  ],
+                                },
+                              },
+                            },
+                          ],
+                        },
+                        60000,
+                      ],
+                    },
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalEmployees: 1,
+              presentToday: 1,
+              onBreak: 1,
+              clockedOut: 1,
+              averageMinutes: {
+                $cond: [
+                  { $gt: ["$clockedOut", 0] },
+                  { $divide: ["$totalWorkedMinutes", "$clockedOut"] },
+                  0,
+                ],
+              },
+            },
+          },
+        ],
       },
     },
     {
       $addFields: {
         total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
+        summary: {
+          $ifNull: [
+            { $arrayElemAt: ["$summary", 0] },
+            {
+              totalEmployees: 0,
+              presentToday: 0,
+              onBreak: 0,
+              clockedOut: 0,
+              averageMinutes: 0,
+            },
+          ],
+        },
       },
     },
     {
       $project: {
         data: 1,
         total: 1,
+        summary: 1,
       },
     },
   ];
@@ -1814,6 +2294,13 @@ export async function fetchAssignedWithClocksNew({
     success: true,
     data: JSON.stringify(result?.data || []),
     totalCount: result?.total || 0,
+    summary: result?.summary || {
+      totalEmployees: 0,
+      presentToday: 0,
+      onBreak: 0,
+      clockedOut: 0,
+      averageMinutes: 0,
+    },
   };
 }
 
@@ -1917,7 +2404,7 @@ export async function storeSiteEmployeeClockTime(decode) {
           //     source: "scanner",
           //   },
           // },
-        }
+        },
       );
       return { success: true, message: "Break In", employeeId };
     }
@@ -1948,7 +2435,7 @@ export async function storeSiteEmployeeClockTime(decode) {
           //     source: "scanner",
           //   },
           // },
-        }
+        },
       );
       return { success: true, message: "Break Out", employeeId };
     }
@@ -1974,14 +2461,14 @@ export async function storeSiteEmployeeClockTime(decode) {
           //     source: "scanner",
           //   },
           // },
-        }
+        },
       );
 
       const autoFlag =
         !existingAttendance.breakIn || !existingAttendance.breakOut;
       await SiteClockModel.updateOne(
         { employeeId: employeeOid, date: date },
-        { $set: { clockInStatus: autoFlag } }
+        { $set: { clockInStatus: autoFlag } },
       );
 
       return {
@@ -2032,7 +2519,7 @@ export async function getSiteEmployeeTodayAttendanceData(employeeId) {
   } catch (error) {
     console.error(
       `Error fetching today's attendance for employee ${employeeId}:`,
-      error
+      error,
     );
     return { success: false, message: "Something went wrong" };
   }
@@ -2087,7 +2574,6 @@ export async function fetchFilterClockRecordData({
   query = null,
   paymentType = null,
 }) {
-  await connect();
   await connect();
 
   const today = normalizeDateToUTC(new Date());

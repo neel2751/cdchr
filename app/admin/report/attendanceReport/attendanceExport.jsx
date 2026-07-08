@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
 import { format } from "date-fns";
 import React, { useMemo } from "react";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
 export default function AttendanceExport({ rawData }) {
   let grandShiftMinutes = 0;
@@ -91,6 +92,12 @@ export default function AttendanceExport({ rawData }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url); // Clean up memory
+
+    logCsvExport({
+      source: "attendanceReport",
+      label: "Attendance report",
+      rowCount: data.length,
+    }).catch(() => {});
   };
 
   return (

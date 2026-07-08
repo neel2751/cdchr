@@ -22,16 +22,17 @@ export default function VerifyTwoFactor() {
     }
   }, [session, status, router]);
 
-  const onSuccess = () => {
-    update({
-      twoFactorVerified: true,
-    });
+  const onSuccess = async () => {
+    // Wait for the session/JWT cookie to update before navigating, then do a
+    // full-page navigation so middleware re-evaluates with the fresh token
+    // (a client-side router.push can run before the cookie propagates, which is
+    // why it previously needed a manual refresh).
+    await update({ twoFactorVerified: true });
     setOpen(false);
-    session?.user?.role === "siteEmployee"
-      ? router.push("/employee")
-      : router.push("/admin/dashboard");
-    router.push("/admin/dashboard");
     toast.success("Two-factor authentication verified");
+    const dest =
+      session?.user?.role === "siteEmployee" ? "/employee" : "/admin/dashboard";
+    window.location.assign(dest);
   };
 
   return (

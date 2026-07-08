@@ -126,27 +126,62 @@ export const MENU = [
     icon: "Building2",
   },
 
-  {
-    name: "Visitor Management",
-    path: "/admin/leads",
-    role: ["superAdmin", "admin"],
-    icon: "SquareChartGantt",
-  },
+  // {
+  //   name: "Visitor Management",
+  //   path: "/admin/leads",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "SquareChartGantt",
+  // },
 
-  {
-    name: "QR Code Management",
-    path: "/admin/qr",
-    role: ["superAdmin", "admin"],
-    icon: "ScanQrCode",
-  },
+  // {
+  //   name: "QR Code Management",
+  //   path: "/admin/qr",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "ScanQrCode",
+  // },
 
+  // {
+  //   name: "Form Template",
+  //   path: "/admin/templates",
+  //   role: ["superAdmin", "admin"],
+  //   icon: "FileText",
+  // },
   {
-    name: "Form Template",
-    path: "/admin/templates",
+    name: "Audit Logs",
+    path: "/admin/auditLogs",
+    role: ["superAdmin"],
+    icon: "ScrollText",
+  },
+  {
+    name: "Media Management",
+    path: "/admin/document",
+    role: ["superAdmin"],
+    icon: "FolderOpen",
+  },
+  // Kept at the bottom: former/inactive staff listings. Access is derived from
+  // the matching active page (see DERIVED_ACCESS) so admins who can see the
+  // active list automatically get the "previous" list without a separate grant.
+  {
+    name: "Previous Office Staff",
+    path: "/admin/previousOfficeEmployee",
     role: ["superAdmin", "admin"],
-    icon: "FileText",
+    icon: "Archive",
+  },
+  {
+    name: "Previous Employees",
+    path: "/admin/previousEmployee",
+    role: ["superAdmin", "admin"],
+    icon: "UserX",
   },
 ];
+
+// Pages whose access mirrors a parent page's permission. An admin who can access
+// the parent path automatically gets the derived path (used by the sidebar
+// builder and the middleware route guard).
+export const DERIVED_ACCESS = {
+  "/admin/previousOfficeEmployee": "/admin/officeEmployee",
+  "/admin/previousEmployee": "/admin/employee",
+};
 
 export const COMMONMENUITEMS = [
   {
@@ -166,6 +201,24 @@ export const COMMONMENUITEMS = [
     path: "/admin/siteAssign",
     role: ["superAdmin", "admin", "user"],
     icon: "RadioIcon",
+  },
+  {
+    name: "My Attendance",
+    path: "/admin/my-attendance",
+    role: ["user"],
+    icon: "CalendarClock",
+  },
+  {
+    name: "My Weekly Shifts",
+    path: "/admin/my-weekly-shifts",
+    role: ["user"],
+    icon: "CalendarDays",
+  },
+  {
+    name: "My Leaves",
+    path: "/admin/my-leaves",
+    role: ["user"],
+    icon: "Stamp",
   },
 ];
 

@@ -76,6 +76,7 @@ const SMTPConfig = ({ queryKey }) => {
         { value: "outlook.office365.com", label: "Microsoft" },
         { value: "smtp.mail.yahoo.com", label: "Yahoo" },
         { value: "smtp.zoho.eu", label: "Zoho" },
+        { value: "smtppro.zoho.eu", label: "Zoho Pro" },
         { value: "other", label: "Custom SMTP" },
       ],
       placeholder: "Enter SMTP host",
@@ -139,7 +140,7 @@ const SMTPConfig = ({ queryKey }) => {
       // alert dialog like if isTest is not true are you sure you don't want to test the connection
       if (!data.isTest) {
         const confirmSave = confirm(
-          "Are you sure you want to save without testing the connection?"
+          "Are you sure you want to save without testing the connection?",
         );
         if (!confirmSave) return;
 

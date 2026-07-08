@@ -10,6 +10,9 @@ import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
 import { decrypt } from "@/lib/algo";
 import SiteClockModel from "@/models/siteClockModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
+import { withAudit, recordAudit } from "@/lib/audit";
+import { logVisaExpiryChange } from "../visaServer/visaAudit";
+import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -26,6 +29,29 @@ export const getAllEmployees = async (filterData) => {
   if (immigrationType) {
     query.immigrationType = immigrationType;
   }
+
+  // Account status filter. The default view shows only active employees;
+  // "inactive" shows deactivated accounts and "all" reveals everyone.
+  // Deleted records are always excluded (query.delete = false above).
+  const accountStatus = filterData?.filter?.status;
+  if (accountStatus === "inactive") query.isActive = false;
+  else if (accountStatus !== "all") query.isActive = true;
+
+  // Visa status filter on eVisaExp. Requiring a date excludes British/no-visa.
+  const visaStatus = filterData?.filter?.visaStatus;
+  if (visaStatus && visaStatus !== "all") {
+    const now = new Date();
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 90);
+    if (visaStatus === "expired") {
+      query.eVisaExp = { $ne: null, $lt: now };
+    } else if (visaStatus === "expiring") {
+      query.eVisaExp = { $ne: null, $gte: now, $lte: horizon };
+    } else if (visaStatus === "valid") {
+      query.eVisaExp = { $ne: null, $gt: horizon };
+    }
+  }
+
   if (sanitizedSearch) {
     query.$or = [
       { firstName: { $regex: sanitizedSearch, $options: "i" } },
@@ -52,11 +78,59 @@ export const getAllEmployees = async (filterData) => {
       {
         $limit: validLimit,
       },
+      {
+        $lookup: {
+          from: "auditlogs",
+          let: { empId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$entityId", "$$empId"] },
+                    { $eq: ["$module", "Visa"] },
+                    { $eq: ["$action", "Visa.reminderSent"] },
+                    { $eq: ["$status", "success"] },
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                milestone: "$metadata.milestone",
+                visaEndDate: "$metadata.visaEndDate",
+                createdAt: 1,
+              },
+            },
+          ],
+          as: "visaReminders",
+        },
+      },
+      // Never expose the password hash to the client.
+      {
+        $unset: "password",
+      },
     ];
 
     const employees = await EmployeModel.aggregate(pipeline);
     // RangeError handling  for empty array
     if (!filterData) return { success: false, message: "No employees found" };
+
+    // Annotate each employee with current account-lock status so admins can see
+    // which accounts are locked out by repeated failed logins.
+    try {
+      const emails = employees.map((r) => r?.email).filter(Boolean);
+      const lockMap = await getLockedEmails(emails);
+      for (const r of employees) {
+        const key = (r?.email || "").trim().toLowerCase();
+        r.isLocked = Boolean(lockMap[key]);
+        r.lockedUntil = lockMap[key] || null;
+      }
+    } catch (e) {
+      console.log("lock-status annotation failed:", e?.message);
+    }
+
     const data = {
       success: true,
       totalCount: totalEmployees,
@@ -71,128 +145,162 @@ export const getAllEmployees = async (filterData) => {
   }
 };
 
-export const handleEmploye = async (data, isChecked, id) => {
-  if (!data) return { status: false, message: "Please Provide Informations" };
-  // if (!images) return { status: true, message: "success" };
-  const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
-  const Payrate = payRateValidation.test(String(Number(data?.payRate)));
-  if (Payrate === false) return { status: false, message: "Invalid Pay Rate" };
-  try {
-    const employeType = data?.paymentType === "Monthly" ? "Payroll" : "CIS";
-    await connect(); //connect to the database
-    const {
-      address,
-      streetAddress,
-      city,
-      zipCode,
-      country,
-      accountName,
-      accountNumber,
-      sortCode,
-      payRate,
-    } = data;
-    const eAddress = {
-      address: address || "",
-      streetAddress: streetAddress || "",
-      city: city || "",
-      zipCode: zipCode || "",
-      country: country || "",
-    };
-    const bankDetail = {
-      accountName: accountName || "",
-      accountNumber: accountNumber || "",
-      sortCode: sortCode || "",
-    };
-    if (id) {
-      // We have to check email and phone  before updating the Employee's information because they are required fields in MongoDB
-      const isExists = await EmployePhoneAndEmailExists(
-        id,
-        data.phone,
-        data.email
-      );
-      if (!isExists.status)
-        return { success: isExists.status, message: isExists.message };
-      let res = await EmployeModel.findByIdAndUpdate(
-        id,
-        {
-          $set: {
-            ...data,
-            eAddress: eAddress,
-            bankDetail: bankDetail,
-            employeType,
+export const handleEmploye = withAudit(
+  "Employee.upsert",
+  async (data, isChecked, id) => {
+    if (!data) return { status: false, message: "Please Provide Informations" };
+    // if (!images) return { status: true, message: "success" };
+    const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
+    const Payrate = payRateValidation.test(String(Number(data?.payRate)));
+    if (Payrate === false)
+      return { status: false, message: "Invalid Pay Rate" };
+    try {
+      const employeType = data?.paymentType === "Monthly" ? "Payroll" : "CIS";
+      await connect(); //connect to the database
+      const {
+        address,
+        streetAddress,
+        city,
+        zipCode,
+        country,
+        accountName,
+        accountNumber,
+        sortCode,
+        payRate,
+      } = data;
+      const eAddress = {
+        address: address || "",
+        streetAddress: streetAddress || "",
+        city: city || "",
+        zipCode: zipCode || "",
+        country: country || "",
+      };
+      const bankDetail = {
+        accountName: accountName || "",
+        accountNumber: accountNumber || "",
+        sortCode: sortCode || "",
+      };
+      if (id) {
+        // We have to check email and phone  before updating the Employee's information because they are required fields in MongoDB
+        const isExists = await EmployePhoneAndEmailExists(
+          id,
+          data.phone,
+          data.email,
+        );
+        if (!isExists.status)
+          return { success: isExists.status, message: isExists.message };
+        const beforeEmp = await EmployeModel.findById(id).lean();
+        let res = await EmployeModel.findByIdAndUpdate(
+          id,
+          {
+            $set: {
+              ...data,
+              eAddress: eAddress,
+              bankDetail: bankDetail,
+              employeType,
+            },
           },
-        },
-        { new: true }
-      );
-      if (!res) return { success: false, message: "Somthing Went Wrong..." };
-      if (isChecked) {
-        const attendanceRecords = await AttendanceModel.find({
-          "employeAttendance.employeeId": id,
+          { new: true },
+        );
+        if (!res) return { success: false, message: "Somthing Went Wrong..." };
+        recordAudit({
+          entityId: id,
+          before: beforeEmp,
+          after: res.toObject(),
+          description:
+            `Updated field employee ${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
         });
-        for (const record of attendanceRecords) {
-          for (const attendee of record.employeAttendance) {
-            if (attendee.employeeId.toString() === id) {
-              attendee.aPayRate = payRate; // Update aPayRate
-              attendee.totalPay = attendee.totalHours * payRate;
+        await logVisaExpiryChange({
+          before: beforeEmp?.eVisaExp,
+          after: res?.eVisaExp,
+          employeeType: "Employe",
+          entityId: id,
+          name: `${res?.firstName || ""} ${res?.lastName || ""}`.trim(),
+        });
+        if (isChecked) {
+          const attendanceRecords = await AttendanceModel.find({
+            "employeAttendance.employeeId": id,
+          });
+          for (const record of attendanceRecords) {
+            for (const attendee of record.employeAttendance) {
+              if (attendee.employeeId.toString() === id) {
+                attendee.aPayRate = payRate; // Update aPayRate
+                attendee.totalPay = attendee.totalHours * payRate;
+              }
             }
+            // Save the updated attendance record
+            await record.save();
           }
-          // Save the updated attendance record
-          await record.save();
         }
-      }
-      return { success: true, message: "Employee Record Update..." };
-    } else {
-      //create new employee
-      const isExists = await EmployePhoneAndEmailExists(
-        id,
-        data.phone,
-        data.email
-      );
-      const password = await GenerateHashPassword("Cdc@1234");
-      if (!isExists.status) return isExists;
-      const addEmploye = await EmployeModel.create({
-        ...data,
-        eAddress: eAddress,
-        bankDetail: bankDetail,
-        employeType,
-        password,
-      }); // create new employee
-      if (!addEmploye)
-        return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
-      if (addEmploye) {
-        const { firstName, lastName, email } = addEmploye; // get the employee id
-        const type = "HR";
-        const response = await getSMTPForFeature(type);
-        if (response?.success) {
-          const emailData = JSON.parse(response?.data);
-          // register email we have to send the welcome mail with email and password with site link
-          const html = `<p>Dear ${firstName} ${lastName},</p>
+        return { success: true, message: "Employee Record Update..." };
+      } else {
+        //create new employee
+        const isExists = await EmployePhoneAndEmailExists(
+          id,
+          data.phone,
+          data.email,
+        );
+
+        const password = await GenerateHashPassword("Interior@1234");
+        if (!isExists.status) return isExists;
+        const addEmploye = await EmployeModel.create({
+          ...data,
+          eAddress: eAddress,
+          bankDetail: bankDetail,
+          employeType,
+          password,
+        }); // create new employee
+        if (!addEmploye)
+          return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
+        recordAudit({
+          entityId: addEmploye._id,
+          after: addEmploye.toObject(),
+          description: `Created field employee ${addEmploye.firstName} ${addEmploye.lastName}`,
+        });
+        if (addEmploye) {
+          const { firstName, lastName, email } = addEmploye; // get the employee id
+          // Previous / historical employees are entered with a visa expiry that
+          // is already in the past — we are only recording their data, so we
+          // must NOT email them login credentials.
+          const visaExp = data?.eVisaExp ? new Date(data.eVisaExp) : null;
+          const isPreviousEmployee =
+            visaExp && !Number.isNaN(visaExp.getTime()) && visaExp < new Date();
+          if (!isPreviousEmployee) {
+            const type = "HR";
+            const response = await getSMTPForFeature(type);
+            if (response?.success) {
+              const emailData = JSON.parse(response?.data);
+              // register email we have to send the welcome mail with email and password with site link
+              const html = `<p>Dear ${firstName} ${lastName},</p>
           <p>Welcome to our team! We are excited to have you on board.</p>
           <p>Your login details are as follows:</p>
           <p>Email: ${email}</p>
-          <p>Password: Cdc@1234</p>
+          <p>Password: ${password}</p>
           <p>Please log in to your account using the following link:</p>
-          <p><a href="https://hr.cdc.construction/employee">Click here to login</a></p>
+          <p><a href="${process.env.NEXT_PUBLIC_WEB_URL}">Click here to login</a></p>
           <p>Thank you for joining us!</p>
           <p>Best regards,</p>
           <p>Hr Management</p>`;
-          const subject = "Welcome to Our Team";
-          const smtp = { ...emailData, toEmail: email, html, subject };
-          await userRegisterEmail(smtp);
-        } else {
-          const data = {
-            success: true,
-            message: `Employee added successfully`,
-          };
-          return data;
+              const subject = "Welcome to Our Team";
+              const smtp = { ...emailData, toEmail: email, html, subject };
+              await userRegisterEmail(smtp);
+            } else {
+              const data = {
+                success: true,
+                message: `Employee added successfully`,
+              };
+              return data;
+            }
+          }
         }
       }
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
     }
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: "Somthing Went Wrong..." }; // if the employee is not created
-  }
-};
+  },
+  { module: "Employee" },
+);
 
 const EmployePhoneAndEmailExists = async (id, phone, email) => {
   try {
@@ -255,46 +363,70 @@ const EmployePhoneAndEmailExists = async (id, phone, email) => {
   }
 };
 
-export const employeeStatus = async (data) => {
-  if (!data) return { success: false, message: "Not found" };
-  try {
-    const id = data?.id;
-    const isActive = !data?.status;
-    const statusDate = data.status ? new Date() : null;
-    await EmployeModel.updateOne(
-      { _id: id },
-      { $set: { isActive, statusDate } }
-    );
-    return {
-      success: true,
-      message: "The Status of the Assign Project has been Updated",
-    };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: `Error Occurred in server problem` };
-  }
-};
+export const employeeStatus = withAudit(
+  "Employee.status",
+  async (data) => {
+    if (!data) return { success: false, message: "Not found" };
+    try {
+      const id = data?.id;
+      const isActive = !data?.status;
+      const statusDate = data.status ? new Date() : null;
+      const before = await EmployeModel.findById(id).lean();
+      await EmployeModel.updateOne(
+        { _id: id },
+        { $set: { isActive, statusDate } },
+      );
+      const after = await EmployeModel.findById(id).lean();
+      recordAudit({
+        entityId: id,
+        before,
+        after,
+        description: `${isActive ? "Activated" : "Deactivated"} field employee ${id}`,
+      });
+      return {
+        success: true,
+        message: "The Status of the Assign Project has been Updated",
+      };
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: `Error Occurred in server problem` };
+    }
+  },
+  { module: "Employee" },
+);
 
-export const employeeDelete = async (data) => {
-  if (!data) return { success: false, message: "Not found" };
-  try {
-    const id = data?.id;
-    const isActive = false;
-    const isDelete = true;
-    const statusDate = new Date();
-    await EmployeModel.updateOne(
-      { _id: id },
-      { $set: { isActive, delete: isDelete, statusDate } }
-    );
-    return {
-      success: true,
-      message: "The  Status of the Assign Project has been Updated",
-    };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: `Error Occurred in server problem` };
-  }
-};
+export const employeeDelete = withAudit(
+  "Employee.delete",
+  async (data) => {
+    if (!data) return { success: false, message: "Not found" };
+    try {
+      const id = data?.id;
+      const isActive = false;
+      const isDelete = true;
+      const statusDate = new Date();
+      const before = await EmployeModel.findById(id).lean();
+      await EmployeModel.updateOne(
+        { _id: id },
+        { $set: { isActive, delete: isDelete, statusDate } },
+      );
+      const after = await EmployeModel.findById(id).lean();
+      recordAudit({
+        entityId: id,
+        before,
+        after,
+        description: `Soft-deleted field employee ${id}`,
+      });
+      return {
+        success: true,
+        message: "The  Status of the Assign Project has been Updated",
+      };
+    } catch (error) {
+      console.log(error);
+      return { success: false, message: `Error Occurred in server problem` };
+    }
+  },
+  { module: "Employee" },
+);
 
 export async function changeSiteEmployeePassword(data) {
   if (!data) return { success: false, message: "No Data Provided" };
@@ -317,7 +449,7 @@ export async function changeSiteEmployeePassword(data) {
     // if the user is not superAdmin or admin, check for current password
     const isMatch = await isMatchedPassword(
       currentPassword,
-      updatedEmp.password
+      updatedEmp.password,
     );
     if (!isMatch) {
       return { success: false, message: "Current Password is Incorrect" };
@@ -337,6 +469,79 @@ export async function changeSiteEmployeePassword(data) {
     return { success: false, message: "Error Changing Password" };
   }
 }
+
+/**
+ * Super-admin password reset for a site employee. Records a full audit entry
+ * (who reset it, for whom, the reason, and when) and clears any active
+ * failed-login lockout for the account.
+ */
+export const resetSiteEmployeePassword = withAudit(
+  "Password.reset",
+  async ({ employeeId, newPassword, reason } = {}) => {
+    const { props } = await getServerSideProps();
+    const actor = props?.session?.user;
+
+    if (actor?.role !== "superAdmin") {
+      return {
+        success: false,
+        message: "Only a super admin can reset passwords",
+      };
+    }
+    if (!employeeId) return { success: false, message: "Employee is required" };
+    if (!newPassword || String(newPassword).length < 8) {
+      return {
+        success: false,
+        message: "New password must be at least 8 characters",
+      };
+    }
+    if (!reason || !String(reason).trim()) {
+      return { success: false, message: "A reason for the reset is required" };
+    }
+
+    try {
+      await connect();
+      const employee = await EmployeModel.findById(employeeId).exec();
+      if (!employee) return { success: false, message: "Employee not found" };
+
+      const hashed = await GenerateHashPassword(String(newPassword));
+      if (!hashed) {
+        return { success: false, message: "Failed to secure the new password" };
+      }
+      employee.password = hashed;
+      await employee.save();
+
+      await clearLockByEmail(employee.email);
+
+      const targetName =
+        `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
+        "employee";
+      recordAudit({
+        entityId: employeeId,
+        module: "Account",
+        description: `Password reset by ${
+          actor?.name || actor?.email
+        } for ${targetName} <${employee.email}>. Reason: ${String(
+          reason,
+        ).trim()}`,
+        after: {
+          target: {
+            id: String(employeeId),
+            name: targetName,
+            email: employee.email,
+          },
+          reason: String(reason).trim(),
+          lockCleared: true,
+        },
+      });
+
+      return { success: true, message: "Password reset successfully" };
+    } catch (error) {
+      console.log("Error in resetSiteEmployeePassword:", error);
+      return { success: false, message: "Error resetting password" };
+    }
+  },
+  { module: "Account" },
+);
 
 export async function getEmployeeWiseData(params) {
   try {

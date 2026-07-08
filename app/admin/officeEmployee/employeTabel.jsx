@@ -8,21 +8,48 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { format, formatDistanceStrict, isPast } from "date-fns";
-import { Edit, Eye, Trash2 } from "lucide-react";
+import { format } from "date-fns";
+import {
+  Edit,
+  Eye,
+  Trash2,
+  Mail,
+  MailCheck,
+  KeyRound,
+  Lock,
+  ShieldAlert,
+} from "lucide-react";
 import React from "react";
+import { useSession } from "next-auth/react";
 import { useCommonContext } from "@/context/commonContext";
 import { TableStatus } from "@/components/tableStatus/status";
+import { Badge } from "@/components/ui/badge";
 import EmployeeSheet from "./employeeSheet";
 import Link from "next/link";
 import { encrypt } from "@/lib/algo";
+import {
+  daysUntil,
+  getMilestone,
+  milestoneLabel,
+  formatVisaRemaining,
+  getVisaUrgencyLevel,
+  VISA_URGENCY_TEXT,
+} from "@/lib/visaMilestones";
 
 const EmployeTabel = () => {
   const {
     officeEmployeeData: data,
     handleEdit,
     handleAlert,
+    onSendVisaReminder,
+    isSendingReminder,
+    onResetPassword,
+    onLockdown,
   } = useCommonContext();
+
+  const { data: session } = useSession();
+  const isSuperAdmin = session?.user?.role === "superAdmin";
+  const currentUserId = session?.user?._id;
 
   return (
     <>
@@ -49,7 +76,31 @@ const EmployeTabel = () => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data?.map((item, index) => (
+          {data?.map((item, index) => {
+            const visaIso = item?.visaEndDate
+              ? new Date(item.visaEndDate).toISOString()
+              : null;
+            const milestone =
+              item?.immigrationType !== "British" && item?.visaEndDate
+                ? getMilestone(daysUntil(item?.visaEndDate))
+                : null;
+            const visaUrgency =
+              item?.immigrationType !== "British"
+                ? getVisaUrgencyLevel(item?.visaEndDate)
+                : null;
+            const visaText = visaUrgency
+              ? VISA_URGENCY_TEXT[visaUrgency]
+              : "text-neutral-700";
+            const visaRemaining =
+              item?.immigrationType !== "British"
+                ? formatVisaRemaining(item?.visaEndDate)
+                : null;
+            const sentMilestones = (item?.visaReminders || [])
+              .filter((r) => r.visaEndDate === visaIso)
+              .map((r) => r.milestone);
+            const alreadySent =
+              milestone && sentMilestones.includes(milestone);
+            return (
             <TableRow key={index}>
               <TableCell className="cursor-pointer">
                 <EmployeeSheet item={item} />
@@ -57,22 +108,42 @@ const EmployeTabel = () => {
               <TableCell>{item?.email}</TableCell>
               <TableCell>{item?.phoneNumber}</TableCell>
               <TableCell>
-                {!item?.isSuperAdmin ? (
-                  <div
-                    onClick={() =>
-                      handleAlert(
-                        item?._id,
-                        "Update",
-                        item?.isActive,
-                        "isActive",
-                      )
-                    }
-                  >
+                <div className="flex items-center gap-2">
+                  {!item?.isSuperAdmin ||
+                  (isSuperAdmin &&
+                    String(item?._id) !== String(currentUserId)) ? (
+                    <div
+                      onClick={() =>
+                        handleAlert(
+                          item?._id,
+                          "Update",
+                          item?.isActive,
+                          "isActive",
+                        )
+                      }
+                    >
+                      <TableStatus isActive={item?.isActive} />
+                    </div>
+                  ) : (
                     <TableStatus isActive={item?.isActive} />
-                  </div>
-                ) : (
-                  <TableStatus isActive={item?.isActive} />
-                )}
+                  )}
+                  {item?.isLocked && (
+                    <Badge
+                      variant="destructive"
+                      className="gap-1"
+                      title={
+                        item?.lockedUntil
+                          ? `Locked until ${format(
+                              new Date(item.lockedUntil),
+                              "PPp",
+                            )}`
+                          : "Account locked by failed logins"
+                      }
+                    >
+                      <Lock className="h-3 w-3" /> Locked
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
                 <div
@@ -101,32 +172,42 @@ const EmployeTabel = () => {
                   : item?.visaStartDate &&
                     format(new Date(item?.visaStartDate), "PPP")}
               </TableCell>
-              <TableCell
-                className={`${
-                  isPast(new Date(item?.visaEndDate) || new Date(), new Date())
-                    ? "text-rose-600"
-                    : "text-neutral-700"
-                }`}
-              >
+              <TableCell className={visaText}>
                 {item?.immigrationType === "British"
                   ? "-"
                   : item?.visaEndDate &&
                     format(new Date(item.visaEndDate), "PPP")}
               </TableCell>
-              <TableCell>
-                {item?.immigrationType === "British"
+              <TableCell className={visaText}>
+                {item?.immigrationType === "British" || !visaRemaining
                   ? "-"
-                  : item?.visaEndDate && item?.visaEndDate
-                    ? isPast(new Date(item?.visaEndDate))
-                      ? "Visa expired"
-                      : `${formatDistanceStrict(
-                          new Date(),
-                          new Date(item.visaEndDate),
-                        )}`
-                    : "-"}
+                  : visaRemaining === "Expired"
+                    ? "Visa expired"
+                    : visaRemaining}
               </TableCell>
               <TableCell>
                 <div className="flex gap-2">
+                  {milestone && (
+                    <Button
+                      onClick={() => onSendVisaReminder?.(item)}
+                      disabled={isSendingReminder}
+                      variant="outline"
+                      size="icon"
+                      title={
+                        alreadySent
+                          ? `Reminder already sent (${milestoneLabel(
+                              milestone,
+                            )}) — click to resend`
+                          : `Send visa reminder (${milestoneLabel(milestone)})`
+                      }
+                    >
+                      {alreadySent ? (
+                        <MailCheck className="text-green-600" />
+                      ) : (
+                        <Mail className="text-amber-600" />
+                      )}
+                    </Button>
+                  )}
                   <Button
                     size={"icon"}
                     variant={"outline"}
@@ -148,6 +229,30 @@ const EmployeTabel = () => {
                   >
                     <Edit className="text-indigo-600" />
                   </Button>
+                  {isSuperAdmin && !item?.isSuperAdmin && (
+                    <Button
+                      onClick={() => onResetPassword?.(item)}
+                      variant="outline"
+                      size="icon"
+                      title="Reset password"
+                      className={item?.isLocked ? "border-rose-300" : ""}
+                    >
+                      <KeyRound className="text-amber-600" />
+                    </Button>
+                  )}
+                  {isSuperAdmin &&
+                    String(item?._id) !== String(currentUserId) &&
+                    item?.isActive && (
+                      <Button
+                        onClick={() => onLockdown?.(item)}
+                        variant="outline"
+                        size="icon"
+                        title="Emergency lockdown (deactivate & end sessions)"
+                        className="border-rose-300"
+                      >
+                        <ShieldAlert className="text-rose-600" />
+                      </Button>
+                    )}
                   {!item?.isSuperAdmin && (
                     <Button
                       onClick={() =>
@@ -162,7 +267,8 @@ const EmployeTabel = () => {
                 </div>
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </>

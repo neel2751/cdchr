@@ -1,6 +1,6 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import { MENU, COMMONMENUITEMS } from "./data/menu";
+import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
 
 async function checkRoleMiddleware(req) {
   const requestedPath = req?.nextUrl?.pathname;
@@ -8,6 +8,7 @@ async function checkRoleMiddleware(req) {
   const employeeId = token?.id;
   const userRole = token?.role;
   const requires2FA = token?.requiresTwoFactor === true;
+  const mustSetup2FA = token?.mustSetup2FA === true;
 
   const hostname = req?.headers?.get("host") || "";
 
@@ -36,6 +37,41 @@ async function checkRoleMiddleware(req) {
   // If 2FA is required, redirect to verification page
   if (requires2FA && requestedPath !== "/verify") {
     return NextResponse.redirect(new URL("/verify", req.url));
+  }
+
+  // Privileged users who have not yet enrolled in 2FA are forced to set it up
+  // before they can access any protected page.
+  if (mustSetup2FA && requestedPath !== "/setup-2fa") {
+    return NextResponse.redirect(new URL("/setup-2fa", req.url));
+  }
+
+  // Terminate live sessions for deactivated / locked-down office accounts.
+  // Runs before the super-admin bypass so even a compromised super admin can
+  // be cut off. Fails open so a transient error never locks everyone out.
+  if (
+    userRole === "admin" ||
+    userRole === "user" ||
+    userRole === "superAdmin"
+  ) {
+    try {
+      const baseUrl =
+        process.env.NEXTAUTH_URL || `http://${req.headers.get("host")}`;
+      const statusRes = await fetch(`${baseUrl}/api/account/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId }),
+      });
+      if (statusRes.ok) {
+        const { isActive } = await statusRes.json();
+        if (isActive === false) {
+          return NextResponse.redirect(
+            new URL("/unauthorized?action=logout", req.url)
+          );
+        }
+      }
+    } catch (err) {
+      console.log("Account status check error:", err);
+    }
   }
 
   // we have to check for only hr routes here becuase account is active or not
@@ -143,11 +179,12 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL(dashboardPath, req.url));
   }
 
-  const isAccessible = roleData?.permissions?.some((path) =>
-    requestedPath.startsWith(path)
-  );
+  // Derived pages (e.g. "previous employees") inherit the permission of their
+  // parent page, so an admin who can access the active list can also access the
+  // matching "previous" list without a separate permission grant.
+  const requiredPath = DERIVED_ACCESS[menuItem?.path] || menuItem?.path;
 
-  if (!isAccessible || !roleData?.permissions.includes(menuItem?.path)) {
+  if (!roleData?.permissions?.includes(requiredPath)) {
     return NextResponse.redirect(new URL(dashboardPath, req.url));
   }
 

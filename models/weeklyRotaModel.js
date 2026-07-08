@@ -46,6 +46,12 @@ const weeklyRotaSchema = new mongoose.Schema(
       default: "Active",
       type: String,
     },
+    // Current version number; incremented on every edit. The full history of
+    // each version lives in the WeeklyRotaVersion collection.
+    version: {
+      type: Number,
+      default: 1,
+    },
     isDeleted: {
       type: Boolean,
       default: false,

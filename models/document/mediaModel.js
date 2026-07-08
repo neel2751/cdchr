@@ -45,6 +45,12 @@ const MediaSchema = new Schema(
       type: [String],
       default: [],
     },
+    archivedAt: {
+      type: Date,
+    },
+    deletedAt: {
+      type: Date,
+    },
   },
   { timestamps: true }
 );

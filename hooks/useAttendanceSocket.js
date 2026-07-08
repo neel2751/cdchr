@@ -19,6 +19,23 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { decrypt } from "@/lib/algo";
 
+const OBJECT_ID_REGEX = /^[a-f\d]{24}$/i;
+
+function resolveSiteId(siteId) {
+  if (!siteId || siteId === "All") return null;
+
+  if (OBJECT_ID_REGEX.test(siteId)) {
+    return siteId;
+  }
+
+  try {
+    const decrypted = decrypt(siteId);
+    return OBJECT_ID_REGEX.test(decrypted) ? decrypted : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useAttendanceSocketOld() {
   const socketRef = useRef(null);
   const [attendanceMap, setAttendanceMap] = useState({}); // employeeId → [clockData]
@@ -168,6 +185,13 @@ export function useAttendanceSocket({
   const [currentAction, setCurrentAction] = useState("");
   const [showSetupDialog, setShowSetupDialog] = useState(false);
   const [total, setTotal] = useState();
+  const [summary, setSummary] = useState({
+    totalEmployees: 0,
+    presentToday: 0,
+    onBreak: 0,
+    clockedOut: 0,
+    averageMinutes: 0,
+  });
 
   const loadData = useCallback(
     async ({
@@ -195,6 +219,15 @@ export function useAttendanceSocket({
         }
         const data = res?.data ? JSON.parse(res.data) : {}; // Fallback to {} instead of crashing
         setTotal(res.totalCount);
+        setSummary(
+          res.summary || {
+            totalEmployees: 0,
+            presentToday: 0,
+            onBreak: 0,
+            clockedOut: 0,
+            averageMinutes: 0,
+          },
+        );
         return data;
       } catch (err) {
         console.log("❌ Error fetching clock data:", err);
@@ -202,7 +235,7 @@ export function useAttendanceSocket({
         return null;
       }
     },
-    []
+    [],
   );
 
   const { data: attendanceMap = {}, refetch } = useQuery({
@@ -226,11 +259,22 @@ export function useAttendanceSocket({
     : [];
 
   // QR code generator helper
-  const generateQrCode = async (token) => {
-    if (!token) {
+  const generateQrCode = async (tokenPayload) => {
+    const token =
+      typeof tokenPayload === "string" ? tokenPayload : tokenPayload?.token;
+    const preRendered =
+      typeof tokenPayload === "object" ? tokenPayload?.qrDataUrl : "";
+
+    if (!token && !preRendered) {
       setQrData("");
       return;
     }
+
+    if (preRendered) {
+      setQrData(preRendered);
+      return;
+    }
+
     try {
       const qr = await QRCode.toDataURL(token);
       setQrData(qr);
@@ -272,8 +316,8 @@ export function useAttendanceSocket({
         await refetch();
       });
 
-      socketRef.current.on("new-qr-token", async (token) => {
-        await generateQrCode(token);
+      socketRef.current.on("new-qr-token", async (tokenPayload) => {
+        await generateQrCode(tokenPayload);
       });
 
       socketRef.current.on("refresh-clock-table", async (updatedEmployeeId) => {
@@ -316,6 +360,7 @@ export function useAttendanceSocket({
     queryKey,
     socket: socketRef.current,
     total,
+    summary,
   };
 }
 
@@ -330,7 +375,7 @@ export function useSiteAttendanceSocket({
 }) {
   const socketRef = useRef(null);
   const queryClient = useQueryClient();
-  const siteOId = siteId ? decrypt(siteId) : null;
+  const siteOId = resolveSiteId(siteId);
   const queryKey = [
     "siteClock",
     { siteOId, employeeId, query, currentPage, pagePerData, fromDate, toDate },
@@ -340,6 +385,13 @@ export function useSiteAttendanceSocket({
   const [currentAction, setCurrentAction] = useState("");
   const [showSetupDialog, setShowSetupDialog] = useState(false);
   const [total, setTotal] = useState();
+  const [summary, setSummary] = useState({
+    totalEmployees: 0,
+    presentToday: 0,
+    onBreak: 0,
+    clockedOut: 0,
+    averageMinutes: 0,
+  });
   // Load attendance data based on passed params (siteId or employeeId)
   const loadData = useCallback(
     async ({
@@ -362,6 +414,15 @@ export function useSiteAttendanceSocket({
         });
         const data = JSON.parse(res?.data);
         setTotal(res.totalCount || 0);
+        setSummary(
+          res.summary || {
+            totalEmployees: 0,
+            presentToday: 0,
+            onBreak: 0,
+            clockedOut: 0,
+            averageMinutes: 0,
+          },
+        );
         const map = {};
 
         data?.forEach((item) => {
@@ -378,7 +439,7 @@ export function useSiteAttendanceSocket({
         return null;
       }
     },
-    []
+    [siteOId],
   );
 
   const { data: attendanceMap = {}, refetch } = useQuery({
@@ -397,11 +458,22 @@ export function useSiteAttendanceSocket({
   const attendanceList = Object.values(attendanceMap).flat();
 
   // QR code generator helper
-  const generateQrCode = async (token) => {
-    if (!token) {
+  const generateQrCode = async (tokenPayload) => {
+    const token =
+      typeof tokenPayload === "string" ? tokenPayload : tokenPayload?.token;
+    const preRendered =
+      typeof tokenPayload === "object" ? tokenPayload?.qrDataUrl : "";
+
+    if (!token && !preRendered) {
       setQrData("");
       return;
     }
+
+    if (preRendered) {
+      setQrData(preRendered);
+      return;
+    }
+
     try {
       const qr = await QRCode.toDataURL(token);
       setQrData(qr);
@@ -444,8 +516,8 @@ export function useSiteAttendanceSocket({
         await refetch();
       });
 
-      socketRef.current.on("new-qr-token", async (token) => {
-        await generateQrCode(token);
+      socketRef.current.on("new-qr-token", async (tokenPayload) => {
+        await generateQrCode(tokenPayload);
       });
 
       socketRef.current.on("refresh-clock-table", async (updatedEmployeeId) => {
@@ -490,5 +562,6 @@ export function useSiteAttendanceSocket({
     socket: socketRef.current,
     queryKey,
     total,
+    summary,
   };
 }

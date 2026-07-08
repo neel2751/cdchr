@@ -22,6 +22,9 @@ export async function sendMail(data) {
       text: data.text || "No Content",
       html: data.html || "<p>No Content</p>",
     };
+    if (data.cc && (Array.isArray(data.cc) ? data.cc.length : data.cc)) {
+      mailOptions.cc = data.cc;
+    }
     const info = await transporter.sendMail(mailOptions);
     transporter.close();
     if (info.messageId) {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { exportMarketing } from "@/server/leadServer";
 import { Button } from "@/components/ui/button";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 
 export default function MarketingExport() {
   const [isExporting, setIsExporting] = useState(false);
@@ -34,6 +35,11 @@ export default function MarketingExport() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      logCsvExport({
+        source: "marketingLeads",
+        label: "Marketing leads",
+        rowCount: json.length,
+      }).catch(() => {});
       setIsExporting(false);
     } catch (error) {
       console.log("Error exporting marketing data:", error);

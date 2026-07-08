@@ -62,7 +62,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
   const pageSize = parseInt(searchParams?.pageSize) || 10;
   const dateParam = searchParams?.date || "";
 
-  const { attendanceList, socket, total } = useAttendanceSocket({
+  const { attendanceList, socket, total, summary } = useAttendanceSocket({
     siteId: null,
     employeeId: null,
     currentPage,
@@ -76,7 +76,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
     recordId,
     employeeId,
     actionType,
-    breaks
+    breaks,
   ) => {
     const result = await handleTimeActionNew({
       clockId: recordId,
@@ -214,14 +214,6 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       toast.error("Please fix validation errors before saving.");
       return;
     }
-    if (breaks && breaks.length > 0) {
-      for (const br of breaks) {
-        if (!br.breakIn || !br.breakOut) {
-          toast.error("All breaks must have Break In and Break Out");
-          return;
-        }
-      }
-    }
 
     const result = await handleTimeActionNew({
       clockId: clockRecordId || id,
@@ -278,7 +270,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
   const handleSendReminder = async (employee) => {
     const response = await sendNotification(
       employee.employeeId,
-      `Hi ${employee.name}, it looks like you forgot to clock out!`
+      `Hi ${employee.name}, it looks like you forgot to clock out!`,
     );
 
     if (response.success) toast.success("Notification sent!");
@@ -324,10 +316,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             <CardHeader>
               <CardTitle>Present Today</CardTitle>
               <span className="text-2xl font-semibold">
-                {
-                  attendanceList.filter((emp) => emp.clockIn && !emp.clockOut)
-                    .length
-                }
+                {summary?.presentToday || 0}
               </span>
             </CardHeader>
           </Card>
@@ -335,24 +324,25 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             <CardHeader>
               <CardTitle>On Break</CardTitle>
               <span className="text-2xl font-semibold">
-                {
-                  attendanceList.filter((emp) => emp.breakIn && !emp.breakOut)
-                    .length
-                }
+                {summary?.onBreak || 0}
               </span>
             </CardHeader>
           </Card>
           <Card className="bg-purple-50 text-purple-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Avarage Hours</CardTitle>
-              <span className="text-2xl font-semibold">00:00</span>
+              <span className="text-2xl font-semibold">
+                {minutesToHHMM(
+                  Math.max(0, Math.round(summary?.averageMinutes || 0)),
+                )}
+              </span>
             </CardHeader>
           </Card>
           <Card className="bg-red-50 text-red-600 border-none shadow-none">
             <CardHeader>
               <CardTitle>Clocked Out</CardTitle>
               <span className="text-2xl font-semibold">
-                {attendanceList.filter((emp) => emp.clockOut).length}
+                {summary?.clockedOut || 0}
               </span>
             </CardHeader>
           </Card>
@@ -399,8 +389,8 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                     const status = !assignment.clockIn
                       ? "assigned"
                       : assignment.clockIn && !assignment.clockOut
-                      ? "checked-in"
-                      : "clocked-out";
+                        ? "checked-in"
+                        : "clocked-out";
 
                     const statusConfig = getStatusBadge(status);
 
@@ -409,6 +399,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                     const lastBreak = breaks.length
                       ? breaks[breaks.length - 1]
                       : null;
+                    const hasOpenBreak = Boolean(
+                      lastBreak?.breakIn && !lastBreak?.breakOut,
+                    );
 
                     // calculate total break hours
                     const breakMinutes = breaks.reduce((sum, br) => {
@@ -431,20 +424,27 @@ const EmployeeSiteManagement = ({ searchParams }) => {
 
                         {/* STATUS */}
                         <TableCell>
-                          <Badge className={statusConfig?.color}>
-                            <div className="flex items-center gap-1">
-                              {status === "checked-in" && (
-                                <CheckCircle className="h-3 w-3" />
-                              )}
-                              {status === "clocked-out" && (
-                                <CheckCircle className="h-3 w-3" />
-                              )}
-                              {status === "assigned" && (
-                                <Clock className="h-3 w-3" />
-                              )}
-                              {statusConfig?.text}
-                            </div>
-                          </Badge>
+                          <div className="flex flex-col gap-1 items-start">
+                            <Badge className={statusConfig?.color}>
+                              <div className="flex items-center gap-1">
+                                {status === "checked-in" && (
+                                  <CheckCircle className="h-3 w-3" />
+                                )}
+                                {status === "clocked-out" && (
+                                  <CheckCircle className="h-3 w-3" />
+                                )}
+                                {status === "assigned" && (
+                                  <Clock className="h-3 w-3" />
+                                )}
+                                {statusConfig?.text}
+                              </div>
+                            </Badge>
+                            {hasOpenBreak && (
+                              <Badge className="bg-yellow-100 text-yellow-800 border border-yellow-300">
+                                Open Break
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
 
                         {/* CLOCK IN */}
@@ -506,7 +506,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                         <TableCell>
                           {calculateDuration(
                             assignment.clockIn,
-                            assignment.clockOut
+                            assignment.clockOut,
                           ) || "-"}
                         </TableCell>
                         {/* BREAK HOURS */}
@@ -547,7 +547,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                         assignment.clockRecordId,
                                         assignment.employeeId,
                                         "clockIn",
-                                        breaks
+                                        breaks,
                                       )
                                     }
                                   >
@@ -573,7 +573,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                           assignment.clockRecordId,
                                           assignment.employeeId,
                                           "breakIn",
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
@@ -600,13 +600,19 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                           assignment.clockRecordId,
                                           assignment.employeeId,
                                           "breakOut",
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
                                       <Button
                                         type="button"
                                         size="icon"
+                                        disabled={!lastBreak?.breakIn}
+                                        title={
+                                          !lastBreak?.breakIn
+                                            ? "No open break to close"
+                                            : "End break"
+                                        }
                                         className="bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-800 hover:[box-shadow:0_0_10px_rgba(0,0,255,0.5)] cursor-pointer"
                                       >
                                         <Coffee />
@@ -626,7 +632,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                           assignment.clockRecordId,
                                           assignment.employeeId,
                                           "clockOut",
-                                          breaks
+                                          breaks,
                                         )
                                       }
                                     >
@@ -640,28 +646,26 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                     </ClockConfirmDialog>
                                   )}
 
-                                {/* EDIT / DELETE only after Clock Out */}
+                                {assignment.clockRecordId && (
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => setShowEditForm(assignment)}
+                                  >
+                                    <EditIcon />
+                                  </Button>
+                                )}
+
                                 {assignment.clockOut && (
-                                  <>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() =>
-                                        setShowEditForm(assignment)
-                                      }
-                                    >
-                                      <EditIcon />
-                                    </Button>
-                                    <Button
-                                      size="icon"
-                                      variant="outline"
-                                      onClick={() =>
-                                        handleRemoveAssignment(assignment._id)
-                                      }
-                                    >
-                                      <Trash2 />
-                                    </Button>
-                                  </>
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() =>
+                                      handleRemoveAssignment(assignment._id)
+                                    }
+                                  >
+                                    <Trash2 />
+                                  </Button>
                                 )}
                               </>
                             )}

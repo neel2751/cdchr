@@ -51,15 +51,17 @@ const SideBarHeaderCom = () => {
                 size="lg"
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <div className="flex aspect-square size-8 items-center border border-neutral-200 p-1 justify-center rounded-lg text-sidebar-primary-foreground">
+                <div className="flex aspect-square size-8 items-center border border-neutral-200 justify-center rounded-lg text-sidebar-primary-foreground">
                   <Image
                     // src="/images/cdc.svg"
                     src={
-                      "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      "/images/Interiorlogo.svg"
                     }
                     alt="Logo"
                     width={30}
                     height={30}
+                    className="rounded-lg"
                   />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -81,9 +83,11 @@ const SideBarHeaderCom = () => {
 const SideBarMenu = () => {
   const pathName = usePathname();
   const { data: sessionData } = useSession();
+  const currentRole = sessionData?.user?.role;
+  const currentUserId = sessionData?.user?._id;
 
   // Memoize the path to avoid recalculation
-  const path = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
+  const rootPath = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
 
   // Fetch employee menu (React Query / SWR style)
   const { data: menuItems = [], isLoading } = useFetchSelectQuery({
@@ -94,12 +98,45 @@ const SideBarMenu = () => {
   // Merge menus and memoize to prevent recalculation on re-render
   const menu = useMemo(
     () => mergeAndFilterMenus(COMMONMENUITEMS, menuItems),
-    [menuItems]
+    [menuItems],
   );
 
+  const personalMenu = useMemo(() => {
+    if (currentRole !== "user" || !currentUserId) return [];
+
+    return [
+      {
+        name: "My Attendance",
+        path: "/admin/my-attendance",
+        icon: "CalendarClock",
+      },
+      {
+        name: "My Weekly Shifts",
+        path: "/admin/my-weekly-shifts",
+        icon: "CalendarDays",
+      },
+      {
+        name: "My Leaves",
+        path: "/admin/my-leaves",
+        icon: "Stamp",
+      },
+    ];
+  }, [currentRole, currentUserId]);
+
+  const mergedMenu = useMemo(() => {
+    if (!personalMenu.length) return menu;
+
+    const existingPaths = new Set(menu.map((item) => item?.path));
+    const uniquePersonalMenu = personalMenu.filter(
+      (item) => !existingPaths.has(item.path),
+    );
+
+    return [...uniquePersonalMenu, ...menu];
+  }, [personalMenu, menu]);
+
   // Determine current menus and reports
-  const currentMenu = useMemo(() => getMenu(path), [path]);
-  const currentReport = useMemo(() => getReportMenu(path), [path]);
+  const currentMenu = useMemo(() => getMenu(rootPath), [rootPath]);
+  const currentReport = useMemo(() => getReportMenu(rootPath), [rootPath]);
 
   return (
     <SidebarContent>
@@ -115,7 +152,7 @@ const SideBarMenu = () => {
         </SidebarGroup>
       ) : (
         <SidebarGroup>
-          <SideBarMenuCom menuItems={menu} path={path} />
+          <SideBarMenuCom menuItems={mergedMenu} path={pathName} />
         </SidebarGroup>
       )}
 
@@ -168,11 +205,12 @@ const SideBarFooterCom = () => {
                 size="lg"
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <Avatar className="h-8 w-8 rounded-lg border p-1">
+                <Avatar className="h-8 w-8 rounded-lg border p-1 bg-black">
                   <AvatarImage
                     // src={session?.user?.image || "/images/cdc.svg"}
                     src={
-                      "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                      "/images/Interiorlogo.svg"
                     }
                     alt={session?.user?.name || "HR"}
                   />
@@ -201,7 +239,8 @@ const SideBarFooterCom = () => {
                     <AvatarImage
                       // src={session?.user?.image || "/images/cdc.svg"}
                       src={
-                        "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                        // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
+                        "/images/Interiorlogo.svg"
                       }
                       alt={session?.user?.name || "HR"}
                     />
@@ -235,7 +274,7 @@ const SideBarFooterCom = () => {
                   <Link
                     className="flex items-center gap-2 w-full"
                     href={`/admin/account/${encrypt(
-                      session?.user?._id
+                      session?.user?._id,
                     )}/overview`}
                   >
                     <BadgeCheck />

@@ -64,8 +64,11 @@ const clockInSchema = new Schema(
       default: false,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+clockInSchema.index({ employeeId: 1, date: -1, siteId: 1, isDeleted: 1 });
+clockInSchema.index({ date: -1, siteId: 1, isDeleted: 1 });
 
 const ClockRecordModel =
   mongoose.models.ClockRecord || mongoose.model("ClockRecord", clockInSchema);

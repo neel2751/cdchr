@@ -23,7 +23,9 @@ import {
   User,
 } from "lucide-react";
 import React, { useState } from "react";
+import { logCsvExport } from "@/server/auditServer/exportAudit";
 import AddCategory from "./components/addCategory";
+import RotaHistoryDialog from "./components/rotaHistoryDialog";
 import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { AddWeeklyRota } from "./addRota";
 import { Button } from "@/components/ui/button";
@@ -112,6 +114,12 @@ const Rota = ({ searchParams }) => {
     link.setAttribute("download", "WeeklySchedule.csv");
     document.body.appendChild(link);
     link.click();
+
+    logCsvExport({
+      source: "weeklyRota",
+      label: "Weekly rota schedule",
+      rowCount: rows.length,
+    }).catch(() => {});
   };
 
   return (
@@ -164,6 +172,10 @@ const Rota = ({ searchParams }) => {
                             >
                               <Download />
                             </Button>
+                            <RotaHistoryDialog
+                              rotaId={item?._id}
+                              weekStartDate={item?.weekStartDate}
+                            />
                           </div>
                           <Badge
                             variant="outline"
