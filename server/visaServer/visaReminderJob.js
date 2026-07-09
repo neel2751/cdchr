@@ -21,7 +21,7 @@ import {
 
 // How many times HR may manually resend a reminder for the same
 // (employee, visaEndDate, milestone). The automated cron always sends once.
-export const MAX_MANUAL_SENDS = 3;
+export const MAX_MANUAL_SENDS = 5;
 
 // employeeType -> visa date field on the model
 const VISA_FIELD = { OfficeEmploye: "visaEndDate", Employe: "eVisaExp" };
