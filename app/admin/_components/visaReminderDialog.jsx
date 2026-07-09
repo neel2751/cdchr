@@ -12,7 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import { Loader2, Mail } from "lucide-react";
-import { daysUntil, getMilestone, milestoneLabel } from "@/lib/visaMilestones";
+import {
+  daysUntil,
+  getMilestone,
+  formatVisaRemaining,
+} from "@/lib/visaMilestones";
 import { getVisaReminderCount } from "@/server/visaServer/visaServer";
 
 /**
@@ -61,6 +65,11 @@ const VisaReminderDialog = ({ target, onOpenChange, onConfirm, isPending }) => {
   const prettyDate = target?.visaEndDate
     ? format(new Date(target.visaEndDate), "PPP")
     : "—";
+  // Actual time remaining (e.g. "1 month 5 days" / "1 year 3 months"), not the
+  // coarse milestone bucket.
+  const remaining = target?.visaEndDate
+    ? formatVisaRemaining(target.visaEndDate)
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -82,10 +91,8 @@ const VisaReminderDialog = ({ target, onOpenChange, onConfirm, isPending }) => {
             <span className="font-medium text-right">{prettyDate}</span>
           </div>
           <div className="flex justify-between gap-4">
-            <span className="text-gray-500">Reminder</span>
-            <span className="font-medium text-right">
-              {milestone ? milestoneLabel(milestone) : "—"}
-            </span>
+            <span className="text-gray-500">Expires in</span>
+            <span className="font-medium text-right">{remaining || "—"}</span>
           </div>
           {countInfo && (
             <div className="flex justify-between gap-4">
