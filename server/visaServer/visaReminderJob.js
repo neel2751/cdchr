@@ -16,7 +16,12 @@ import {
   MILESTONE_WINDOW_DAYS,
   daysUntil,
   getMilestone,
+  milestoneLabel,
 } from "@/lib/visaMilestones";
+
+// How many times HR may manually resend a reminder for the same
+// (employee, visaEndDate, milestone). The automated cron always sends once.
+export const MAX_MANUAL_SENDS = 3;
 
 // employeeType -> visa date field on the model
 const VISA_FIELD = { OfficeEmploye: "visaEndDate", Employe: "eVisaExp" };
@@ -34,16 +39,21 @@ async function getCompanyName(employee, employeeType) {
   }
 }
 
-async function alreadySent({ employeeId, visaEndDateISO, milestone }) {
-  const existing = await AuditLogModel.findOne({
+// Number of successful reminders already sent for this exact
+// (employee, visaEndDate, milestone).
+export async function getVisaReminderSentCount({
+  employeeId,
+  visaEndDateISO,
+  milestone,
+}) {
+  return AuditLogModel.countDocuments({
     module: "Visa",
     action: "Visa.reminderSent",
     status: "success",
     entityId: employeeId,
     "metadata.milestone": milestone,
     "metadata.visaEndDate": visaEndDateISO,
-  }).lean();
-  return Boolean(existing);
+  });
 }
 
 /**
@@ -81,15 +91,34 @@ export async function sendVisaReminderCore({
 
   const visaEndDateISO = new Date(visaEndDate).toISOString();
 
-  if (
-    !force &&
-    (await alreadySent({ employeeId: employee._id, visaEndDateISO, milestone }))
-  ) {
-    return {
-      success: false,
-      duplicate: true,
-      message: "Reminder already sent for this milestone",
-    };
+  const sentCount = await getVisaReminderSentCount({
+    employeeId: employee._id,
+    visaEndDateISO,
+    milestone,
+  });
+
+  if (!force) {
+    // Automated cron stays idempotent — one send per milestone.
+    if (channel === "auto" && sentCount >= 1) {
+      return {
+        success: false,
+        duplicate: true,
+        sentCount,
+        message: "Reminder already sent for this milestone",
+      };
+    }
+    // HR may manually resend up to MAX_MANUAL_SENDS times per milestone.
+    if (channel === "manual" && sentCount >= MAX_MANUAL_SENDS) {
+      return {
+        success: false,
+        limitReached: true,
+        sentCount,
+        maxSends: MAX_MANUAL_SENDS,
+        message: `Already sent ${sentCount} times for the ${milestoneLabel(
+          milestone,
+        )} reminder (maximum ${MAX_MANUAL_SENDS}).`,
+      };
+    }
   }
 
   const days = daysUntil(visaEndDate);
@@ -163,9 +192,22 @@ export async function sendVisaReminderCore({
     },
   });
 
-  return ok
-    ? { success: true, message: `Reminder sent (${milestone})` }
-    : { success: false, message: sendRes?.message || "Failed to send email" };
+  if (!ok) {
+    return { success: false, message: sendRes?.message || "Failed to send email" };
+  }
+
+  const nextCount = sentCount + 1;
+  return {
+    success: true,
+    sentCount: nextCount,
+    maxSends: MAX_MANUAL_SENDS,
+    message:
+      channel === "manual"
+        ? `Reminder sent — ${nextCount} of ${MAX_MANUAL_SENDS} for the ${milestoneLabel(
+            milestone,
+          )} reminder.`
+        : `Reminder sent (${milestone})`,
+  };
 }
 
 /**
