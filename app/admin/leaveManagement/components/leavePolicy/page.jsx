@@ -10,3 +10,4 @@ function LeavePolicy() {
 }
 
 export { LeavePolicy };
+export default LeavePolicy;
