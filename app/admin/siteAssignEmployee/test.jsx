@@ -137,6 +137,7 @@ const EmployeeSiteManagement = () => {
       siteId: siteId || null, // only included if on a site
       employeeType,
       currentBreaks: breaks, // pass current breaks from UI if needed
+      selectedDate: date || undefined, // date being viewed (defaults to today)
     });
 
     if (result?.success) {

@@ -108,10 +108,15 @@ export const handleTimeActionNew = async ({
   manualTimes = null,
   employeeType,
   currentBreaks = [], // pass current breaks from UI if needed
+  selectedDate = null, // date currently being viewed (defaults to today)
 }) => {
   const now = getUKTime({ format: "HH:mm" });
   const fullDate = new Date();
-  const date = normalizeDateToUTC(new Date());
+  // Use the date the admin is actually viewing so that fixing a missed
+  // clock in/out on a past date writes to that date, not today.
+  const date = selectedDate
+    ? normalizeDateToUTC(new Date(selectedDate))
+    : normalizeDateToUTC(new Date());
 
   const payload = {
     id: clockId,
