@@ -12,6 +12,7 @@ import {
 } from "@/server/officeServer/officeServer";
 import { Plus } from "lucide-react";
 import React, { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import EmployeTabel from "./employeTabel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
@@ -59,6 +60,22 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
     // Office Employees page shows inactive staff. No in-page status toggle.
     status: isPrevious ? "inactive" : "active",
   });
+
+  const pathname = usePathname();
+  const { replace } = useRouter();
+  const urlSearchParams = useSearchParams();
+
+  // Apply a filter change AND jump back to page 1. Without the reset, a filter
+  // applied while on page 2+ would query the smaller result set on a page that
+  // no longer exists, showing "No data found" even though matches exist.
+  const updateFilter = (patch) => {
+    setFilter((prev) => ({ ...prev, ...patch }));
+    const params = new URLSearchParams(urlSearchParams);
+    if (params.get("page") && params.get("page") !== "1") {
+      params.set("page", "1");
+      replace(`${pathname}?${params.toString()}`);
+    }
+  };
   const queryKey = [
     "officeEmployee",
     { query, currentPage, pagePerData, filter },
@@ -293,7 +310,7 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
                         ...selectRoleType,
                       ]}
                       placeholder={filter?.role === "" ? "All" : "Select Role"}
-                      onChange={(e) => setFilter({ ...filter, role: e })}
+                      onChange={(e) => updateFilter({ role: e })}
                       noData="No Data found"
                     />
                   </div>
@@ -307,7 +324,7 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
                       placeholder={
                         filter.company === "" ? "All" : "Select Company"
                       }
-                      onChange={(e) => setFilter({ ...filter, company: e })}
+                      onChange={(e) => updateFilter({ company: e })}
                       noData="No Data found"
                     />
                   </div>
@@ -316,7 +333,7 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
                       value={filter?.type || ""}
                       frameworks={[{ label: "All", value: "" }, ...options]}
                       placeholder={filter.type === "" ? "All" : "Select Type"}
-                      onChange={(e) => setFilter({ ...filter, type: e })}
+                      onChange={(e) => updateFilter({ type: e })}
                       noData="No Data found"
                     />
                   </div>
@@ -327,7 +344,7 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
                       placeholder={
                         filter.visaStatus === "" ? "All Visa" : "Visa status"
                       }
-                      onChange={(e) => setFilter({ ...filter, visaStatus: e })}
+                      onChange={(e) => updateFilter({ visaStatus: e })}
                       noData="No Data found"
                     />
                   </div>

@@ -84,6 +84,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       actionType,
       employeeType: "OfficeEmployee",
       currentBreaks: breaks,
+      selectedDate: dateParam || undefined,
     });
 
     if (result?.success) {
@@ -224,6 +225,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
         breaks,
       },
       employeeType: "OfficeEmployee",
+      selectedDate: dateParam || undefined,
     });
     if (result?.success) {
       toast.success("Updated successfully");
