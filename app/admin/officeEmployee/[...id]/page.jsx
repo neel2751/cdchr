@@ -2,6 +2,7 @@ import { AvatarProvider } from "@/components/Avatar/AvatarContext";
 import Navbar from "../../leaveManagement/components/nav";
 import { officeMenu, officeSlugComponentmap } from "../../_components/menu";
 import EmployeeSidebar from "../components/employeeSidebar";
+import BackButton from "@/components/backButton/backButton";
 
 export default async function IdPage({ params, searchParams }) {
   const slug = (await params).id;
@@ -11,6 +12,12 @@ export default async function IdPage({ params, searchParams }) {
 
   return (
     <AvatarProvider slug={slug} searchParams={searchParam}>
+      <div className="px-4 pt-4">
+        <BackButton
+          fallbackHref="/admin/officeEmployee"
+          label="Back to Office Management"
+        />
+      </div>
       <Navbar
         slug={popSlug}
         adminMenu={officeMenu}

@@ -3,6 +3,7 @@ import { SiteEmployeeProvider } from "@/components/Avatar/AvatarContext";
 import { siteOfficeEmployeSlugComponentmap } from "../../_components/siteEmployeeSlugMap";
 import EmployeeSidebar from "../components/employeeSidebar";
 import { siteEmployeeMenu } from "../../_components/siteMenu";
+import BackButton from "@/components/backButton/backButton";
 
 export default async function IdPage({ params, searchParams }) {
   const slug = (await params).id;
@@ -12,6 +13,12 @@ export default async function IdPage({ params, searchParams }) {
 
   return (
     <SiteEmployeeProvider slug={slug} searchParams={searchParam}>
+      <div className="px-4 pt-4">
+        <BackButton
+          fallbackHref="/admin/employee"
+          label="Back to Employee List"
+        />
+      </div>
       <Navbar
         slug={popSlug}
         adminMenu={siteEmployeeMenu}

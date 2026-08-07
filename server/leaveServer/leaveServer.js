@@ -59,7 +59,10 @@ export async function fetchCommonLeave(filterData) {
   const companyFilter = filterData?.filter?.company;
   const filterType = filterData?.filter?.type;
   const skip = (validPage - 1) * validLimit;
-  const query = { delete: false };
+  // Entitlements only apply to current staff. This also keeps the table in
+  // step with getLeaveYearSyncStatus(), which has always counted active
+  // employees only — the two disagreed while leavers were still listed here.
+  const query = { delete: false, isActive: true };
 
   const settings = await getLeaveSettings();
   const currentLeaveYear = getLeaveYearString(
@@ -154,7 +157,8 @@ export async function fetchCommonLeave(filterData) {
           roleType: 1,
           leaveYear: 1,
           leaveHistory: 1,
-          password: 1, // Exclude sensitive field unless absolutely required
+          // The password hash is deliberately not projected — the table has no
+          // use for it and it must never reach the client.
         },
       },
       {

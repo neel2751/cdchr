@@ -26,6 +26,7 @@ import EmployeeLeaveEntitlement from "../leaveManagement/components/leaveEntitle
 import RequestOff from "../leaveManagement/components/reuqestOff/requestOff";
 import LeaveHistory from "../leaveManagement/components/leaveHistory/leaveHistory";
 import { BankHoliday } from "../leaveManagement/components/bankHoliday";
+import HolidayPlannerCalendar from "../leaveManagement/components/leaveSettings/leaveHolidayPlanner";
 import LeaveReport from "../leaveManagement/components/leaveReport/leaveReport";
 import EmployeeOverview from "@/components/tabs/employee-overview";
 import EmployeeTimeOff from "@/components/tabs/employee-time-off";
@@ -206,6 +207,11 @@ export const leaveMenu = [
   //   icon: GalleryVerticalEnd,
   // },
   {
+    name: "Holiday Calendar",
+    link: "holidaycalendar",
+    icon: CalendarIcon,
+  },
+  {
     name: "Bank Holiday",
     link: "bankholiday",
     icon: ScrollText,
@@ -324,6 +330,7 @@ export const slugComponentmap = {
   requestoff: RequestOff,
   history: LeaveHistory,
   // addleaveEmployee: AddEmploeeLeave,
+  holidaycalendar: HolidayPlannerCalendar,
   bankholiday: BankHoliday,
   report: LeaveReport,
   settings: CarryForwardSettings,
