@@ -89,10 +89,13 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   ];
 
   // Keyed on the company so the cards re-fetch whenever that filter changes.
+  // Skipped entirely on the Previous Office Employees page: the stats describe
+  // current staff, so they say nothing about the leavers listed there.
   const { data: companyWiseCount } = useFetchQuery({
     params: { company: filter.company },
     fetchFn: countCompanyWiseEmployees,
     queryKey: ["countCompanyWiseEmployees", filter.company],
+    enabled: !isPrevious,
   });
   const { newData: employeeStats } = companyWiseCount || {};
 
@@ -314,12 +317,14 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       >
         <div>
           <Card>
-            <CompanyWiseCountCard
-              data={employeeStats}
-              companyName={
-                selectCompany.find((c) => c.value === filter.company)?.label
-              }
-            />
+            {!isPrevious && (
+              <CompanyWiseCountCard
+                data={employeeStats}
+                companyName={
+                  selectCompany.find((c) => c.value === filter.company)?.label
+                }
+              />
+            )}
             <CardHeader>
               <div className="mb-4">
                 <CardTitle>
