@@ -11,6 +11,34 @@ import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getServerSideProps } from "../session/session";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
+import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
+
+const UNITED_KINGDOM = "United Kingdom";
+
+/**
+ * The office employee form is flat, but bank details are stored as a
+ * sub-document. Fold the flat fields into it, and fill in the country the form
+ * hides for British staff.
+ *
+ * Bank details are left untouched when the payload has none of those fields —
+ * a user without the bank permission never sees them, so an edit from them
+ * must not wipe what is stored.
+ */
+const buildOfficeEmployeePayload = (data) => {
+  const { accountName, bankName, accountNumber, sortCode, country, ...rest } =
+    data;
+  const hasBankFields = accountName || bankName || accountNumber || sortCode;
+  return {
+    ...rest,
+    country:
+      data?.immigrationType === "British"
+        ? UNITED_KINGDOM
+        : country || UNITED_KINGDOM,
+    ...(hasBankFields
+      ? { bankDetail: { accountName, bankName, accountNumber, sortCode } }
+      : {}),
+  };
+};
 
 export const handleOfficeEmployee = withAudit(
   "OfficeEmployee.upsert",
@@ -44,7 +72,7 @@ export const handleOfficeEmployee = withAudit(
       // if the email is changing we have to convert it to lowercase
       data.email = data.email.toLowerCase();
       const beforeEmp = updatedEmp.toObject();
-      Object.assign(updatedEmp, data);
+      Object.assign(updatedEmp, buildOfficeEmployeePayload(data));
       const updatedData = await updatedEmp.save();
       if (!updatedData)
         return { success: false, message: "Error Updating Employee" };
@@ -75,7 +103,7 @@ export const handleOfficeEmployee = withAudit(
       });
       if (!userExist) {
         const newUser = new OfficeEmployeeModel({
-          ...data,
+          ...buildOfficeEmployeePayload(data),
           password: hashPass,
           email: data.email.toLowerCase(),
         });
@@ -329,6 +357,11 @@ export const getOfficeEmployee = async (filterData) => {
     } catch (e) {
       console.log("lock-status annotation failed:", e?.message);
     }
+
+    // The list feeds the edit form, so protected fields ride along — but only
+    // for users allowed to see them.
+    const { allowed: canSeeSensitive } = await getSensitiveAccess();
+    if (!canSeeSensitive) stripSensitiveDetails(result);
 
     return {
       success: true,

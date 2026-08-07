@@ -21,7 +21,8 @@ import {
   handleEmploye,
   resetSiteEmployeePassword,
 } from "@/server/employeServer/employeServer";
-import { EMPLOYEFIELD } from "@/data/fields/fields";
+import { BANKFIELD, EMPLOYEFIELD } from "@/data/fields/fields";
+import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
 import Pagination from "@/lib/pagination";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
 import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
@@ -40,6 +41,12 @@ const VISA_STATUS_OPTIONS = [
   { label: "Expired", value: "expired" },
   { label: "Valid", value: "valid" },
 ];
+// Fields only editable by users who may also read them.
+const PROTECTED_FIELD_NAMES = [
+  ...BANKFIELD.map((item) => item.name),
+  "employeNI",
+];
+
 const Employee = ({ searchParams, variant = "active" }) => {
   // "active" = the main Employee List page (active staff only);
   // "previous" = the Previous Employees page (inactive staff only).
@@ -101,7 +108,18 @@ const Employee = ({ searchParams, variant = "active" }) => {
   const { newData: officeEmployeeData = [], totalCount = 0 } =
     queryResult || {};
 
-  const field = EMPLOYEFIELD.map((item) => {
+  const { data: sensitiveAccess } = useFetchQuery({
+    fetchFn: canViewSensitiveDetails,
+    queryKey: ["canViewSensitiveDetails"],
+  });
+  const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
+
+  const field = EMPLOYEFIELD.filter(
+    // Bank and NI fields are only editable by users allowed to see them; the
+    // server leaves the stored values alone when these fields are absent.
+    (item) =>
+      canSeeSensitiveDetails || !PROTECTED_FIELD_NAMES.includes(item.name),
+  ).map((item) => {
     if (item.name === "projectSite") {
       return {
         ...item,
@@ -134,10 +152,13 @@ const Employee = ({ searchParams, variant = "active" }) => {
     const newItem = {
       ...item,
       address: eAddress?.address,
+      streetAddress: eAddress?.streetAddress,
       city: eAddress?.city,
-      zipCode: eAddress?.zipCode,
+      // Records written before the rename still carry `zipCode`.
+      postCode: eAddress?.postCode || eAddress?.zipCode,
       country: eAddress?.country,
       accountName: bankDetail?.accountName,
+      bankName: bankDetail?.bankName,
       accountNumber: bankDetail?.accountNumber,
       sortCode: bankDetail?.sortCode,
     };

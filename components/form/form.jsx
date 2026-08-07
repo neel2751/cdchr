@@ -104,6 +104,11 @@ export function GlobalForm({
   //   return true;
   // });
 
+  // showIf/hideIf accept either a single value or an array of values, so a
+  // field can be tied to several options of the same control.
+  const matchesCondition = (actual, expected) =>
+    Array.isArray(expected) ? expected.includes(actual) : actual === expected;
+
   const visibleFields = fields.filter((field) => {
     if (
       field.showIf &&
@@ -112,7 +117,7 @@ export function GlobalForm({
     ) {
       const { field: dependentField, value } = field.showIf;
 
-      if (watchField[dependentField] !== value) {
+      if (!matchesCondition(watchField[dependentField], value)) {
         return false;
       }
     }
@@ -124,7 +129,7 @@ export function GlobalForm({
     ) {
       const { field: dependentField, value } = field.hideIf;
 
-      if (watchField[dependentField] === value) {
+      if (matchesCondition(watchField[dependentField], value)) {
         return false;
       }
     }

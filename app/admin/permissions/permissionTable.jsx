@@ -20,7 +20,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { COMMONMENUITEMS, MENU } from "@/data/menu";
+import { CAPABILITIES, COMMONMENUITEMS, MENU } from "@/data/menu";
 import { Badge } from "@/components/ui/badge";
 import { mergeAndFilterMenus } from "@/lib/object";
 
@@ -47,7 +47,7 @@ const PermissionTable = () => {
             <TableCell>{item?.result[0]?.name}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-2">
-                {mergeAndFilterMenus(COMMONMENUITEMS, MENU)
+                {[...mergeAndFilterMenus(COMMONMENUITEMS, MENU), ...CAPABILITIES]
                   .filter((it) => item?.permissions?.includes(it?.path))
                   .map((im) => (
                     <Badge key={im.name} variant="outline">

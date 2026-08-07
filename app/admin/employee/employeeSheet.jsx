@@ -69,9 +69,10 @@ const EmployeeSheet = ({ item }) => {
       value:
         item?.immigrationType === "British"
           ? "-"
-          : item.visaEndDate
-          ? format(item.visaEndDate || new Date(), "PPP")
-          : "N/A",
+          : // Site employees store the expiry as `eVisaExp`, not `visaEndDate`.
+            item.eVisaExp
+            ? format(item.eVisaExp || new Date(), "PPP")
+            : "N/A",
     },
     {
       label: "Employee Status",

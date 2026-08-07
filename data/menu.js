@@ -183,6 +183,22 @@ export const DERIVED_ACCESS = {
   "/admin/previousEmployee": "/admin/employee",
 };
 
+// Permission to read an employee's bank account details and National Insurance
+// number. Stored on a role the same way menu paths are, but it is NOT a page —
+// it never appears in the sidebar, it only unlocks the protected details panel
+// (behind a password re-check).
+export const SENSITIVE_DETAILS_PERMISSION = "SENSITIVE_DETAILS_VIEW";
+
+// Capabilities are permissions that gate data rather than a route. They are
+// offered alongside the menu paths when assigning a role's permissions.
+export const CAPABILITIES = [
+  {
+    name: "View Bank & NI Details",
+    path: SENSITIVE_DETAILS_PERMISSION,
+    role: ["superAdmin", "admin"],
+  },
+];
+
 export const COMMONMENUITEMS = [
   {
     name: "Dashboard",

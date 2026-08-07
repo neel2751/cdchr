@@ -1,5 +1,17 @@
 import mongoose from "mongoose";
 
+// Bank account details. Every field is optional so office employees created
+// before this was captured can still be saved.
+const bankDetailSchema = new mongoose.Schema(
+  {
+    accountName: { type: String, required: false },
+    bankName: { type: String, required: false },
+    accountNumber: { type: Number, required: false },
+    sortCode: { type: Number, required: false },
+  },
+  { _id: false }
+);
+
 const officeEmployeSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -19,6 +31,7 @@ const officeEmployeSchema = new mongoose.Schema(
       required: false, // make it after true
     },
     employeId: { type: String, required: false },
+    dateOfBirth: { type: Date, required: false },
     immigrationType: { type: String, required: true },
     immigrationCategory: { type: String, required: false },
     employeType: { type: String, required: true },
@@ -31,6 +44,14 @@ const officeEmployeSchema = new mongoose.Schema(
     countryOfWork: { type: String, required: false },
     isShowenInWeeklyTimesheet: { type: Boolean, default: true },
     employeNI: { type: String, required: false },
+    // Home address. `country` defaults to the UK — the form only asks for it
+    // when the employee is not British.
+    address: { type: String, required: false },
+    streetAddress: { type: String, required: false },
+    city: { type: String, required: false },
+    postCode: { type: String, required: false },
+    country: { type: String, required: false, default: "United Kingdom" },
+    bankDetail: { type: bankDetailSchema, required: false },
     visaStartDate: { type: Date, required: false },
     visaEndDate: { type: Date, required: false },
     joinDate: { type: Date, required: true },

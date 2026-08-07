@@ -6,7 +6,8 @@
     "dev": "node server.mjs",
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "migrate:postcode": "node scripts/migrate-zipcode-to-postcode.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

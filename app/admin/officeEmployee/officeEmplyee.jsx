@@ -25,7 +25,8 @@ import {
 } from "@/server/selectServer/selectServer";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { CommonContext } from "@/context/commonContext";
-import { OFFICEFIELD } from "@/data/fields/fields";
+import { BANKFIELD, OFFICEFIELD } from "@/data/fields/fields";
+import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
 import Alert from "@/components/alert/alert";
 import OfficeEmployeeForm from "./components/officeEmployeeForm";
 import CompanyWiseCountCard from "./components/companyWiseCountCard";
@@ -40,6 +41,12 @@ const VISA_STATUS_OPTIONS = [
   { label: "Expired", value: "expired" },
   { label: "Valid", value: "valid" },
 ];
+// Fields only editable by users who may also read them.
+const PROTECTED_FIELD_NAMES = [
+  ...BANKFIELD.map((item) => item.name),
+  "employeNI",
+];
+
 const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   // "active" = the main Office Management page (active staff only);
   // "previous" = the Previous Office Employees page (inactive staff only).
@@ -123,7 +130,18 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
     fetchFn: getSelectCompanies,
   });
 
-  const field = OFFICEFIELD.map((item) => {
+  const { data: sensitiveAccess } = useFetchQuery({
+    fetchFn: canViewSensitiveDetails,
+    queryKey: ["canViewSensitiveDetails"],
+  });
+  const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
+
+  const field = OFFICEFIELD.filter(
+    // Bank and NI fields are only editable by users allowed to see them; the
+    // server leaves the stored values alone when these fields are absent.
+    (item) =>
+      canSeeSensitiveDetails || !PROTECTED_FIELD_NAMES.includes(item.name),
+  ).map((item) => {
     if (item.name === "department") {
       return {
         ...item,
@@ -165,6 +183,10 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       ...item,
       department: item.department._id,
       company: item.company._id,
+      accountName: item?.bankDetail?.accountName,
+      bankName: item?.bankDetail?.bankName,
+      accountNumber: item?.bankDetail?.accountNumber,
+      sortCode: item?.bankDetail?.sortCode,
     });
     setIsEdit(true);
     setShowDialog(true);
