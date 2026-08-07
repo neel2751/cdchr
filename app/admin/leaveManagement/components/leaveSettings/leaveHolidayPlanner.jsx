@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import {
   CalendarCheck,
@@ -22,6 +24,20 @@ import {
 import { format } from "date-fns";
 
 // ================================
+// DATE KEYS
+// ================================
+
+// Leave dates are stored at UTC midnight and the server keys them by their UTC
+// calendar date. Building a key here with `new Date(y, m, d).toISOString()`
+// would convert local midnight to UTC first, which shifts the date back a day
+// for every month in British Summer Time — leave then rendered on the wrong
+// cell. Formatting the calendar components directly keeps the two in step.
+function toDateKey(year, month, day) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${year}-${pad(month + 1)}-${pad(day)}`;
+}
+
+// ================================
 // MAIN COMPONENT
 // ================================
 
@@ -30,25 +46,31 @@ export default function HolidayPlannerCalendar() {
   const [plannerData, setPlannerData] = useState({});
 
   useEffect(() => {
+    // `ignore` drops the response of a request that a fast month-change has
+    // already superseded, so an earlier month cannot overwrite a later one.
+    let ignore = false;
+
+    async function fetchPlanner() {
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const lastDay = new Date(year, month + 1, 0).getDate();
+
+      // Sent as plain yyyy-MM-dd so the range cannot drift across the
+      // client/server timezone boundary — passing Date objects previously
+      // dropped the last day of the month during British Summer Time.
+      const res = await holidayPlannerNew({
+        startDate: toDateKey(year, month, 1),
+        endDate: toDateKey(year, month, lastDay),
+      });
+      if (ignore) return;
+      setPlannerData(res?.success ? JSON.parse(res.data) : {});
+    }
+
     fetchPlanner();
+    return () => {
+      ignore = true;
+    };
   }, [currentMonth]);
-
-  async function fetchPlanner() {
-    const start = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth(),
-      1
-    );
-    const end = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth() + 1,
-      0
-    );
-
-    const res = await holidayPlannerNew({ startDate: start, endDate: end });
-    const data = res.success ? JSON.parse(res.data) : {};
-    setPlannerData(data);
-  }
 
   function changeMonth(direction) {
     const newDate = new Date(currentMonth);
@@ -114,7 +136,7 @@ function CalendarGrid({ currentMonth, plannerData }) {
   }
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const dateKey = new Date(year, month, day).toISOString().split("T")[0];
+    const dateKey = toDateKey(year, month, day);
 
     cells.push(
       <DayCell
@@ -146,13 +168,18 @@ function CalendarGrid({ currentMonth, plannerData }) {
 // ================================
 
 function DayCell({ day, leaves, currentMonth }) {
-  const currentDay = new Date().getDate();
+  const today = new Date();
+  // The year matters too — without it, the same day/month in any other year
+  // was highlighted as "today".
+  const isToday =
+    day === today.getDate() &&
+    currentMonth.getMonth() === today.getMonth() &&
+    currentMonth.getFullYear() === today.getFullYear();
   return (
     <div className="min-h-[110px] border rounded-xl p-1">
       <div
         className={
-          day === currentDay &&
-          new Date().getMonth() === currentMonth.getMonth()
+          isToday
             ? "bg-indigo-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold whitespace-nowrap"
             : "text-gray-800 rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold whitespace-nowrap"
         }

@@ -846,13 +846,25 @@ export async function holidayPlanner({ startDate, endDate }) {
   }
 }
 
+// Leave dates are stored at UTC midnight. A "yyyy-MM-dd" string is turned into
+// exactly that instant; anything else falls back to the old normalisation.
+// Running the caller's Date through normalizeDateToUTC used the *server's*
+// timezone, which shifted the range by a day whenever the two disagreed — the
+// last day of the month then dropped out of the results.
+function toUtcRangeBound(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+  return normalizeDateToUTC(value);
+}
+
 export async function holidayPlannerNew({ startDate, endDate }) {
   await connect();
   const leaves = await LeaveRequestModel.find({
     leaveStatus: "Approved",
     leaveDates: {
-      $gte: normalizeDateToUTC(startDate),
-      $lte: normalizeDateToUTC(endDate),
+      $gte: toUtcRangeBound(startDate),
+      $lte: toUtcRangeBound(endDate),
     },
   }).lean();
 

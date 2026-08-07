@@ -25,6 +25,9 @@ export const SelectFilter = React.memo(function SelectFilter({
   frameworks,
   placeholder,
   noData,
+  // Naming the filter — several sit side by side and, once a value is picked,
+  // the trigger shows only that value, so there is nothing to say what it filters.
+  label,
 }) {
   const [open, setOpen] = React.useState(false);
   return (
@@ -34,10 +37,14 @@ export const SelectFilter = React.memo(function SelectFilter({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-label={label}
           className={`max-w-max justify-between ${
             value ? "text-neutral-900" : "text-neutral-500"
           }`}
         >
+          {label && (
+            <span className="text-neutral-500 font-normal">{label}:</span>
+          )}
           {value
             ? frameworks?.find((framework) => framework?.value === value)?.label
             : placeholder}

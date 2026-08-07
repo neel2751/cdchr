@@ -650,48 +650,67 @@ export const getSuperAdmins = async () => {
   }
 };
 
-export const countCompanyWiseEmployees = async () => {
+/**
+ * Headline counts for the office employee page: active, inactive, and the two
+ * visa states that need chasing.
+ *
+ * Narrowed by company when one is selected, so the cards describe whatever the
+ * list below is showing. The visa counts only consider active, non-British
+ * staff — an expired visa on a leaver is not something anyone can act on.
+ *
+ * @param {{ company?: string }} [filter]
+ */
+export const countCompanyWiseEmployees = async (filter) => {
   try {
     await connect();
-    const pipeline = [
-      {
-        $match: { delete: false }, // Only consider active employees
-      },
-      {
-        $group: {
-          _id: "$company", // Group by company ID (this becomes _id)
-          employeeCount: { $sum: 1 },
-        },
-      },
-      {
-        $lookup: {
-          from: "companies",
-          localField: "_id", // ✅ Use _id from group stage
-          foreignField: "_id", // Must match _id in companies collection
-          as: "companyDetails",
-        },
-      },
-      {
-        $unwind: "$companyDetails",
-      },
-      {
-        $project: {
-          _id: 0,
-          companyId: "$_id",
-          companyName: "$companyDetails.name",
-          employeeCount: 1, // ✅ This is the count we calculated, not from companyDetails.employees
-        },
-      },
-    ];
 
-    const result = await OfficeEmployeeModel.aggregate(pipeline);
+    const match = { delete: false };
+    const companyId = filter?.company;
+    if (companyId) match.company = createObjectId(companyId);
 
-    if (!result || result.length === 0) {
-      return { success: false, message: "No employees found" };
-    }
-    return { success: true, data: JSON.stringify(result) };
+    const now = new Date();
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 90);
+
+    const visaMatch = {
+      isActive: true,
+      immigrationType: { $ne: "British" },
+      visaEndDate: { $ne: null },
+    };
+
+    const [result] = await OfficeEmployeeModel.aggregate([
+      { $match: match },
+      {
+        $facet: {
+          total: [{ $count: "count" }],
+          active: [{ $match: { isActive: true } }, { $count: "count" }],
+          inactive: [{ $match: { isActive: false } }, { $count: "count" }],
+          visaExpiring: [
+            { $match: { ...visaMatch, visaEndDate: { $gte: now, $lte: horizon } } },
+            { $count: "count" },
+          ],
+          visaExpired: [
+            { $match: { ...visaMatch, visaEndDate: { $lt: now } } },
+            { $count: "count" },
+          ],
+        },
+      },
+    ]);
+
+    const countOf = (key) => result?.[key]?.[0]?.count || 0;
+
+    return {
+      success: true,
+      data: JSON.stringify({
+        total: countOf("total"),
+        active: countOf("active"),
+        inactive: countOf("inactive"),
+        visaExpiring: countOf("visaExpiring"),
+        visaExpired: countOf("visaExpired"),
+      }),
+    };
   } catch (error) {
-    console.error("Error counting company-wise employees:", error);
-    return { success: false, message: "Error counting company-wise employees" };
+    console.error("Error counting office employees:", error);
+    return { success: false, message: "Error counting office employees" };
   }
 };

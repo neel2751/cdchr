@@ -295,6 +295,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
                 <div className="flex gap-2">
                   <div>
                     <SelectFilter
+                      label="Pay Type"
                       value={filter.employeType}
                       frameworks={[
                         { label: "All", value: "" },
@@ -307,15 +308,14 @@ const Employee = ({ searchParams, variant = "active" }) => {
                           value: "Weekly",
                         },
                       ]}
-                      placeholder={
-                        filter.employeType === "" ? "All" : "Select Type"
-                      }
+                      placeholder="All"
                       onChange={(e) => updateFilter({ employeType: e })}
                       noData="No Data found"
                     />
                   </div>
                   <div>
                     <SelectFilter
+                      label="Immigration"
                       value={filter.type}
                       frameworks={[
                         { label: "All", value: "" },
@@ -328,18 +328,17 @@ const Employee = ({ searchParams, variant = "active" }) => {
                           value: "Immigrant",
                         },
                       ]}
-                      placeholder={filter.type === "" ? "All" : "Select Type"}
+                      placeholder="All"
                       onChange={(e) => updateFilter({ type: e })}
                       noData="No Data found"
                     />
                   </div>
                   <div>
                     <SelectFilter
+                      label="Visa"
                       value={filter.visaStatus}
                       frameworks={VISA_STATUS_OPTIONS}
-                      placeholder={
-                        filter.visaStatus === "" ? "All Visa" : "Visa status"
-                      }
+                      placeholder="All Visa"
                       onChange={(e) => updateFilter({ visaStatus: e })}
                       noData="No Data found"
                     />

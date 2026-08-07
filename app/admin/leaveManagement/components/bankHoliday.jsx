@@ -12,7 +12,7 @@ import Image from "next/image";
 import React from "react";
 
 export const BankHoliday = ({ className }) => {
-  const { isLoading, isError, data } = useBankHoliday();
+  const { isLoading, isError, error, data } = useBankHoliday();
 
   // find the next bank holiday
   const nextBankHoliday = data?.find((holiday) => {
@@ -28,6 +28,31 @@ export const BankHoliday = ({ className }) => {
     acc[year].push(holiday);
     return acc;
   }, {});
+
+  if (isLoading) {
+    return (
+      <p className="mt-4 text-sm text-muted-foreground">
+        Loading bank holidays...
+      </p>
+    );
+  }
+
+  if (isError) {
+    return (
+      <p className="mt-4 text-sm text-red-600">
+        {error?.message || "Could not load bank holidays."} Please try again
+        later.
+      </p>
+    );
+  }
+
+  if (!data?.length) {
+    return (
+      <p className="mt-4 text-sm text-muted-foreground">
+        No bank holidays found.
+      </p>
+    );
+  }
 
   return (
     <div className="mt-4 space-y-2">
@@ -92,7 +117,9 @@ export const BankHoliday = ({ className }) => {
                               {format(holiday?.date, "E, MMMM d, yyyy")}
                             </CardDescription>
                           </div>
-                          {nextBankHoliday.date === holiday?.date && (
+                          {/* Optional chaining: late in the year every
+                              remaining holiday is past, leaving no "next" one. */}
+                          {nextBankHoliday?.date === holiday?.date && (
                             <StarIcon className="size-3 top-4 absolute right-2 fill-indigo-600 text-indigo-600" />
                             // <div className="text-xl">🌟 </div>
                           )}

@@ -17,8 +17,6 @@ import {
 import React from "react";
 import { toast } from "sonner";
 import PreviewCarryForwardPage from "./previewCarryForward";
-import HolidayPlannerCalendar from "./leaveHolidayPlanner";
-import HolidayPlannerPage from "./holiday-planner/holidayPlanner";
 
 export default function CarryForwardSettings() {
   const months = [
@@ -234,7 +232,8 @@ export default function CarryForwardSettings() {
             })}
         </CardContent>
         {/* <PreviewCarryForwardPage /> */}
-        <HolidayPlannerCalendar />
+        {/* The holiday calendar now has its own "Holiday Calendar" tab — it is
+            a planning view, not a setting, and was buried inside this card. */}
       </Card>
     </div>
   );

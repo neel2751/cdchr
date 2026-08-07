@@ -88,11 +88,13 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
     { query, currentPage, pagePerData, filter },
   ];
 
+  // Keyed on the company so the cards re-fetch whenever that filter changes.
   const { data: companyWiseCount } = useFetchQuery({
+    params: { company: filter.company },
     fetchFn: countCompanyWiseEmployees,
-    queryKey: ["countCompanyWiseEmployees"],
+    queryKey: ["countCompanyWiseEmployees", filter.company],
   });
-  const { newData: companyWiseEmployeeCount = [] } = companyWiseCount || {};
+  const { newData: employeeStats } = companyWiseCount || {};
 
   const {
     data: queryResult,
@@ -312,7 +314,12 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       >
         <div>
           <Card>
-            <CompanyWiseCountCard data={companyWiseEmployeeCount} />
+            <CompanyWiseCountCard
+              data={employeeStats}
+              companyName={
+                selectCompany.find((c) => c.value === filter.company)?.label
+              }
+            />
             <CardHeader>
               <div className="mb-4">
                 <CardTitle>
@@ -326,46 +333,46 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
                 <div className="flex gap-2">
                   <div>
                     <SelectFilter
+                      label="Department"
                       value={filter?.role || ""}
                       frameworks={[
                         { label: "All", value: "" },
                         ...selectRoleType,
                       ]}
-                      placeholder={filter?.role === "" ? "All" : "Select Role"}
+                      placeholder="All"
                       onChange={(e) => updateFilter({ role: e })}
                       noData="No Data found"
                     />
                   </div>
                   <div>
                     <SelectFilter
+                      label="Company"
                       value={filter.company}
                       frameworks={[
                         { label: "All", value: "" },
                         ...selectCompany,
                       ]}
-                      placeholder={
-                        filter.company === "" ? "All" : "Select Company"
-                      }
+                      placeholder="All"
                       onChange={(e) => updateFilter({ company: e })}
                       noData="No Data found"
                     />
                   </div>
                   <div>
                     <SelectFilter
+                      label="Immigration"
                       value={filter?.type || ""}
                       frameworks={[{ label: "All", value: "" }, ...options]}
-                      placeholder={filter.type === "" ? "All" : "Select Type"}
+                      placeholder="All"
                       onChange={(e) => updateFilter({ type: e })}
                       noData="No Data found"
                     />
                   </div>
                   <div>
                     <SelectFilter
+                      label="Visa"
                       value={filter?.visaStatus || ""}
                       frameworks={VISA_STATUS_OPTIONS}
-                      placeholder={
-                        filter.visaStatus === "" ? "All Visa" : "Visa status"
-                      }
+                      placeholder="All Visa"
                       onChange={(e) => updateFilter({ visaStatus: e })}
                       noData="No Data found"
                     />
