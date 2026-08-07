@@ -12,7 +12,10 @@ import {
   BriefcaseBusinessIcon,
   IdCardIcon,
   CalendarPlus2Icon,
+  SignpostIcon,
+  CakeIcon,
 } from "lucide-react";
+import { formatDisplayDate } from "@/lib/formatDate";
 
 export default function EmployeeSidebar() {
   // const { searchParams } = useCommonContext();// commented out
@@ -28,7 +31,8 @@ export default function EmployeeSidebar() {
               {newData?.firstName || "CDC"}
             </CardTitle>
             <p className="text-muted-foreground text-sm">
-              {newData?._id.slice(-4).padStart(newData?._id.length, "*")}
+              {newData?.employeId ||
+                newData?._id?.slice(-4).padStart(newData?._id?.length, "*")}
             </p>
           </div>
         </div>
@@ -47,6 +51,13 @@ export default function EmployeeSidebar() {
             <span className="text-sm">Email:</span>
             <span className="text-primary">{newData?.email}</span>
           </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <CakeIcon className="size-3.5 -mr-1" />
+            <span className="text-sm">Date of birth:</span>
+            <span className="text-primary">
+              {formatDisplayDate(newData?.dateOfBirth)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -61,6 +72,13 @@ export default function EmployeeSidebar() {
             </span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
+            <SignpostIcon className="size-3.5 -mr-1" />
+            <span className="text-sm">Street:</span>
+            <span className="text-primary">
+              {newData?.eAddress?.streetAddress || "-"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-muted-foreground">
             <MapPinnedIcon className="size-3.5 -mr-1" />
             <span className="text-sm">City state:</span>
             <span className="text-primary">
@@ -71,7 +89,8 @@ export default function EmployeeSidebar() {
             <RadarIcon className="size-3.5 -mr-1" />
             <span className="text-sm">Postcode:</span>
             <span className="text-primary">
-              {newData?.eAddress?.zipCode || "-"}
+              {/* Records written before the rename still carry `zipCode`. */}
+              {newData?.eAddress?.postCode || newData?.eAddress?.zipCode || "-"}
             </span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">

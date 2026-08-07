@@ -23,7 +23,7 @@ import { Loader2, ShieldCheckIcon } from "lucide-react";
 import { useState } from "react";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import PermissionTable from "./permissionTable";
-import { COMMONMENUITEMS, MENU } from "@/data/menu";
+import { CAPABILITIES, COMMONMENUITEMS, MENU } from "@/data/menu";
 import { getSelectOfficeEmployee } from "@/server/selectServer/selectServer";
 import {
   assignPermission,
@@ -66,7 +66,11 @@ const Permission = ({ searchParams }) => {
       //   label: it.name,
       //   value: it.path,
       // })),
-      options: mergeAndFilterMenusWithLabelAndValue(MENU, COMMONMENUITEMS),
+      options: [
+        ...mergeAndFilterMenusWithLabelAndValue(MENU, COMMONMENUITEMS),
+        // Capabilities gate data rather than a route, so they are not in MENU.
+        ...CAPABILITIES.map((it) => ({ label: it.name, value: it.path })),
+      ],
       validationOptions: {
         required: "Select at least one", // Required validation
       },

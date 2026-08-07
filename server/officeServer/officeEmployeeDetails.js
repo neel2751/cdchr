@@ -83,8 +83,16 @@ export async function employeeDeatils(params) {
           },
         },
       },
+      // Bank details and the NI number are released only through
+      // revealSensitiveDetails(), which re-checks permission and password.
       {
-        $unset: ["password", "departmentview", "companys"],
+        $unset: [
+          "password",
+          "departmentview",
+          "companys",
+          "bankDetail",
+          "employeNI",
+        ],
       },
     ];
     // we have to set the signal as well in this case

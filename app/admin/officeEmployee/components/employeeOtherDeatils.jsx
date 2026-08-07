@@ -54,16 +54,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
 import LeaveSheet from "../../leaveManagement/components/leaveEntitlements/leave-sheet";
+import SensitiveDetailsCard from "@/components/sensitiveDetails/sensitiveDetailsCard";
+import { formatDisplayDate } from "@/lib/formatDate";
 
 const EmployeeOtherDeatils = () => {
-  const { newData } = useAvatar();
+  const { newData, slug } = useAvatar();
   const updateData = [
     {
-      title: "Bank Account Details",
+      title: "Personal Details",
       content: [
-        { label: "Account Name", value: newData?.accountName || "-" },
-        { label: "Account No", value: newData?.accountNo || "-" },
-        { label: "Sort Code", value: newData?.sortCode || "-" },
+        { label: "Employee ID", value: newData?.employeId || "-" },
+        {
+          label: "Date of Birth",
+          value: formatDisplayDate(newData?.dateOfBirth),
+        },
       ],
     },
     {
@@ -72,14 +76,14 @@ const EmployeeOtherDeatils = () => {
         { label: "Nationality", value: newData?.immigrationType || "-" },
         { label: "Visa Type", value: newData?.immigrationCategory || "-" },
         { label: "Employee Type", value: newData?.employeType || "-" },
-        { label: "Employee NI", value: newData?.employeNI || "-" },
+        // Employee NI lives in the password-protected card above.
         newData?.immigrationType !== "British" && {
           label: "Visa Start Date",
-          value: newData?.visaStartDate || "-",
+          value: formatDisplayDate(newData?.visaStartDate),
         },
         newData?.immigrationType !== "British" && {
           label: "Visa End Date",
-          value: newData?.visaEndDate || "-",
+          value: formatDisplayDate(newData?.visaEndDate),
         },
 
         // { label: "Join Date", value: "22 Sep, 2022" },
@@ -97,7 +101,12 @@ const EmployeeOtherDeatils = () => {
     },
   ];
 
-  return <EmployeeOverview data={updateData} />;
+  return (
+    <div className="space-y-2">
+      <SensitiveDetailsCard slug={slug} employeeType="office" />
+      <EmployeeOverview data={updateData} />
+    </div>
+  );
 };
 
 const EmployeeLeaveDeatails = () => {

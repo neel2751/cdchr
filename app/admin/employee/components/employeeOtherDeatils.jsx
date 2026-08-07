@@ -1,21 +1,19 @@
 import EmployeeOverview from "@/components/tabs/employee-overview";
 import { useSiteEmployee } from "@/components/Avatar/AvatarContext";
+import SensitiveDetailsCard from "@/components/sensitiveDetails/sensitiveDetailsCard";
+import { formatDisplayDate } from "@/lib/formatDate";
 
 const SiteEmployeeOtherDeatils = () => {
-  const { newData } = useSiteEmployee();
+  const { newData, slug } = useSiteEmployee();
   const updateData = [
     {
-      title: "Bank Account Details",
+      title: "Personal Details",
       content: [
+        { label: "Employee ID", value: newData?.employeId || "-" },
         {
-          label: "Account Name",
-          value: newData?.bankDetail?.accountName || "-",
+          label: "Date of Birth",
+          value: formatDisplayDate(newData?.dateOfBirth),
         },
-        {
-          label: "Account No",
-          value: newData?.bankDetail?.accountNumber || "-",
-        },
-        { label: "Sort Code", value: newData?.bankDetail?.sortCode || "-" },
       ],
     },
     {
@@ -24,14 +22,15 @@ const SiteEmployeeOtherDeatils = () => {
         { label: "Nationality", value: newData?.immigrationType || "-" },
         { label: "Visa Type", value: newData?.immigrationCategory || "-" },
         { label: "Employee Type", value: newData?.employeType || "-" },
-        { label: "Employee NI", value: newData?.employeNI || "-" },
+        // Employee NI lives in the password-protected card above.
         newData?.immigrationType !== "British" && {
           label: "Visa Start Date",
-          value: newData?.visaStartDate || "-",
+          value: formatDisplayDate(newData?.visaStartDate),
         },
         newData?.immigrationType !== "British" && {
           label: "Visa End Date",
-          value: newData?.visaEndDate || "-",
+          // Site employees store the expiry as `eVisaExp`, not `visaEndDate`.
+          value: formatDisplayDate(newData?.eVisaExp),
         },
 
         // { label: "Join Date", value: "22 Sep, 2022" },
@@ -49,7 +48,12 @@ const SiteEmployeeOtherDeatils = () => {
     },
   ];
 
-  return <EmployeeOverview data={updateData} />;
+  return (
+    <div className="space-y-2">
+      <SensitiveDetailsCard slug={slug} employeeType="site" />
+      <EmployeeOverview data={updateData} />
+    </div>
+  );
 };
 
 export { SiteEmployeeOtherDeatils };

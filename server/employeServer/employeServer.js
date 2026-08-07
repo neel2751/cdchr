@@ -13,6 +13,10 @@ import { normalizeDateToUTC } from "@/lib/formatDate";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
+import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
+
+// The form only asks for a country when the employee is not British.
+const UNITED_KINGDOM = "United Kingdom";
 
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -131,6 +135,11 @@ export const getAllEmployees = async (filterData) => {
       console.log("lock-status annotation failed:", e?.message);
     }
 
+    // The list feeds the edit form, so protected fields ride along — but only
+    // for users allowed to see them.
+    const { allowed: canSeeSensitive } = await getSensitiveAccess();
+    if (!canSeeSensitive) stripSensitiveDetails(employees);
+
     const data = {
       success: true,
       totalCount: totalEmployees,
@@ -161,9 +170,10 @@ export const handleEmploye = withAudit(
         address,
         streetAddress,
         city,
-        zipCode,
+        postCode,
         country,
         accountName,
+        bankName,
         accountNumber,
         sortCode,
         payRate,
@@ -172,14 +182,26 @@ export const handleEmploye = withAudit(
         address: address || "",
         streetAddress: streetAddress || "",
         city: city || "",
-        zipCode: zipCode || "",
-        country: country || "",
+        postCode: postCode || "",
+        // British employees never get asked for a country, so store the default.
+        country:
+          data?.immigrationType === "British"
+            ? UNITED_KINGDOM
+            : country || UNITED_KINGDOM,
       };
-      const bankDetail = {
-        accountName: accountName || "",
-        accountNumber: accountNumber || "",
-        sortCode: sortCode || "",
-      };
+      // Only overwrite bank details when the form actually carried them — a
+      // user without the bank permission edits the employee without those
+      // fields, and must not wipe them.
+      const hasBankFields =
+        accountName || bankName || accountNumber || sortCode;
+      const bankDetail = hasBankFields
+        ? {
+            accountName: accountName || "",
+            bankName: bankName || "",
+            accountNumber: accountNumber || "",
+            sortCode: sortCode || "",
+          }
+        : null;
       if (id) {
         // We have to check email and phone  before updating the Employee's information because they are required fields in MongoDB
         const isExists = await EmployePhoneAndEmailExists(
@@ -196,7 +218,7 @@ export const handleEmploye = withAudit(
             $set: {
               ...data,
               eAddress: eAddress,
-              bankDetail: bankDetail,
+              ...(bankDetail ? { bankDetail } : {}),
               employeType,
             },
           },
@@ -246,7 +268,7 @@ export const handleEmploye = withAudit(
         const addEmploye = await EmployeModel.create({
           ...data,
           eAddress: eAddress,
-          bankDetail: bankDetail,
+          ...(bankDetail ? { bankDetail } : {}),
           employeType,
           password,
         }); // create new employee
@@ -557,8 +579,10 @@ export async function getEmployeeWiseData(params) {
           delete: false,
         },
       },
+      // Bank details and the NI number are released only through
+      // revealSensitiveDetails(), which re-checks permission and password.
       {
-        $unset: ["password"],
+        $unset: ["password", "bankDetail", "employeNI"],
       },
     ];
     // we have to set the signal as well in this case

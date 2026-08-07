@@ -14,6 +14,12 @@ const bankDetailSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
+  // Added after the first records were created, so it stays optional to keep
+  // existing employees saveable.
+  bankName: {
+    type: String,
+    required: false,
+  },
 });
 // Define the Full Address schema
 const addressSchema = new mongoose.Schema({
@@ -29,7 +35,9 @@ const addressSchema = new mongoose.Schema({
     type: String,
     required: false,
   },
-  zipCode: {
+  // Previously stored as `zipCode`; records written before the rename keep the
+  // old key, so readers fall back to it.
+  postCode: {
     type: String,
     required: true,
   },
@@ -76,6 +84,10 @@ const employeSchema = new mongoose.Schema(
     },
     employeId: {
       type: String,
+      required: false,
+    },
+    dateOfBirth: {
+      type: Date,
       required: false,
     },
     cisDeduction: {

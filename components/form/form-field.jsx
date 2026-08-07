@@ -340,8 +340,10 @@ export const FormDate = ({ field }) => {
     formState: { errors },
   } = useFormContext();
 
-  const startYear = getYear(new Date()) - 50;
-  const endYear = getYear(new Date()) + 50;
+  // Defaults suit joining/visa dates. A field can widen or shift the window
+  // via `yearRange` — a date of birth needs to reach much further back.
+  const startYear = field?.yearRange?.start ?? getYear(new Date()) - 50;
+  const endYear = field?.yearRange?.end ?? getYear(new Date()) + 50;
 
   const months = [
     "January",

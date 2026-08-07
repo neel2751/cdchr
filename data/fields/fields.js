@@ -27,6 +27,186 @@ export const EMPLOYEID = {
   },
 };
 
+// Minimum working age in the UK, and the oldest birth year we offer.
+const MIN_EMPLOYEE_AGE = 16;
+const MAX_EMPLOYEE_AGE = 80;
+
+const currentYear = new Date().getFullYear();
+
+export const DATEOFBIRTHFIELD = {
+  name: "dateOfBirth",
+  labelText: "Date of Birth",
+  type: "date",
+  placeholder: "Select Date of Birth",
+  yearRange: {
+    start: currentYear - MAX_EMPLOYEE_AGE,
+    end: currentYear - MIN_EMPLOYEE_AGE,
+  },
+  validationOptions: {
+    required: "Date of Birth is required",
+    validate: (value) => {
+      if (!value) return "Date of Birth is required";
+      const dob = new Date(value);
+      if (Number.isNaN(dob.getTime())) return "Enter a valid date";
+
+      const today = new Date();
+      if (dob > today) return "Date of Birth cannot be in the future";
+
+      let age = today.getFullYear() - dob.getFullYear();
+      const monthDiff = today.getMonth() - dob.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+        age -= 1;
+      }
+      if (age < MIN_EMPLOYEE_AGE)
+        return `Employee must be at least ${MIN_EMPLOYEE_AGE} years old`;
+      if (age > MAX_EMPLOYEE_AGE) return "Please check the date of birth";
+      return true;
+    },
+  },
+};
+
+// Home address. Shared by the site-employee and office-employee forms so both
+// capture the same shape. The country picker only appears for non-British
+// staff — British employees are stored as "United Kingdom" by the server.
+export const ADDRESSFIELD = [
+  {
+    name: "address",
+    labelText: "Address",
+    type: "text",
+    placeholder: "Apt, Suite, Building",
+    size: true,
+    validationOptions: {
+      required: "Address is required",
+      minLength: {
+        value: 5,
+        message: "Minimum 5 characters required",
+      },
+      maxLength: {
+        value: 50,
+        message: "Maximum 50 characters allowed",
+      },
+    },
+  },
+  {
+    name: "streetAddress",
+    labelText: "Street Address (optional)",
+    type: "text",
+    placeholder: "Street Address (optional)",
+    validationOptions: {
+      ...PATTERN,
+    },
+  },
+  {
+    name: "city",
+    labelText: "City",
+    type: "text",
+    placeholder: "City",
+    validationOptions: {
+      required: "City is required",
+      minLength: {
+        value: 3,
+        message: "Minimum 3 characters required",
+      },
+      maxLength: {
+        value: 20,
+        message: "Maximum 20 characters allowed",
+      },
+      ...PATTERN,
+    },
+  },
+  {
+    name: "postCode",
+    labelText: "Postcode",
+    type: "text",
+    placeholder: "Enter Postcode",
+    validationOptions: {
+      required: "Postcode is required",
+      ...PATTERN,
+    },
+  },
+  {
+    name: "country",
+    labelText: "Country",
+    options: COUNTRIES,
+    type: "select",
+    helperText: "*British employees are saved as United Kingdom.",
+    showIf: {
+      field: "immigrationType",
+      value: ["Immigrant", "Other"],
+    },
+    validationOptions: { required: "Country is required" },
+  },
+];
+
+// Bank account details. Shared by both employee forms.
+export const BANKFIELD = [
+  {
+    name: "accountName",
+    labelText: "Account Name",
+    type: "text",
+    placeholder: "Enter Account Name",
+    size: true,
+    validationOptions: {
+      required: "Account name is required",
+      minLength: {
+        value: 3,
+        message: "Minimum 3 characters required",
+      },
+      maxLength: {
+        value: 50,
+        message: "Maximum 50 characters allowed",
+      },
+      ...PATTERN,
+    },
+  },
+  {
+    name: "bankName",
+    labelText: "Bank Name",
+    type: "text",
+    placeholder: "Enter Bank Name",
+    validationOptions: {
+      required: "Bank name is required",
+      minLength: {
+        value: 2,
+        message: "Minimum 2 characters required",
+      },
+      maxLength: {
+        value: 50,
+        message: "Maximum 50 characters allowed",
+      },
+      ...PATTERN,
+    },
+  },
+  {
+    name: "accountNumber",
+    labelText: "Account Number",
+    type: "number",
+    inputMode: "numeric",
+    placeholder: "Enter Account Number",
+    validationOptions: {
+      required: "Account number is required",
+      pattern: {
+        value: /^\d{8}$/i,
+        message: "Must be exactly 8 digits",
+      },
+    },
+  },
+  {
+    name: "sortCode",
+    labelText: "Sort Code",
+    type: "number",
+    inputMode: "numeric",
+    placeholder: "Enter Sort Code",
+    validationOptions: {
+      required: "Sort code is required",
+      pattern: {
+        value: /^\d{6}$/i,
+        message: "Must be exactly 6 digits",
+      },
+    },
+  },
+];
+
 export const EMERGENCYFIELD = [
   {
     name: "emergencyName",
@@ -289,68 +469,39 @@ export const EMPLOYEFIELD = [
     },
   },
   EMPLOYEID,
+  DATEOFBIRTHFIELD,
   {
-    name: "address",
-    labelText: "Address",
-    type: "text",
-    placeholder: "Apt, Syuite, Building",
-    size: true,
+    name: "immigrationType",
+    labelText: " Immigration Type",
+    type: "select",
+    placeholder: "Enter Immigration Type",
+    options: [
+      { value: "British", label: "British" },
+      { value: "Immigrant", label: "Immigrant" },
+    ],
     validationOptions: {
-      required: "Address is required",
-      minLength: {
-        value: 5,
-        message: "Minimum 5 characters required",
-      },
-      maxLength: {
-        value: 50,
-        message: "Maximum 50 characters allowed",
-      },
+      required: "Immigration Type is required",
     },
   },
   {
-    name: "streetAddress",
-    labelText: "Street Address(optional)",
+    name: "immigrationCategory",
+    labelText: " Immigration  Category",
     type: "text",
-    placeholder: "Street Address(optional)",
-    validationOptions: {
-      ...PATTERN,
+    showIf: {
+      field: "immigrationType",
+      value: "Immigrant",
     },
-  },
-  {
-    name: "city",
-    labelText: "City",
-    type: "text",
-    placeholder: "city",
+    placeholder: "Enter Immigration  Category",
     validationOptions: {
-      required: "city is required",
+      required: "Immigration  Category is required",
       minLength: {
         value: 3,
-        message: "Minimum 3 characters required",
-      },
-      maxLength: {
-        value: 20,
-        message: "Maximum 20 characters allowed",
+        message: "Minimum length should be 3 characters",
       },
       ...PATTERN,
     },
   },
-  {
-    name: "zipCode",
-    labelText: "Zipcode",
-    type: "text",
-    placeholder: "Zip/Postal Code",
-    validationOptions: {
-      required: "zipcode is required",
-      ...PATTERN,
-    },
-  },
-  {
-    name: "country",
-    labelText: "Country",
-    options: COUNTRIES,
-    type: "select",
-    validationOptions: { required: "Country is required" },
-  },
+  ...ADDRESSFIELD,
   {
     name: "paymentType",
     labelText: "Employe Type",
@@ -362,53 +513,7 @@ export const EMPLOYEFIELD = [
     type: "radio",
     validationOptions: { required: "Employee Type is required" },
   },
-  {
-    name: "accountName",
-    labelText: "Account Name",
-    type: "text",
-    placeholder: "Enter Account Name",
-    size: true,
-    validationOptions: {
-      required: "Account name is required",
-      minLength: {
-        value: 3,
-        message: "Minimum 3 characters required",
-      },
-      maxLength: {
-        value: 20,
-        message: "Maximum 20 characters allowed",
-      },
-      ...PATTERN,
-    },
-  },
-  {
-    name: "accountNumber",
-    labelText: "Account Number",
-    type: "number",
-    inputMode: "numeric",
-    placeholder: "Enter Account Number",
-    validationOptions: {
-      required: "Account number is required",
-      pattern: {
-        value: /^\d{8}$/i,
-        message: "Must be exactly 8 digits",
-      },
-    },
-  },
-  {
-    name: "sortCode",
-    labelText: "Sort Code",
-    type: "number",
-    inputMode: "numeric",
-    placeholder: "Enter Sort Code",
-    validationOptions: {
-      required: "Sort code is required",
-      pattern: {
-        value: /^\d{6}$/i,
-        message: "Must be exactly 6 digits",
-      },
-    },
-  },
+  ...BANKFIELD,
   // {
   //   name: "cis",
   //   labelText: "CIS",
@@ -564,39 +669,6 @@ export const EMPLOYEFIELD = [
   //     },
   //   },
   // },
-
-  {
-    name: "immigrationType",
-    labelText: " Immigration Type",
-    type: "select",
-    placeholder: "Enter Immigration Type",
-    options: [
-      { value: "British", label: "British" },
-      { value: "Immigrant", label: "Immigrant" },
-    ],
-    validationOptions: {
-      required: "Immigration Type is required",
-    },
-  },
-
-  {
-    name: "immigrationCategory",
-    labelText: " Immigration  Category",
-    type: "text",
-    showIf: {
-      field: "immigrationType",
-      value: "Immigrant",
-    },
-    placeholder: "Enter Immigration  Category",
-    validationOptions: {
-      required: "Immigration  Category is required",
-      minLength: {
-        value: 3,
-        message: "Minimum length should be 3 characters",
-      },
-      ...PATTERN,
-    },
-  },
 
   {
     name: "projectSite",
@@ -801,6 +873,7 @@ export const OFFICEFIELD = [
     },
   },
   EMPLOYEID,
+  DATEOFBIRTHFIELD,
   ...DEPARTMENTFIELD,
   {
     name: "employeType",
@@ -888,14 +961,14 @@ export const OFFICEFIELD = [
   },
   {
     name: "countryOfWork",
-    labelText: "Country",
+    labelText: "Country of Work",
     options: COUNTRIES,
     showIf: {
       field: "immigrationType",
       value: "Other",
     },
     type: "select",
-    validationOptions: { required: "Country is required" },
+    validationOptions: { required: "Country of Work is required" },
   },
   {
     name: "employeNI",
@@ -934,6 +1007,9 @@ export const OFFICEFIELD = [
   //   },
   // },
   ...VISAFIELD,
+  // Office details first, then the home address, then the bank details.
+  ...ADDRESSFIELD,
+  ...BANKFIELD,
   ...EMERGENCYFIELD,
 ];
 
