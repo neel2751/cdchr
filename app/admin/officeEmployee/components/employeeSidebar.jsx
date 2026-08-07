@@ -2,7 +2,6 @@
 import { UserAvatar } from "@/components/Avatar/Avatar";
 import { useAvatar } from "@/components/Avatar/AvatarContext";
 import { CardTitle } from "@/components/ui/card";
-import { format } from "date-fns";
 import {
   PhoneIcon,
   MailIcon,
@@ -116,7 +115,10 @@ export default function EmployeeSidebar() {
             <CalendarPlus2Icon className="size-3.5 -mr-1" />
             <span className="text-sm">Join date:</span>
             <span className="text-primary text-pretty">
-              {format(new Date(newData?.startDate || new Date()), "PPP")}
+              {/* Office employees store this as `joinDate`. Reading `startDate`
+                  gave undefined, and the old `|| new Date()` fallback then
+                  rendered today's date as if it were the join date. */}
+              {formatDisplayDate(newData?.joinDate)}
             </span>
           </div>
         </div>

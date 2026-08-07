@@ -1,7 +1,6 @@
 "use client";
 import { useSiteEmployee } from "@/components/Avatar/AvatarContext";
 import { CardTitle } from "@/components/ui/card";
-import { format } from "date-fns";
 import {
   PhoneIcon,
   MailIcon,
@@ -122,7 +121,9 @@ export default function EmployeeSidebar() {
             <CalendarPlus2Icon className="size-3.5 -mr-1" />
             <span className="text-sm">Join date:</span>
             <span className="text-primary text-pretty">
-              {format(new Date(newData?.startDate || new Date()), "PPP")}
+              {/* `startDate` is the right field here, but the old
+                  `|| new Date()` fallback showed today when it was missing. */}
+              {formatDisplayDate(newData?.startDate)}
             </span>
           </div>
         </div>
