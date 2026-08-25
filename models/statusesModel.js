@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const statusesSchema = new mongoose.Schema(
   {
@@ -31,6 +32,10 @@ const statusesSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(statusesSchema, "Statuses");
 
 const StatusesModel =
   mongoose.models.Statuses || mongoose.model("Statuses", statusesSchema);

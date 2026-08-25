@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const commonLeaveSchema = new mongoose.Schema(
   {
@@ -24,6 +25,10 @@ const commonLeaveSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(commonLeaveSchema, "CommonLeave");
 
 const CommonLeaveModel =
   mongoose.models.CommonLeave ||

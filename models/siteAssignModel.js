@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 const siteAssignSchema = new mongoose.Schema(
   {
     // Site ID reference
@@ -25,6 +26,10 @@ const siteAssignSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(siteAssignSchema, "SiteAssign");
 
 const SiteAssignModel =
   mongoose.models.SiteAssign || mongoose.model("SiteAssign", siteAssignSchema);

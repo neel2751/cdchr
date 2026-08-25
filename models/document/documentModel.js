@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const DocumentFileSchema = new mongoose.Schema({
   title: {
@@ -71,6 +72,10 @@ const DocumentSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(DocumentSchema, "Document");
 
 const DocumentModel =
   mongoose.models.Document || mongoose.model("Document", DocumentSchema);

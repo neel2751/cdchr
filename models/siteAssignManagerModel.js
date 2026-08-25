@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const siteAssignManagerSchema = new mongoose.Schema(
   {
@@ -47,6 +48,10 @@ const siteAssignManagerSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(siteAssignManagerSchema, "AssignProject");
+
 const SiteAssignManagerModel =
   mongoose.models.AssignProject ||
   mongoose.model("AssignProject", siteAssignManagerSchema);

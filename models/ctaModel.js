@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const ctaSchema = new mongoose.Schema(
   {
@@ -54,6 +55,10 @@ const ctaSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(ctaSchema, "Cta");
 
 const CtaModel = mongoose.models.Cta || mongoose.model("Cta", ctaSchema);
 export default CtaModel;

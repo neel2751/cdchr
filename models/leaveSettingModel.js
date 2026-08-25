@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 const leaveSettingSchema = new mongoose.Schema(
   {
     // Later this will be real companyId (for now can be null or default)
@@ -53,6 +54,10 @@ const leaveSettingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(leaveSettingSchema, "LeaveSetting");
 
 const LeaveSettingModel =
   mongoose.models.LeaveSetting ||

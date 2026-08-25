@@ -1,5 +1,6 @@
 // models/SiteAssignment.js
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 const Schema = mongoose.Schema;
 const ObjectId = Schema.Types.ObjectId;
 
@@ -19,6 +20,10 @@ const siteAssignmentSchema = new Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(siteAssignmentSchema, "SiteAssignment");
 
 const SiteAssignmentModel =
   mongoose.models.SiteAssignment ||

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const ReceiptFileSchema = new mongoose.Schema(
   {
@@ -87,6 +88,10 @@ const expenseSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(expenseSchema, "Expense");
+
 const ExpenseModel =
   mongoose.models.Expense || mongoose.model("Expense", expenseSchema);
 export default ExpenseModel;

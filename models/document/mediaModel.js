@@ -1,4 +1,5 @@
 import { Schema, model, models } from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const MediaSchema = new Schema(
   {
@@ -55,6 +56,10 @@ const MediaSchema = new Schema(
   { timestamps: true }
 );
 MediaSchema.index({ status: 1 });
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(MediaSchema, "Media");
 
 const MediaModel = models.Media || model("Media", MediaSchema);
 export default MediaModel;

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const attendanceCategorySchema = new mongoose.Schema(
   {
@@ -25,6 +26,10 @@ const attendanceCategorySchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(attendanceCategorySchema, "AttendanceCategory");
 
 const AttendanceCategoryModel =
   mongoose.models.AttendanceCategory ||

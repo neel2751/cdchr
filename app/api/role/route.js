@@ -3,6 +3,7 @@ import RoleBasedModel from "@/models/rolebasedModel";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
+import { escapeTenant } from "@/lib/tenantContext";
 
 export async function POST(req) {
   const { employeeId } = await req.json();
@@ -31,11 +32,16 @@ export async function POST(req) {
     await connect();
     // const findSite = await SiteAssignManagerModel.findOne({
 
-    const role = await RoleBasedModel.findOne({
-      employeeId,
-      isActive: true,
-      isDeleted: false,
-    });
+    // Called by proxy.js over HTTP, which does not forward the session cookie,
+    // so there is no tenant to derive. Safe because the lookup is pinned to a
+    // single employeeId taken from that user's own signed token.
+    const role = await escapeTenant("proxy: permission lookup by employeeId", () =>
+      RoleBasedModel.findOne({
+        employeeId,
+        isActive: true,
+        isDeleted: false,
+      })
+    );
 
     if (!role) {
       return NextResponse.json(

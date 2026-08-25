@@ -6,6 +6,7 @@ import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
 import { isTenantUsable, toTenantSummary } from "@/lib/tenant";
+import { escapeTenant } from "@/lib/tenantContext";
 import {
   hostCandidates,
   isPlatformHost,
@@ -194,10 +195,16 @@ export async function getTenants(filterData) {
       .exec();
 
     // Employee counts per tenant, in one query rather than one per row.
-    const counts = await OfficeEmployeeModel.aggregate([
-      { $match: { delete: { $ne: true }, company: { $ne: null } } },
-      { $group: { _id: "$company", total: { $sum: 1 } } },
-    ]);
+    // Cross-tenant on purpose: this is the provider's view of every tenant, and
+    // callers are gated to platformAdmin in proxy.js and again in the layout.
+    const counts = await escapeTenant(
+      "platform console: employee counts across tenants",
+      () =>
+        OfficeEmployeeModel.aggregate([
+          { $match: { delete: { $ne: true }, company: { $ne: null } } },
+          { $group: { _id: "$company", total: { $sum: 1 } } },
+        ])
+    );
     const countByTenant = new Map(
       counts.map((c) => [String(c._id), c.total])
     );

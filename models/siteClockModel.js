@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const siteClockSchema = new mongoose.Schema(
   {
@@ -67,6 +68,10 @@ const siteClockSchema = new mongoose.Schema(
 
 siteClockSchema.index({ employeeId: 1, siteId: 1, date: -1, isDeleted: 1 });
 siteClockSchema.index({ siteId: 1, date: -1, isDeleted: 1 });
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(siteClockSchema, "SiteClock");
 
 const SiteClockModel =
   mongoose.models.SiteClock || mongoose.model("SiteClock", siteClockSchema);

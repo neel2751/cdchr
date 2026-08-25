@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const leaveRequestSchema = new mongoose.Schema(
   {
@@ -102,6 +103,10 @@ const leaveRequestSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(leaveRequestSchema, "LeaveRequest");
 
 const LeaveRequestModel =
   mongoose.models.LeaveRequest ||

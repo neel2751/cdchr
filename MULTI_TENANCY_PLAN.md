@@ -579,15 +579,57 @@ Two decisions made during implementation, both deviating slightly from the sketc
    resolve endpoint answers in ~2s with `{"type":"unknown"}` and every existing route is
    completely unaffected. Before the bounds were added, an outage cost 10s per lookup.
 
-### Phase 2 — Tenant context + backfill *(shadow mode)*
-- Build `lib/tenant.js` (AsyncLocalStorage) and `lib/tenantPlugin.js` (§3.2).
-- Apply the plugin to all 48 schemas; add `companyId` + compound indexes leading with it.
-- Migration script (following the existing `scripts/migrate-zipcode-to-postcode.mjs`
-  pattern) backfilling `companyId` on every collection, using
-  `officeEmployeeModel.company` where present and tenant #1 otherwise.
+### Phase 2 — Tenant context + backfill *(shadow mode)* ✅ *implemented*
+- Build the tenant context (AsyncLocalStorage) and `lib/tenantPlugin.js` (§3.2).
+- Apply the plugin to all tenant-scoped schemas; add `companyId` + compound indexes.
+- Migration script backfilling `companyId` on every collection.
 - **Shadow mode:** the plugin *logs* every query that runs without tenant context instead
-  of throwing. Run in production until the log is silent. This is what converts "we
-  probably got all 515" into evidence.
+  of throwing. Run in production until the log is silent.
+
+Delivered:
+
+| File | Purpose |
+|---|---|
+| `lib/tenantContext.js` | AsyncLocalStorage scope + per-request session fallback |
+| `lib/tenantPlugin.js` | Adds `companyId`, filters reads/writes/aggregates, flags unscoped `$lookup` |
+| `scripts/backfill-tenant.mjs` | Idempotent backfill with per-employee attribution |
+| `scripts/seed-dev-fixtures.mjs` | Two-tenant fixtures (refuses any non-local database) |
+| `scripts/test-tenant-scope.mjs` | 9 cross-tenant isolation tests (`npm run tenant:test`) |
+| `scripts/lib/alias-loader.mjs` | Resolves `@/…` so models can be tested outside Next |
+
+Applied to **42 models**; 7 are deliberately global (`GLOBAL_MODELS` in the plugin):
+the tenant itself, platform users, and the five auth-time collections consulted before a
+tenant is known.
+
+**The context problem, solved without touching 515 call sites.** The original sketch
+wrapped every server action in `withTenant`, which meant editing 59 files. Instead
+`currentTenantId()` falls back to the session of the request in flight, memoised per
+request with React's `cache()`. Existing queries get a tenant with no edit at all;
+`runWithTenant()` remains for crons, scripts and the platform console, which have no
+session.
+
+**A trap worth recording.** `runWithTenant(id, () => Model.find())` silently lost the
+context: a Mongoose Query is lazy, so the callback returns before anything executes and
+the `await` — with every hook — lands outside the scope. All nine tests failed with "no
+tenant in context" despite being correctly wrapped. Both `runWithTenant` and
+`escapeTenant` now await inside the scope so a lazy Query cannot escape it.
+
+**`$lookup` detection works.** Run against the real pipeline in
+`server/officeServer/officeServer.js`, shadow mode reports both lookups (`companies`,
+`roletypes`) as unscoped and says to convert them to pipeline form — and goes silent once
+converted. The §9 "highest-risk surface" is now a mechanically-produced checklist rather
+than a manual audit.
+
+**Escape hatches so far** (`grep escapeTenant` lists every one): the login account
+lookup, the platform console's employee counts, and the two proxy-called routes
+`/api/role` and `/api/account/status`, both reached over HTTP without a cookie and pinned
+to an employeeId taken from the caller's own signed token.
+
+**Not yet done, and needed before Phase 3.** Shadow mode has produced no findings from
+live traffic yet, because the admin pages fetch through react-query *after* hydration —
+so driving them with curl never invokes the server actions. Real signal needs the app
+exercised through a browser, or the actions called directly. Until that has run, the size
+of Phase 3 is still an estimate.
 
 ### Phase 3 — Enforce isolation
 - Flip the plugin to fail-closed.

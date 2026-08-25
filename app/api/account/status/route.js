@@ -2,6 +2,7 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import mongoose from "mongoose";
 import { NextResponse } from "next/server";
+import { escapeTenant } from "@/lib/tenantContext";
 
 // Used by middleware to terminate live sessions for accounts that have been
 // deactivated / locked down. Fails open (returns active) on any error so a
@@ -13,9 +14,11 @@ export async function POST(req) {
       return NextResponse.json({ isActive: true }, { status: 200 });
     }
     await connect();
-    const emp = await OfficeEmployeeModel.findById(employeeId)
-      .select("isActive delete")
-      .lean();
+    // Same reasoning as /api/role: proxy.js calls this without a cookie, so
+    // there is no tenant. Pinned to the employeeId from the caller's own token.
+    const emp = await escapeTenant("proxy: account status by employeeId", () =>
+      OfficeEmployeeModel.findById(employeeId).select("isActive delete").lean()
+    );
     if (!emp) {
       return NextResponse.json({ isActive: true }, { status: 200 });
     }

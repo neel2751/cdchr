@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const conversationSchema = new mongoose.Schema({
   sender: {
@@ -63,6 +64,10 @@ const leadSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(leadSchema, "Lead");
 
 const LeadModel = mongoose.models.Lead || mongoose.model("Lead", leadSchema);
 export default LeadModel;

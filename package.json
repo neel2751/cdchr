@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "NODE_ENV=production node server.mjs",
     "lint": "eslint .",
-    "migrate:postcode": "node scripts/migrate-zipcode-to-postcode.mjs"
+    "migrate:postcode": "node scripts/migrate-zipcode-to-postcode.mjs",
+    "tenant:seed": "node scripts/seed-tenant.mjs",
+    "tenant:fixtures": "node scripts/seed-dev-fixtures.mjs",
+    "tenant:backfill": "node scripts/backfill-tenant.mjs",
+    "tenant:test": "node --import ./scripts/lib/alias-loader.mjs scripts/test-tenant-scope.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

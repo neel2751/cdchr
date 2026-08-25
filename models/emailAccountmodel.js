@@ -1,5 +1,6 @@
 import { decrypt, encrypt } from "@/lib/algo";
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const emailAccountSchema = new mongoose.Schema(
   {
@@ -91,6 +92,10 @@ emailAccountSchema.pre("save", function (next) {
 emailAccountSchema.methods.getDecryptedPassword = function () {
   return decrypt(this.password);
 };
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(emailAccountSchema, "EmailAccount");
 
 const EmailAccountModel =
   mongoose.models.EmailAccount ||

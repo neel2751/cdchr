@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 /**
  * Immutable, append-only history of every weekly-rota state.
@@ -68,6 +69,10 @@ const weeklyRotaVersionSchema = new mongoose.Schema(
 
 weeklyRotaVersionSchema.index({ rotaId: 1, version: -1 });
 weeklyRotaVersionSchema.index({ weekStartDate: -1 });
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(weeklyRotaVersionSchema, "WeeklyRotaVersion");
 
 const WeeklyRotaVersionModel =
   mongoose.models.WeeklyRotaVersion ||

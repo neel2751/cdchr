@@ -1,4 +1,5 @@
 import mongoose, { Schema } from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const meetingSchema = new Schema(
   {
@@ -17,6 +18,10 @@ const meetingSchema = new Schema(
     timestamps: true,
   }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(meetingSchema, "Meeting");
 
 const MeetingModel =
   mongoose.models.Meeting || mongoose.model("Meeting", meetingSchema);

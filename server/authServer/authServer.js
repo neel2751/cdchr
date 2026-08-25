@@ -8,6 +8,7 @@ import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
 import PlatformUserModel from "@/models/platformUserModel";
+import { escapeTenant } from "@/lib/tenantContext";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -207,37 +208,39 @@ export const LoginData = async (email, password, deviceId) => {
 
   await connect();
 
-  // Try OfficeEmployeeModel first
-  let user = await OfficeEmployeeModel.findOne({
-    email,
-    delete: { $ne: true },
-  }).lean();
-  let userType = "office";
-
-  if (!user) {
-    // Then try SiteEmployeeModel
-    user = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
-    userType = "site";
-  }
-
-  if (!user) {
-    user = await OfficeUserModel.findOne({
+  // Cross-tenant by necessity: at this point there is no session, so there is
+  // no tenant — working out which one the account belongs to is the whole
+  // purpose of this lookup. Which tenant they may then reach is enforced
+  // afterwards, from the signed session.
+  const { user, userType } = await escapeTenant("login: find account by email", async () => {
+    // Try OfficeEmployeeModel first
+    let found = await OfficeEmployeeModel.findOne({
       email,
       delete: { $ne: true },
     }).lean();
-    userType = "reception";
-  }
+    if (found) return { user: found, userType: "office" };
 
-  // Provider-side staff who administer the platform itself. Checked last, so
-  // this branch is only reached for an email that belongs to no tenant — a
-  // deployment with no platform users behaves exactly as it did before.
-  if (!user) {
-    user = await PlatformUserModel.findOne({
+    // Then try SiteEmployeeModel
+    found = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
+    if (found) return { user: found, userType: "site" };
+
+    found = await OfficeUserModel.findOne({
+      email,
+      delete: { $ne: true },
+    }).lean();
+    if (found) return { user: found, userType: "reception" };
+
+    // Provider-side staff who administer the platform itself. Checked last, so
+    // this branch is only reached for an email that belongs to no tenant — a
+    // deployment with no platform users behaves exactly as it did before.
+    found = await PlatformUserModel.findOne({
       email: email.toLowerCase(),
       delete: { $ne: true },
     }).lean();
-    userType = "platform";
-  }
+    if (found) return { user: found, userType: "platform" };
+
+    return { user: null, userType: null };
+  });
 
   // No user found
   if (!user) {

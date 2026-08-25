@@ -1,5 +1,6 @@
 // models/FormTemplateModel.js
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const formTemplateSchema = new mongoose.Schema(
   {
@@ -19,6 +20,10 @@ const formTemplateSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(formTemplateSchema, "FormTemplate");
 
 const FormTemplateModel =
   mongoose.models.FormTemplate ||

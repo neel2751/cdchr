@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { applyTenantScope } from "@/lib/tenantPlugin";
 
 const Schema = mongoose.Schema;
 const ObjectId = Schema.Types.ObjectId;
@@ -74,6 +75,10 @@ auditLogSchema.index({ actorId: 1, createdAt: -1 });
 auditLogSchema.index({ module: 1, createdAt: -1 });
 auditLogSchema.index({ entityId: 1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
+
+// Tenant scoping (lib/tenantPlugin.js). Must run before the model is
+// compiled, or the hooks and companyId field are not attached.
+applyTenantScope(auditLogSchema, "AuditLog");
 
 const AuditLogModel =
   mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema);
