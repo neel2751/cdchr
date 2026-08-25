@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { SessionProvider } from "next-auth/react";
-import { getServerSession } from "next-auth";
-import { options } from "@/app/api/auth/[...nextauth]/option";
+import { auth } from "@/auth";
 import { PlatformProviders } from "./providers";
 import PlatformNav from "./platformNav";
 
@@ -19,7 +18,7 @@ export const metadata = {
  * layout is the last thing between a request and cross-tenant data.
  */
 export default async function PlatformLayout({ children }) {
-  const session = await getServerSession(options);
+  const session = await auth();
 
   if (!session?.user) redirect("/api/auth/signin");
   if (session.user.role !== "platformAdmin") redirect("/unauthorized");

@@ -4,14 +4,13 @@ import { NextResponse } from "next/server";
 import axios from "axios";
 import { connect } from "@/db/db";
 import MicrosoftIntegration from "@/models/microSoftModel";
-import { getServerSession } from "next-auth";
-import { options } from "../../[...nextauth]/option";
+import { auth } from "@/auth";
 
 export async function GET(req) {
   const code = req.nextUrl.searchParams.get("code");
   const returnTo =
     req.nextUrl.searchParams.get("return_to") || "/admin/integrations";
-  const session = await getServerSession(options);
+  const session = await auth();
   if (!session?.user?.email) {
     return new NextResponse("Unauthorized", { status: 401 });
   }

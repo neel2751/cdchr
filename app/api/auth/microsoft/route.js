@@ -1,11 +1,10 @@
 // app/api/auth/microsoft/route.ts
 
-import { getServerSession } from "next-auth";
+import { auth } from "@/auth";
 import { NextResponse } from "next/server";
-import { options } from "../[...nextauth]/option";
 
 export async function GET() {
-  const session = await getServerSession(options);
+  const session = await auth();
   const role = session?.user?.role;
   if (!role) {
     return new NextResponse("Unauthorized", { status: 401 });

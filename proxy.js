@@ -1,5 +1,6 @@
-import { withAuth } from "next-auth/middleware";
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
+import { authConfig } from "./auth.config";
 import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
 import {
   TENANT_HEADERS,
@@ -88,11 +89,25 @@ function withTenantHeaders(req, resolution) {
 
 async function checkRoleMiddleware(req) {
   const requestedPath = req?.nextUrl?.pathname;
-  const token = req?.nextauth?.token;
-  const employeeId = token?.id;
-  const userRole = token?.role;
-  const requires2FA = token?.requiresTwoFactor === true;
-  const mustSetup2FA = token?.mustSetup2FA === true;
+  // Auth.js v5 exposes the resolved session on the request, where v4 put the
+  // raw JWT on `req.nextauth.token`. The fields below all come through the
+  // session callback in auth.config.js.
+  const user = req?.auth?.user;
+  const employeeId = user?._id;
+  const userRole = user?.role;
+  const requires2FA = user?.requiresTwoFactor === true;
+  const mustSetup2FA = user?.mustSetup2FA === true;
+
+  // v4's withAuth redirected unauthenticated requests before this ran; v5 hands
+  // every matched request over, so the check is explicit.
+  if (!req?.auth) {
+    const signInUrl = new URL("/api/auth/signin", req.url);
+    signInUrl.searchParams.set(
+      "callbackUrl",
+      `${requestedPath}${req.nextUrl.search || ""}`
+    );
+    return NextResponse.redirect(signInUrl);
+  }
 
   const hostname = req?.headers?.get("host") || "";
 
@@ -321,11 +336,11 @@ async function checkRoleMiddleware(req) {
   return pass();
 }
 
-export default withAuth(checkRoleMiddleware, {
-  callbacks: {
-    authorized: ({ token }) => !!token,
-  },
-});
+// Built from the Edge-safe half of the config only — the Credentials provider
+// and the signIn callback both need Mongoose, which cannot run here.
+const { auth } = NextAuth(authConfig);
+
+export default auth(checkRoleMiddleware);
 
 // Exclude auth routes and public paths from the middleware
 export const config = {

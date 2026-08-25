@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import Image from "next/image";
 import { GlobalForm } from "@/components/form/form";
 import { CopyCode } from "@/components/clipboard";
+import { describeLoginError } from "@/lib/authErrors";
+import { toSafeRelativePath } from "@/lib/roleHome";
 
 export const LOGINFIELD = [
   {
@@ -49,7 +51,13 @@ export const LoginUi = () => {
   const [isLoading, setIsLoading] = React.useState(false);
   const [unauthorizedId, setUnauthorizedId] = React.useState(""); // State to store the ID
 
-  const callBackcheck = callback || process.env.NEXTAUTH_URL || "/";
+  // Always a same-origin path. Auth.js derives absolute URLs from the request
+  // URL, which behind a proxy is the internal address rather than the tenant's
+  // domain — so the destination is resolved here instead of taken from it.
+  const callBackcheck = toSafeRelativePath(
+    callback,
+    typeof window === "undefined" ? "" : window.location.origin
+  );
 
   useEffect(() => {
     if (session) {
@@ -84,25 +92,17 @@ export const LoginUi = () => {
         });
 
         if (res?.error) {
-          // we have ERROR TYPE from the API
-          try {
-            const cleanJson = res.error.replace(/^Error: /, "");
-            const errorObj = JSON.parse(cleanJson);
-
-            if (errorObj.type === "DEVICE_ERROR") {
-              toast.error(
-                "This device is not authorized. Please contact admin.",
-              );
-              setUnauthorizedId(errorObj?.detectedId || "");
-            } else {
-              toast.error(errorObj?.message); // Optionally show a toast notification
-            }
-          } catch (parseError) {
-            toast.error(res.error.replace(/^Error: /, ""));
-          }
+          // Auth.js v5 forwards only the short `code` of the error thrown in
+          // authorize(); the wording is reconstructed here.
+          const { message, deviceId: unauthorizedDeviceId } =
+            describeLoginError(res.code);
+          toast.error(message);
+          if (unauthorizedDeviceId) setUnauthorizedId(unauthorizedDeviceId);
         } else {
           toast.success("Logged in successfully. Please wait..."); // Optionally show a toast notification
-          window.location.href = res.url || callBackcheck || "/";
+          // Deliberately ignores res.url — see toSafeRelativePath. A full page
+          // load (not router.push) so the proxy re-runs with the new cookie.
+          window.location.href = callBackcheck;
         }
       } catch (err) {
         console.log("Error during login:", err);
