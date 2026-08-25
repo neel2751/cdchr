@@ -126,6 +126,19 @@ async function main() {
     const acmeUser = await escapeTenant("test setup", () =>
       OfficeEmployee.findOne({ email: "admin@acme.test" }).lean()
     );
+
+    // Reset to a known value first. In shadow mode the tamper below genuinely
+    // succeeds — that is the point of shadow mode — so without this the next
+    // enforce run would read the previous run's leftover and report a failure
+    // that is really just stale state.
+    const SENTINEL = "untouched";
+    await escapeTenant("test setup", () =>
+      OfficeEmployee.updateOne(
+        { _id: acmeUser._id },
+        { $set: { emergencyName: SENTINEL } }
+      )
+    );
+
     const res = await runWithTenant(String(beta._id), () =>
       OfficeEmployee.updateOne(
         { _id: acmeUser._id },
@@ -135,9 +148,20 @@ async function main() {
     const after = await escapeTenant("test check", () =>
       OfficeEmployee.findById(acmeUser._id).lean()
     );
+
     if (ENFORCING) {
       assert.equal(res.modifiedCount, 0, "cross-tenant update was applied");
-      assert.notEqual(after.emergencyName, "TAMPERED");
+      assert.equal(after.emergencyName, SENTINEL, "Acme's row was modified by Beta");
+    } else {
+      // Shadow mode must not block anything — confirm it really did go through,
+      // then put the fixture back.
+      assert.equal(after.emergencyName, "TAMPERED", "shadow mode must not filter");
+      await escapeTenant("test cleanup", () =>
+        OfficeEmployee.updateOne(
+          { _id: acmeUser._id },
+          { $set: { emergencyName: SENTINEL } }
+        )
+      );
     }
   });
 
