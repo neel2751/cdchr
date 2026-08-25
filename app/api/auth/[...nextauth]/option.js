@@ -114,7 +114,10 @@ export const options = {
         const enabled = await check2FAEnabled(id);
         // Privileged accounts must use 2FA. If enabled, they must verify each
         // login; if not yet enabled, they are forced to set it up first.
-        const privileged = user.role === "admin" || user.role === "superAdmin";
+        const privileged =
+          user.role === "admin" ||
+          user.role === "superAdmin" ||
+          user.role === "platformAdmin";
         user.requiresTwoFactor = enabled;
         user.mustSetup2FA = privileged && !enabled;
         return true;
@@ -128,6 +131,11 @@ export const options = {
         token.email = user.email;
         token.role = user.role;
         token.deviceId = user.deviceId;
+        // Tenant the account belongs to. Recorded now so later phases can scope
+        // queries and reject a session used against another tenant's domain;
+        // nothing reads it for authorization yet, and it is null for accounts
+        // that have no company set.
+        token.companyId = user.companyId ?? null;
         token.requiresTwoFactor = user.requiresTwoFactor ?? false; // Initialize 2FA requirement status
         token.mustSetup2FA = user.mustSetup2FA ?? false; // Forced 2FA enrolment
       }
@@ -148,6 +156,7 @@ export const options = {
         session.user._id = token.id;
         session.user.role = token.role;
         session.user.deviceId = token.deviceId;
+        session.user.companyId = token.companyId ?? null;
       }
       // Include 2FA requirement status in session
       if (token.requiresTwoFactor) {

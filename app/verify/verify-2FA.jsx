@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import TwoFAConfirmModal from "@/components/TwoFAConfirmModel";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
+import { homePathForRole } from "@/lib/roleHome";
 
 export default function VerifyTwoFactor() {
   const [open, setOpen] = useState(true);
@@ -14,10 +15,7 @@ export default function VerifyTwoFactor() {
     if (status !== "loading") {
       // If user is authenticated but doesn't need 2FA, redirect them away
       if (session && !session?.user?.requiresTwoFactor) {
-        session?.user?.role === "siteEmployee"
-          ? router.push("/employee")
-          : router.push("/admin/dashboard");
-        router.push("/admin/dashboard");
+        router.push(homePathForRole(session?.user?.role));
       }
     }
   }, [session, status, router]);
@@ -30,9 +28,7 @@ export default function VerifyTwoFactor() {
     await update({ twoFactorVerified: true });
     setOpen(false);
     toast.success("Two-factor authentication verified");
-    const dest =
-      session?.user?.role === "siteEmployee" ? "/employee" : "/admin/dashboard";
-    window.location.assign(dest);
+    window.location.assign(homePathForRole(session?.user?.role));
   };
 
   return (

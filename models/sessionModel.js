@@ -9,7 +9,7 @@ const userSessionSchema = new mongoose.Schema(
     },
     userType: {
       type: String,
-      enum: ["OfficeEmploye", "Employe"],
+      enum: ["OfficeEmploye", "Employe", "PlatformUser"],
       required: true,
     },
     platform: {

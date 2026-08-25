@@ -14,9 +14,10 @@ import {
 } from "@/components/ui/card";
 import { Loader2, ShieldCheck, Copy } from "lucide-react";
 import { toast } from "sonner";
+import { homePathForRole } from "@/lib/roleHome";
 
 export default function ForcedTwoFactorSetup() {
-  const { update } = useSession();
+  const { data: session, update } = useSession();
   const [secret, setSecret] = useState("");
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [code, setCode] = useState("");
@@ -55,7 +56,7 @@ export default function ForcedTwoFactorSetup() {
         // middleware re-evaluates with mustSetup2FA cleared (a client-side
         // push can run before the cookie propagates and bounce back here).
         await update({ twoFactorSetupComplete: true });
-        window.location.assign("/admin/dashboard");
+        window.location.assign(homePathForRole(session?.user?.role));
       } else {
         toast.error(res?.message || "Invalid code, please try again");
       }

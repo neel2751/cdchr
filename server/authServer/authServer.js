@@ -7,6 +7,7 @@ import { sendMail } from "../email/email";
 import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
+import PlatformUserModel from "@/models/platformUserModel";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -227,6 +228,17 @@ export const LoginData = async (email, password, deviceId) => {
     userType = "reception";
   }
 
+  // Provider-side staff who administer the platform itself. Checked last, so
+  // this branch is only reached for an email that belongs to no tenant — a
+  // deployment with no platform users behaves exactly as it did before.
+  if (!user) {
+    user = await PlatformUserModel.findOne({
+      email: email.toLowerCase(),
+      delete: { $ne: true },
+    }).lean();
+    userType = "platform";
+  }
+
   // No user found
   if (!user) {
     return { status: false, message: "Email not found" };
@@ -300,6 +312,11 @@ export const LoginData = async (email, password, deviceId) => {
     // }
   } else if (userType === "site") {
     user.role = "siteEmployee";
+  } else if (userType === "platform") {
+    // Deliberately distinct from superAdmin, which is the top role *inside* a
+    // tenant. platformAdmin sits outside every tenant and can only reach
+    // /platform (see rolePathMap in proxy.js).
+    user.role = "platformAdmin";
   } else {
     user.role = "reception";
     //
@@ -312,9 +329,15 @@ export const LoginData = async (email, password, deviceId) => {
       ? "OfficeEmployee"
       : userType === "site"
       ? "SiteEmployee"
+      : userType === "platform"
+      ? "PlatformUser"
       : "ReceptionEmployee";
   // user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
   user.name = user.name || user.firstName || "User";
+  // Which tenant this account belongs to. Only office employees carry one
+  // today and it is frequently unset, so it is recorded on the session for
+  // later phases — nothing enforces it yet.
+  user.companyId = user.company ? String(user.company) : null;
   return {
     status: true,
     data: user,
@@ -348,7 +371,12 @@ export const storeSession = async (data) => {
     } = data;
     const obj = {
       userId,
-      userType: userType === "OfficeEmployee" ? "OfficeEmploye" : "Employe",
+      userType:
+        userType === "OfficeEmployee"
+          ? "OfficeEmploye"
+          : userType === "PlatformUser"
+          ? "PlatformUser"
+          : "Employe",
       platform,
       browser,
       device,

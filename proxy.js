@@ -1,6 +1,90 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
+import {
+  TENANT_HEADERS,
+  isPlatformHost,
+  normalizeHost,
+  platformApexHost,
+} from "./lib/tenantHost";
+
+// Host -> resolution cache. Middleware module scope survives between requests
+// within an isolate, so a hostname is resolved at most once a minute rather
+// than on every request. The route handler caches the database lookup too.
+const RESOLVE_TTL_MS = 60_000;
+// A failed lookup is remembered briefly too, so a database outage cannot turn
+// into one failing round-trip per request.
+const RESOLVE_FAIL_TTL_MS = 5_000;
+// Tenant resolution sits in front of every matched request, so it is never
+// allowed to hold one up. If it cannot answer in this long, the request goes
+// through unresolved.
+const RESOLVE_TIMEOUT_MS = 2_500;
+const resolveCache = new Map();
+const UNKNOWN = { type: "unknown", tenant: null };
+
+/**
+ * Ask the app which tenant owns this hostname.
+ *
+ * Always fails open: if the lookup errors or times out the request proceeds
+ * exactly as it did before multi-tenancy existed. Nothing in this phase reads
+ * the result except the /platform gate.
+ */
+async function resolveTenant(req) {
+  const host = normalizeHost(req.headers.get("host"));
+  if (!host) return UNKNOWN;
+  if (isPlatformHost(host)) return { type: "platform", tenant: null };
+
+  const cached = resolveCache.get(host);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const remember = (value, ttl) => {
+    resolveCache.set(host, { value, expiresAt: Date.now() + ttl });
+    return value;
+  };
+
+  try {
+    // req.nextUrl.origin, not NEXTAUTH_URL — with several tenant domains in
+    // play, the request's own origin is the only correct one.
+    const res = await fetch(
+      `${req.nextUrl.origin}/api/tenant/resolve?host=${encodeURIComponent(host)}`,
+      {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS),
+      }
+    );
+    if (!res.ok) return remember(UNKNOWN, RESOLVE_FAIL_TTL_MS);
+
+    return remember(await res.json(), RESOLVE_TTL_MS);
+  } catch (err) {
+    // Includes the abort on timeout. Fail open — an unresolved tenant leaves
+    // the request behaving exactly as it did before multi-tenancy.
+    console.log("Tenant resolve error:", err?.message);
+    return remember(UNKNOWN, RESOLVE_FAIL_TTL_MS);
+  }
+}
+
+/**
+ * Rebuild the request headers with trustworthy tenant hints.
+ *
+ * Every `x-tenant-*` header is stripped first, so a client that sends
+ * `x-tenant-id: <another tenant>` cannot have it reach application code. These
+ * headers are a convenience only — server code that needs the tenant resolves
+ * it from the Host header itself (see server/tenantServer/getRequestTenant).
+ */
+function withTenantHeaders(req, resolution) {
+  const headers = new Headers(req.headers);
+  for (const name of TENANT_HEADERS) headers.delete(name);
+
+  headers.set("x-tenant-host", normalizeHost(req.headers.get("host")));
+  if (resolution?.type === "tenant" && resolution.tenant) {
+    headers.set("x-tenant-id", resolution.tenant.id);
+    headers.set("x-tenant-status", resolution.tenant.status || "active");
+    if (resolution.tenant.slug) {
+      headers.set("x-tenant-slug", resolution.tenant.slug);
+    }
+  }
+  return headers;
+}
 
 async function checkRoleMiddleware(req) {
   const requestedPath = req?.nextUrl?.pathname;
@@ -12,11 +96,54 @@ async function checkRoleMiddleware(req) {
 
   const hostname = req?.headers?.get("host") || "";
 
+  // Resolve the tenant for this hostname and strip any spoofed tenant headers.
+  // `pass()` replaces a bare NextResponse.next() so the cleaned headers travel
+  // with every request that is allowed through.
+  const resolution = await resolveTenant(req);
+  const tenantHeaders = withTenantHeaders(req, resolution);
+  const pass = () => NextResponse.next({ request: { headers: tenantHeaders } });
+
+  // --- Platform (provider) dashboard ---------------------------------------
+  // Served only to platformAdmin, and only on PLATFORM_APEX_HOST when one is
+  // configured. With no apex configured the role check alone applies, so
+  // existing single-domain deployments keep working.
+  const apexHost = platformApexHost();
+  const onPlatformHost = isPlatformHost(hostname);
+  const isPlatformPath = requestedPath.startsWith("/platform");
+
+  if (isPlatformPath) {
+    if (userRole !== "platformAdmin") {
+      return NextResponse.redirect(new URL("/unauthorized", req.url));
+    }
+    if (apexHost && !onPlatformHost) {
+      return NextResponse.redirect(new URL("/unauthorized", req.url));
+    }
+    // Platform admins are privileged, so the same 2FA gates apply. Repeated
+    // here because this branch returns before the shared checks below.
+    if (requires2FA) {
+      return NextResponse.redirect(new URL("/verify", req.url));
+    }
+    if (mustSetup2FA) {
+      return NextResponse.redirect(new URL("/setup-2fa", req.url));
+    }
+    return pass();
+  }
+
+  // The platform host serves the platform dashboard and nothing else.
+  if (onPlatformHost) {
+    return NextResponse.redirect(new URL("/platform", req.url));
+  }
+
+  // A platform admin has no place inside a tenant's app.
+  if (userRole === "platformAdmin") {
+    return NextResponse.redirect(new URL("/platform", req.url));
+  }
+
   const customBrandDomain = "form.cdcproperty.management";
   if (hostname === customBrandDomain) {
     // allow only the visitor path
     if (requestedPath.startsWith("/visitor")) {
-      return NextResponse.next();
+      return pass();
     }
 
     return NextResponse.redirect(new URL("/unauthorized", req.url));
@@ -31,7 +158,7 @@ async function checkRoleMiddleware(req) {
   const isAdminAccountRoute = requestedPath.startsWith("/admin/account/");
 
   if (requestedPath === "/verify" || isAdminAccountRoute) {
-    return NextResponse.next();
+    return pass();
   }
 
   // If 2FA is required, redirect to verification page
@@ -91,7 +218,7 @@ async function checkRoleMiddleware(req) {
 
       if (!response.ok) {
         // we have to do next
-        return NextResponse.next();
+        return pass();
         // return NextResponse.redirect(
         //   new URL("/unauthorized?action=logout", req.url)
         // );
@@ -107,7 +234,7 @@ async function checkRoleMiddleware(req) {
       console.log("Middleware Fetch Error:", err);
       // If the fetch itself fails (network error), don't lock them out
       // unless you want high-security mode.
-      return NextResponse.next();
+      return pass();
     }
   }
 
@@ -117,6 +244,7 @@ async function checkRoleMiddleware(req) {
     siteEmployee: "/employee",
     reception: "/hr",
     superAdmin: "*",
+    platformAdmin: "/platform",
   };
 
   // Restrict path access by role (route prefix guard)
@@ -132,7 +260,7 @@ async function checkRoleMiddleware(req) {
     (item) =>
       requestedPath === item?.path || requestedPath.startsWith(`${item?.path}/`)
   );
-  if (isCommonMenuItem) return NextResponse.next();
+  if (isCommonMenuItem) return pass();
 
   // ✅ Bypass permission checks for `siteEmployee`
   if (
@@ -140,7 +268,7 @@ async function checkRoleMiddleware(req) {
     userRole === "superAdmin" ||
     userRole === "reception"
   ) {
-    return NextResponse.next();
+    return pass();
   }
 
   // Combine menu items
@@ -150,8 +278,10 @@ async function checkRoleMiddleware(req) {
       requestedPath === item?.path || requestedPath.startsWith(`${item?.path}/`)
   );
 
-  // Fetch permissions for admin/superadmin users
-  const res = await fetch(`${process.env.NEXTAUTH_URL}/api/role`, {
+  // Fetch permissions for admin/superadmin users. Uses the request's own origin
+  // rather than NEXTAUTH_URL, which holds a single hostname and would point at
+  // the wrong domain once tenants are served on their own.
+  const res = await fetch(`${req.nextUrl.origin}/api/role`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -188,7 +318,7 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL(dashboardPath, req.url));
   }
 
-  return NextResponse.next();
+  return pass();
 }
 
 export default withAuth(checkRoleMiddleware, {
@@ -199,5 +329,10 @@ export default withAuth(checkRoleMiddleware, {
 
 // Exclude auth routes and public paths from the middleware
 export const config = {
-  matcher: ["/admin/:path*", "/employee/:path*", "/hr/:path*"], // Only match admin routes
+  matcher: [
+    "/admin/:path*",
+    "/employee/:path*",
+    "/hr/:path*",
+    "/platform/:path*",
+  ],
 };
