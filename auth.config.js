@@ -55,16 +55,13 @@ export const authConfig = {
         token.mustSetup2FA = user.mustSetup2FA ?? false;
       }
 
-      // Handle update, including 2FA verification
-      if (trigger === "update" && session?.twoFactorVerified) {
-        token.requiresTwoFactor = false;
-      }
-      // After forced enrolment completes, the user has just verified a code, so
-      // clear both the setup requirement and the per-login verification flag.
-      if (trigger === "update" && session?.twoFactorSetupComplete) {
-        token.mustSetup2FA = false;
-        token.requiresTwoFactor = false;
-      }
+      // NOTE: `trigger === "update"` is deliberately NOT handled here.
+      //
+      // Clearing the 2FA gate requires checking the database for proof that a
+      // code was actually accepted, and this callback also runs on the Edge in
+      // proxy.js, where Mongoose cannot. auth.js overrides this callback and
+      // adds that handling for the Node runtime, which is the only place a
+      // session update is ever processed.
       return token;
     },
 

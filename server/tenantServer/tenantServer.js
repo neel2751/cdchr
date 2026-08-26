@@ -5,8 +5,9 @@ import { connect } from "@/db/db";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
-import { isTenantUsable, toTenantSummary } from "@/lib/tenant";
+import { isTenantUsable, resolveBranding, toTenantSummary } from "@/lib/tenant";
 import { escapeTenant } from "@/lib/tenantContext";
+import { getServerSideProps } from "../session/session";
 import {
   hostCandidates,
   isPlatformHost,
@@ -253,6 +254,34 @@ export async function getTenantById(id) {
   } catch (error) {
     console.log("getTenantById error:", error?.message);
     return { success: false, message: "Something went wrong" };
+  }
+}
+
+/**
+ * Branding for the signed-in user's own company, for the app shell to render.
+ *
+ * Open to any signed-in user — unlike the settings actions, which are super
+ * admin only. It returns nothing but presentation, and every user of a company
+ * sees that company's branding anyway.
+ */
+export async function getBrandingForCurrentUser() {
+  try {
+    const { props } = await getServerSideProps();
+    const tenantId = props?.session?.user?.tenantId;
+    if (!tenantId || !isValidObjectId(tenantId)) return null;
+
+    await connect();
+    const tenant = await CompanyModel.findById(tenantId)
+      .select("name branding")
+      .lean()
+      .exec();
+    if (!tenant) return null;
+
+    return { name: tenant.name, ...resolveBranding(tenant) };
+  } catch (error) {
+    // Branding is cosmetic — never let it break the page it decorates.
+    console.log("getBrandingForCurrentUser error:", error?.message);
+    return null;
   }
 }
 

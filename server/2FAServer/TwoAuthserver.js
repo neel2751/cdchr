@@ -196,6 +196,25 @@ export async function check2FAEnabled(employeeId) {
   }
 }
 
+/**
+ * Whether this account passed a TOTP challenge in the last few minutes.
+ *
+ * The evidence auth.js needs before it will clear a session's 2FA gate. The
+ * window only has to cover the moment between the code being accepted and the
+ * session being updated.
+ */
+export async function hasRecentTwoFactorVerification(employeeId, maxAgeMs = 5 * 60 * 1000) {
+  try {
+    await connect();
+    const exist = await TwoFAMoldel.findOne({ employeeId }).lean();
+    if (!exist?.lastVerifiedAt) return false;
+    return Date.now() - new Date(exist.lastVerifiedAt).getTime() <= maxAgeMs;
+  } catch (error) {
+    console.error("Error checking recent 2FA verification:", error);
+    return false;
+  }
+}
+
 export async function verify2FAWithDB(code) {
   try {
     const { props } = await getServerSideProps();
@@ -207,7 +226,20 @@ export async function verify2FAWithDB(code) {
     const exist = await TwoFAMoldel.findOne({ employeeId });
     if (!exist) return { success: false, message: "2FA not enabled" };
     const isValid = await verify2FA(code, exist.secret);
-    if (isValid.success) return isValid;
+
+    if (isValid.success) {
+      // Record that a code was actually accepted. auth.js checks this stamp
+      // before clearing the login's 2FA gate — without it, the gate could be
+      // lifted by a client simply claiming to have verified.
+      await TwoFAMoldel.updateOne(
+        { _id: exist._id },
+        { $set: { lastVerifiedAt: new Date() } }
+      );
+      return isValid;
+    }
+
+    // Previously fell through and returned undefined on a wrong code.
+    return { success: false, message: "Invalid verification code" };
   } catch (error) {
     console.error("Error verifying 2FA with DB:", error);
     return { success: false, message: "Error verifying 2FA" };

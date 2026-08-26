@@ -3,7 +3,10 @@ import Credentials from "next-auth/providers/credentials";
 import axios from "axios";
 
 import { authConfig } from "./auth.config";
-import { check2FAEnabled } from "@/server/2FAServer/TwoAuthserver";
+import {
+  check2FAEnabled,
+  hasRecentTwoFactorVerification,
+} from "@/server/2FAServer/TwoAuthserver";
 import { LoginData, storeSession } from "@/server/authServer/authServer";
 import {
   checkLoginRateLimit,
@@ -129,6 +132,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   callbacks: {
     ...authConfig.callbacks,
+
+    /**
+     * Adds session-update handling to the Edge-safe base callback.
+     *
+     * The 2FA gate is cleared here and only here, because lifting it requires
+     * asking the database whether a code was really accepted. Trusting the
+     * update payload — as this did before — let anyone holding a valid session
+     * cookie POST `{ twoFactorVerified: true }` to /api/auth/session and skip
+     * two-factor entirely.
+     */
+    async jwt(params) {
+      const token = await authConfig.callbacks.jwt(params);
+      const { trigger, session } = params;
+      if (trigger !== "update" || !token?.id) return token;
+
+      // Forced enrolment: accept only if 2FA is now genuinely enabled for this
+      // account, which enable2FA() writes after checking the code.
+      if (session?.twoFactorSetupComplete) {
+        if (await check2FAEnabled(token.id)) {
+          token.mustSetup2FA = false;
+          token.requiresTwoFactor = false;
+        }
+      }
+
+      // Per-login verification: accept only if a TOTP code was accepted for
+      // this account moments ago (stamped by verify2FAWithDB).
+      if (session?.twoFactorVerified) {
+        if (await hasRecentTwoFactorVerification(token.id)) {
+          token.requiresTwoFactor = false;
+        }
+      }
+
+      return token;
+    },
 
     // Needs the database, so it lives here rather than in the Edge config.
     async signIn({ user, account }) {

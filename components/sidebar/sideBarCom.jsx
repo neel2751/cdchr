@@ -38,9 +38,16 @@ import { getEmployeeMenu } from "@/server/selectServer/selectServer";
 import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import { encrypt } from "@/lib/algo";
+import { useBranding } from "@/app/admin/providers";
 import { useMemo } from "react";
 
 const SideBarHeaderCom = () => {
+  // Falls back to the platform defaults from lib/tenant.js when the company has
+  // set no branding, so this is safe before any tenant configures anything.
+  const branding = useBranding();
+  const logo = branding?.logoUrl || "/images/Interiorlogo.svg";
+  const appName = branding?.appName || "Hr Management";
+
   return (
     <SidebarHeader>
       <SidebarMenu>
@@ -52,23 +59,22 @@ const SideBarHeaderCom = () => {
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <div className="flex aspect-square size-8 items-center border border-neutral-200 justify-center rounded-lg text-sidebar-primary-foreground">
-                  <Image
-                    // src="/images/cdc.svg"
-                    src={
-                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                      "/images/Interiorlogo.svg"
-                    }
-                    alt="Logo"
+                  {/* A plain <img>, not next/image: a tenant's logo URL is
+                      arbitrary, and next/image only accepts hosts listed in
+                      next.config.mjs, which is fixed at build time. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={logo}
+                    alt=""
                     width={30}
                     height={30}
-                    className="rounded-lg"
+                    className="size-[30px] rounded-lg object-contain"
                   />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  {/* <span className="truncate font-semibold">CDC</span> */}
-                  <span className="truncate font-semibold">Hr Management</span>
-                  <span className="truncate text-xs">
-                    {/* Creative Design & Construction */}
+                  <span className="truncate font-semibold">{appName}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {branding?.name || ""}
                   </span>
                 </div>
               </SidebarMenuButton>
@@ -194,6 +200,8 @@ const SideBarMenu = () => {
 };
 const SideBarFooterCom = () => {
   const { data: session } = useSession();
+  const branding = useBranding();
+  const brandLogo = branding?.logoUrl || "/images/Interiorlogo.svg";
 
   return (
     <SidebarFooter className="border-t">
@@ -208,17 +216,14 @@ const SideBarFooterCom = () => {
                 <Avatar className="h-8 w-8 rounded-lg border p-1 bg-black">
                   <AvatarImage
                     // src={session?.user?.image || "/images/cdc.svg"}
-                    src={
-                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                      "/images/Interiorlogo.svg"
-                    }
+                    src={brandLogo}
                     alt={session?.user?.name || "HR"}
                   />
                   <AvatarFallback className="rounded-lg">N</AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
-                    {session?.user?.name || "Hr Management"}
+                    {session?.user?.name || branding?.appName || "Hr Management"}
                   </span>
                   <span className="truncate text-xs">
                     {session?.user?.role || "hr"}
@@ -238,10 +243,7 @@ const SideBarFooterCom = () => {
                   <Avatar className="h-8 w-8 rounded-lg p-1 border">
                     <AvatarImage
                       // src={session?.user?.image || "/images/cdc.svg"}
-                      src={
-                        // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                        "/images/Interiorlogo.svg"
-                      }
+                      src={brandLogo}
                       alt={session?.user?.name || "HR"}
                     />
                     <AvatarFallback className="rounded-lg">N</AvatarFallback>

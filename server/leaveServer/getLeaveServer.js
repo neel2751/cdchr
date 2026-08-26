@@ -33,6 +33,11 @@ export async function getLeaveRequestData(leaveYear) {
             employeeId: createObjectId(employeeId),
             leaveYear: checLeaveYear,
           };
+    // Only a super admin lists other people's requests, so only they need the
+    // employee join. Everyone else sees their own, where the name is already
+    // known. The stage is left out entirely rather than pushed as `{}` —
+    // MongoDB rejects an empty $lookup with "must specify 'pipeline' when
+    // 'from' is empty" and fails the whole pipeline.
     const lookup =
       role === "superAdmin"
         ? {
@@ -41,7 +46,7 @@ export async function getLeaveRequestData(leaveYear) {
             foreignField: "_id",
             as: "employees",
           }
-        : {};
+        : null;
     const approveLookup = {
       from: "officeemployes",
       localField: "approvedBy",
@@ -61,9 +66,7 @@ export async function getLeaveRequestData(leaveYear) {
         },
       },
       // Lookup with superadmin and admin
-      {
-        $lookup: lookup,
-      },
+      ...(lookup ? [{ $lookup: lookup }] : []),
       {
         $lookup: approveLookup,
       },
@@ -148,6 +151,9 @@ export async function getLeaveRequestDataAdmin(filterData) {
     if (leaveStatus && leaveStatus !== "All") {
       match.leaveStatus = leaveStatus;
     }
+    // Same as above: omitted rather than pushed as an empty object, which
+    // MongoDB rejects and which failed this pipeline for every role below
+    // super admin.
     const lookup =
       role === "superAdmin" || isPermission
         ? {
@@ -156,7 +162,7 @@ export async function getLeaveRequestDataAdmin(filterData) {
             foreignField: "_id",
             as: "employees",
           }
-        : {};
+        : null;
 
     const approveLookup = {
       from: "officeemployes",
@@ -173,9 +179,7 @@ export async function getLeaveRequestDataAdmin(filterData) {
           leaveSubmitDate: -1,
         },
       },
-      {
-        $lookup: lookup,
-      },
+      ...(lookup ? [{ $lookup: lookup }] : []),
       {
         $lookup: approveLookup,
       },

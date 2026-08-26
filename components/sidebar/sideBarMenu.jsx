@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Archive,
   UserX,
+  Settings,
 } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Collapsible } from "../ui/collapsible";
@@ -47,6 +48,7 @@ const ICON_MAP = {
   ClockCheck: CalendarClock,
   Archive: Archive,
   UserX: UserX,
+  Settings: Settings,
 };
 
 export default function SideBarMenuCom({ menuItems, path }) {

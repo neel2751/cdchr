@@ -19,6 +19,12 @@ const TwoFASchema = new Schema(
       type: Boolean,
       default: false,
     },
+    // When a TOTP code was last accepted. The session-update handler in auth.js
+    // requires a recent stamp before it will clear the per-login 2FA gate, so a
+    // client cannot simply assert that it verified.
+    lastVerifiedAt: {
+      type: Date,
+    },
     qrCodeUrl: {
       type: String,
     },

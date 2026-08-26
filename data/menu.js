@@ -158,6 +158,14 @@ export const MENU = [
     role: ["superAdmin"],
     icon: "FolderOpen",
   },
+  // Branding and custom domains for this company. Super admin only: it changes
+  // what every user of the company sees, and which hostnames route to it.
+  {
+    name: "Company Settings",
+    path: "/admin/settings",
+    role: ["superAdmin"],
+    icon: "Settings",
+  },
   // Kept at the bottom: former/inactive staff listings. Access is derived from
   // the matching active page (see DERIVED_ACCESS) so admins who can see the
   // active list automatically get the "previous" list without a separate grant.
