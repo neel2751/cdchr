@@ -26,7 +26,7 @@ import {
   verifyTenantDomain,
 } from "@/server/tenantServer/tenantSettingsServer";
 
-const DomainsPanel = ({ tenant, run, isPending }) => {
+const DomainsPanel = ({ tenant, platformRootDomain, run, isPending }) => {
   const [newHost, setNewHost] = useState("");
   const [slug, setSlug] = useState(tenant.slug || "");
 
@@ -59,20 +59,20 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
                   onChange={(e) => setSlug(e.target.value)}
                 />
                 <span className="text-sm text-muted-foreground">
-                  .{tenant.platformRootDomain || "your-platform-domain.com"}
+                  .{platformRootDomain || "your-platform-domain.com"}
                 </span>
               </div>
             </div>
             <Button
               variant="outline"
               disabled={isPending || !slug || slug === tenant.slug}
-              onClick={() => run(() => updateTenantSlug(slug))}
+              onClick={() => run(() => updateTenantSlug(tenant._id, slug))}
             >
               {isPending && <Loader2 className="size-4 animate-spin" />}
               Save address
             </Button>
           </div>
-          {!tenant.platformRootDomain && (
+          {!platformRootDomain && (
             <p className="text-xs text-amber-600 dark:text-amber-500">
               PLATFORM_ROOT_DOMAIN is not configured on the server, so this
               address will not resolve yet. The custom domains below still work.
@@ -84,7 +84,7 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
       {/* -------------------------------------------------------- add domain */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Custom domains</CardTitle>
+          <CardTitle className="text-base">Custom domains for {tenant.name}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-2">
@@ -101,7 +101,7 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
             <Button
               disabled={isPending || !newHost.trim()}
               onClick={() =>
-                run(() => addTenantDomain(newHost), {
+                run(() => addTenantDomain(tenant._id, newHost), {
                   onSuccess: () => setNewHost(""),
                 })
               }
@@ -154,7 +154,7 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
                         <Button
                           size="sm"
                           disabled={isPending}
-                          onClick={() => run(() => verifyTenantDomain(d.host))}
+                          onClick={() => run(() => verifyTenantDomain(tenant._id, d.host))}
                         >
                           {isPending && (
                             <Loader2 className="size-4 animate-spin" />
@@ -168,7 +168,7 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
                           variant="outline"
                           disabled={isPending}
                           onClick={() =>
-                            run(() => setPrimaryTenantDomain(d.host))
+                            run(() => setPrimaryTenantDomain(tenant._id, d.host))
                           }
                         >
                           Make primary
@@ -179,7 +179,7 @@ const DomainsPanel = ({ tenant, run, isPending }) => {
                         variant="outline"
                         disabled={isPending}
                         aria-label={`Remove ${d.host}`}
-                        onClick={() => run(() => removeTenantDomain(d.host))}
+                        onClick={() => run(() => removeTenantDomain(tenant._id, d.host))}
                       >
                         <Trash2 className="size-4 text-rose-600" />
                       </Button>

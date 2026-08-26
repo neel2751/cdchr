@@ -57,7 +57,7 @@ const BrandingForm = ({ tenant, run, isPending }) => {
 
   const onSubmit = (e) => {
     e.preventDefault();
-    run(() => updateTenantBranding(values));
+    run(() => updateTenantBranding(tenant._id, values));
   };
 
   // Falls back to the platform default so the preview always shows something.
