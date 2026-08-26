@@ -746,10 +746,10 @@ Twelve commits on `feat/multi-tenancy-phase-1`. `main` untouched.
 | 2 — Context + plugin + backfill | ✅ done | 42 models scoped; production backfilled (336 docs, one tenant) |
 | 3 — Enforce isolation | ✅ **live** | `TENANT_ENFORCEMENT=enforce` in production. `$lookup` rewritten automatically; auth scoped; `/api/role` and `/api/account/status` locked down; audit carries `tenantId`; 12 cross-tenant tests |
 | 4 — Branding | ✅ done | Per-company branding, applied server-side; logo is still a pasted URL, no upload |
-| 5 — Custom domains | 🟡 partial | CRUD + real DNS TXT verification + subdomain routing done. **TLS automation and dynamic Socket.IO CORS not done** |
+| 5 — Custom domains | ✅ done | Claim/verify ownership, subdomain routing, Caddy on-demand TLS with an ask endpoint, dynamic socket CORS |
 | 6 — Per-tenant email | ✅ done | Per-company SMTP with platform fallback, branded templates, per-tenant cron; the index blocker is fixed and migrated |
 | 7 — Sockets, storage, plans | ✅ done | Socket handshake auth + per-company rooms, tenant-bound QR tokens, dynamic socket CORS, S3 tenant prefixes, feature flags and seat limits enforced |
-| 8 — Lifecycle | 🟡 partial | Provisioning, suspend/reactivate done. No export, hard-delete or impersonation |
+| 8 — Lifecycle | 🟡 mostly | Provisioning, suspend/reactivate, export and permanent delete done. **Support impersonation deliberately not built — see below** |
 
 Delivered beyond the original plan:
 

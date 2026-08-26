@@ -8,6 +8,7 @@ import {
   Loader2,
   Plus,
   ShieldAlert,
+  ShieldCheck,
   Star,
   Trash2,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   addTenantDomain,
+  checkTenantDomainTls,
   removeTenantDomain,
   setPrimaryTenantDomain,
   updateTenantSlug,
@@ -137,10 +139,20 @@ const DomainsPanel = ({ tenant, platformRootDomain, run, isPending }) => {
                         </Badge>
                       )}
                       {d.verified ? (
-                        <Badge className="gap-1">
-                          <BadgeCheck className="size-3" />
-                          Verified
-                        </Badge>
+                        <>
+                          <Badge className="gap-1">
+                            <BadgeCheck className="size-3" />
+                            Verified
+                          </Badge>
+                          {d.sslStatus === "issued" ? (
+                            <Badge variant="outline" className="gap-1">
+                              <ShieldCheck className="size-3" />
+                              HTTPS live
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">HTTPS pending</Badge>
+                          )}
+                        </>
                       ) : (
                         <Badge variant="secondary" className="gap-1">
                           <ShieldAlert className="size-3" />
@@ -160,6 +172,19 @@ const DomainsPanel = ({ tenant, platformRootDomain, run, isPending }) => {
                             <Loader2 className="size-4 animate-spin" />
                           )}
                           Verify
+                        </Button>
+                      )}
+                      {d.verified && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isPending}
+                          onClick={() =>
+                            run(() => checkTenantDomainTls(tenant._id, d.host))
+                          }
+                        >
+                          <ShieldCheck className="size-4" />
+                          Check HTTPS
                         </Button>
                       )}
                       {d.verified && !d.isPrimary && (
@@ -203,7 +228,9 @@ const DomainsPanel = ({ tenant, platformRootDomain, run, isPending }) => {
                       </div>
                       <p className="mt-2 text-muted-foreground">
                         Then point <code>{d.host}</code> at this application
-                        with a CNAME or A record. DNS can take a few minutes.
+                        with a CNAME or A record. Once both records are live,
+                        press Verify — the HTTPS certificate is issued
+                        automatically on the first visit afterwards.
                       </p>
                     </div>
                   )}

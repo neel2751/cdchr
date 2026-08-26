@@ -1,0 +1,67 @@
+# Reverse proxy and automatic TLS for tenant domains.
+#
+# The app runs its own Node server (server.mjs) for Socket.IO, so it cannot use
+# a platform that manages certificates for it. Caddy sits in front and obtains a
+# certificate per hostname on first request.
+#
+#   caddy run --config ./Caddyfile
+#
+# DNS a tenant must set up, for hr.acme.com:
+#   _verify.hr.acme.com   TXT    <token shown in Company Settings>
+#   hr.acme.com           CNAME  <this server's hostname>     (or A -> its IP)
+#
+# The TXT record proves ownership inside the app; the CNAME/A record brings
+# traffic here. Verification must succeed first — an unverified hostname is
+# refused by the ask endpoint below and never gets a certificate.
+
+{
+	# Contact address for the ACME account (expiry warnings).
+	email {$ACME_EMAIL}
+
+	on_demand_tls {
+		# Caddy asks the app before obtaining a certificate for an unknown
+		# hostname. Without this, anyone pointing DNS at this server would
+		# trigger issuance for their hostname and burn the Let's Encrypt rate
+		# limit. See app/api/tenant/domain-allowed/route.js.
+		ask http://127.0.0.1:3000/api/tenant/domain-allowed
+
+		# Caddy's own guard against a flood of issuance attempts.
+		interval 2m
+		burst 5
+	}
+}
+
+# The platform's own hostnames. Listed explicitly so they are obtained at
+# startup rather than waiting for a first visitor.
+{$PLATFORM_ROOT_DOMAIN}, *.{$PLATFORM_ROOT_DOMAIN} {
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+# Every tenant custom domain. `tls { on_demand }` means the certificate is
+# obtained on the first request for a hostname the ask endpoint approves.
+:443 {
+	tls {
+		on_demand
+	}
+
+	reverse_proxy 127.0.0.1:3000 {
+		# Auth.js derives per-request URLs from these, which is what lets one
+		# deployment serve many domains. Without them every tenant would be
+		# redirected to whichever host the server thinks it is.
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# Socket.IO upgrades to WebSocket on the same origin.
+		header_up Upgrade {>Upgrade}
+		header_up Connection {>Connection}
+	}
+}
+
+# Redirect plain HTTP to HTTPS. ACME HTTP-01 challenges are handled by Caddy
+# before this rule applies.
+:80 {
+	redir https://{host}{uri} permanent
+}

@@ -14,6 +14,7 @@ import {
   removeDomain,
   setPrimaryDomain,
   verifyDomain,
+  checkDomainTls,
 } from "./tenantOps";
 
 /**
@@ -189,6 +190,13 @@ export const setPrimaryTenantDomain = withAudit(
   "Tenant.setPrimaryDomain",
   async (tenantId, host) =>
     asCompanyAdmin(tenantId, (id) => setPrimaryDomain(id, host), "Set the primary domain"),
+  { module: "Tenant" }
+);
+
+export const checkTenantDomainTls = withAudit(
+  "Tenant.checkDomainTls",
+  async (tenantId, host) =>
+    asCompanyAdmin(tenantId, (id) => checkDomainTls(id, host), "Checked HTTPS"),
   { module: "Tenant" }
 );
 

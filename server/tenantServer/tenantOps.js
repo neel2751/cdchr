@@ -298,6 +298,48 @@ export async function setPrimaryDomain(tenantId, rawHost) {
   };
 }
 
+/**
+ * Probe whether a domain is actually serving over HTTPS yet.
+ *
+ * Caddy obtains certificates on demand, so there is no callback to tell the app
+ * when one is ready — the honest way to know is to ask the domain. A successful
+ * TLS handshake is the proof; the response status does not matter.
+ */
+export async function checkDomainTls(tenantId, rawHost) {
+  const host = normalizeHost(rawHost);
+  await connect();
+  const tenant = await CompanyModel.findById(tenantId).lean().exec();
+  const domain = (tenant?.domains || []).find((d) => d.host === host);
+  if (!domain) return { success: false, message: "Domain not found" };
+  if (!domain.verified) {
+    return { success: false, message: "Verify the domain first" };
+  }
+
+  let status = "failed";
+  let message = `${host} is not serving over HTTPS yet.`;
+  try {
+    await fetch(`https://${host}/api/tenant/resolve?host=${encodeURIComponent(host)}`, {
+      signal: AbortSignal.timeout(8000),
+      redirect: "manual",
+    });
+    // Reaching here means the TLS handshake completed, which is the question.
+    status = "issued";
+    message = `${host} is live over HTTPS.`;
+  } catch (error) {
+    message =
+      `${host} is not serving over HTTPS yet — check the CNAME or A record ` +
+      `points here, then try again in a minute.`;
+  }
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId), "domains.host": host },
+    { $set: { "domains.$.sslStatus": status } }
+  );
+  cacheInvalidate(host);
+
+  return { success: status === "issued", message, after: { host, sslStatus: status } };
+}
+
 export async function removeDomain(tenantId, rawHost) {
   const host = normalizeHost(rawHost);
   await connect();

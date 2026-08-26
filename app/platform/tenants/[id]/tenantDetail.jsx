@@ -18,6 +18,8 @@ import {
   Trash2,
   Users,
   UserPlus,
+  Download,
+  AlertTriangle,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +29,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  deleteTenantPermanently,
+  exportTenant,
+  previewTenantDeletion,
+} from "@/server/tenantServer/lifecycleServer";
 import {
   grantMembership,
   listTenantMembers,
@@ -141,6 +148,10 @@ const TenantDetail = ({ tenant }) => {
             <Users className="size-4" />
             Members
           </TabsTrigger>
+          <TabsTrigger value="danger" className="gap-2">
+            <AlertTriangle className="size-4" />
+            Data
+          </TabsTrigger>
           <TabsTrigger value="plan" className="gap-2">
             <SlidersHorizontal className="size-4" />
             Plan
@@ -155,6 +166,9 @@ const TenantDetail = ({ tenant }) => {
         </TabsContent>
         <TabsContent value="members">
           <MembersTab tenant={tenant} run={run} isPending={isPending} />
+        </TabsContent>
+        <TabsContent value="danger">
+          <DataTab tenant={tenant} run={run} isPending={isPending} />
         </TabsContent>
         <TabsContent value="plan">
           <PlanTab tenant={tenant} run={run} isPending={isPending} />
@@ -553,6 +567,111 @@ const MembersTab = ({ tenant, run, isPending }) => {
         )}
       </CardContent>
     </Card>
+  );
+};
+
+/**
+ * Export and permanent deletion.
+ *
+ * Deletion is deliberately awkward: the company must already be suspended, the
+ * name has to be typed exactly, and the export sits directly above it — there
+ * is nothing to export afterwards.
+ */
+const DataTab = ({ tenant, run, isPending }) => {
+  const [confirm, setConfirm] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [busy, startBusy] = useTransition();
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await previewTenantDeletion(tenant._id);
+      if (alive && res?.success) setPreview(JSON.parse(res.data));
+    })();
+    return () => { alive = false; };
+  }, [tenant._id, isPending]);
+
+  const download = () =>
+    startBusy(async () => {
+      const res = await exportTenant(tenant._id);
+      if (!res?.success) return toast.error(res?.message || "Export failed");
+      const blob = new Blob([res.data], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${tenant.slug || tenant._id}-export.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(res.message);
+    });
+
+  const deletable = tenant.status === "suspended" || tenant.status === "cancelled";
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Export</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Every document this company owns, as JSON. Take one before deleting.
+          </p>
+          {preview && (
+            <p className="text-sm">
+              <strong>{preview.total}</strong> documents across{" "}
+              {Object.keys(preview.counts).length} collections.
+            </p>
+          )}
+          <Button variant="outline" disabled={busy} onClick={download}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            Download export
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">
+            Delete permanently
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Removes the company and everything it owns. This cannot be undone.
+          </p>
+          {!deletable ? (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              Suspend this company first. Deleting a live company is never a
+              single step.
+            </p>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm">
+                  Type <strong>{tenant.name}</strong> to confirm
+                </Label>
+                <Input
+                  id="confirm"
+                  value={confirm}
+                  className="max-w-sm"
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+              </div>
+              <Button
+                variant="destructive"
+                disabled={isPending || confirm !== tenant.name}
+                onClick={() =>
+                  run(() => deleteTenantPermanently(tenant._id, confirm))
+                }
+              >
+                Delete {tenant.name} and all its data
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
