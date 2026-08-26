@@ -8,6 +8,7 @@ import {
   hasRecentTwoFactorVerification,
 } from "@/server/2FAServer/TwoAuthserver";
 import { LoginData, storeSession } from "@/server/authServer/authServer";
+import { assertCanSwitchTenant } from "@/server/tenantServer/membershipServer";
 import {
   checkLoginRateLimit,
   recordFailedLogin,
@@ -161,6 +162,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session?.twoFactorVerified) {
         if (await hasRecentTwoFactorVerification(token.id)) {
           token.requiresTwoFactor = false;
+        }
+      }
+
+      // Switching company changes which tenant every later query is filtered
+      // by, so the membership is confirmed in the database. A client asserting
+      // a tenant id gets nothing.
+      if (session?.switchTenantId) {
+        const membership = await assertCanSwitchTenant(
+          token.id,
+          session.switchTenantId
+        );
+        if (membership) {
+          token.tenantId = membership.tenantId;
+          // The role travels with the company: someone can be a super admin in
+          // the company they founded and an ordinary admin in another.
+          token.role = membership.role;
         }
       }
 

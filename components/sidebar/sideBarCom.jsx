@@ -39,6 +39,7 @@ import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import { encrypt } from "@/lib/algo";
 import { useBranding } from "@/app/admin/providers";
+import CompanySwitcher from "./companySwitcher";
 import { useMemo } from "react";
 
 const SideBarHeaderCom = () => {
@@ -80,6 +81,10 @@ const SideBarHeaderCom = () => {
               </SidebarMenuButton>
             </DropdownMenuTrigger>
           </DropdownMenu>
+        </SidebarMenuItem>
+        {/* Only renders for accounts that belong to more than one company. */}
+        <SidebarMenuItem>
+          <CompanySwitcher />
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarHeader>

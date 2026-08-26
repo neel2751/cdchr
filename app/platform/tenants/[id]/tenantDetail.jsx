@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import {
   Star,
   Trash2,
   Users,
+  UserPlus,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  grantMembership,
+  listTenantMembers,
+  revokeMembership,
+} from "@/server/tenantServer/membershipServer";
 import {
   platformAddDomain,
   platformRemoveDomain,
@@ -131,6 +137,10 @@ const TenantDetail = ({ tenant }) => {
             <Globe className="size-4" />
             Domains
           </TabsTrigger>
+          <TabsTrigger value="members" className="gap-2">
+            <Users className="size-4" />
+            Members
+          </TabsTrigger>
           <TabsTrigger value="plan" className="gap-2">
             <SlidersHorizontal className="size-4" />
             Plan
@@ -142,6 +152,9 @@ const TenantDetail = ({ tenant }) => {
         </TabsContent>
         <TabsContent value="domains">
           <DomainsTab tenant={tenant} run={run} isPending={isPending} />
+        </TabsContent>
+        <TabsContent value="members">
+          <MembersTab tenant={tenant} run={run} isPending={isPending} />
         </TabsContent>
         <TabsContent value="plan">
           <PlanTab tenant={tenant} run={run} isPending={isPending} />
@@ -433,6 +446,111 @@ const PlanTab = ({ tenant, run, isPending }) => {
           {isPending && <Loader2 className="size-4 animate-spin" />}
           Save plan
         </Button>
+      </CardContent>
+    </Card>
+  );
+};
+
+/**
+ * Who can act as this company.
+ *
+ * This is what lets one login own several companies: granting an existing
+ * account access here makes the company appear in that person's switcher.
+ */
+const MembersTab = ({ tenant, run, isPending }) => {
+  const [members, setMembers] = useState([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("superAdmin");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await listTenantMembers(tenant._id);
+      if (alive && res?.success) setMembers(JSON.parse(res.data));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [tenant._id, isPending]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Members</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Give an existing account access to this company. It then appears in
+          their company switcher and they can manage its settings themselves.
+        </p>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="m-email">Account email</Label>
+            <Input
+              id="m-email"
+              value={email}
+              placeholder="person@example.com"
+              className="w-72"
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="m-role">Role</Label>
+            <select
+              id="m-role"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="h-9 rounded-md border bg-transparent px-3 text-sm"
+            >
+              <option value="superAdmin">superAdmin</option>
+              <option value="admin">admin</option>
+              <option value="user">user</option>
+            </select>
+          </div>
+          <Button
+            disabled={isPending || !email.trim()}
+            onClick={() =>
+              run(
+                () => grantMembership(tenant._id, email, role),
+                () => setEmail("")
+              )
+            }
+          >
+            <UserPlus className="size-4" />
+            Grant access
+          </Button>
+        </div>
+
+        {members.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            No members yet.
+          </div>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {members.map((m) => (
+              <li
+                key={m._id}
+                className="flex flex-wrap items-center justify-between gap-3 p-3"
+              >
+                <span className="flex items-center gap-2 text-sm">
+                  {m.email}
+                  <Badge variant="outline">{m.role}</Badge>
+                  {m.isDefault && <Badge variant="secondary">default</Badge>}
+                </span>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  disabled={isPending}
+                  aria-label={`Remove ${m.email}`}
+                  onClick={() => run(() => revokeMembership(tenant._id, m.userId))}
+                >
+                  <Trash2 className="size-4 text-rose-600" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );

@@ -9,6 +9,7 @@ import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
 import PlatformUserModel from "@/models/platformUserModel";
 import { escapeTenant } from "@/lib/tenantContext";
+import TenantMembershipModel from "@/models/tenantMembershipModel";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -337,10 +338,29 @@ export const LoginData = async (email, password, deviceId) => {
       : "ReceptionEmployee";
   // user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
   user.name = user.name || user.firstName || "User";
-  // Which tenant this account belongs to. Only office employees carry one
-  // today and it is frequently unset, so it is recorded on the session for
-  // later phases — nothing enforces it yet.
-  user.tenantId = user.company ? String(user.company) : null;
+  // Which company this login lands in. The employee record's own tenant is the
+  // default, but a membership marked default wins — that is what lets one login
+  // own several companies and choose where it starts.
+  user.tenantId = user.tenantId ? String(user.tenantId) : null;
+  if (userType === "office" && user._id) {
+    try {
+      const preferred = await TenantMembershipModel.findOne({
+        userId: user._id,
+        isActive: true,
+        isDefault: true,
+      })
+        .lean()
+        .exec();
+      if (preferred?.tenantId) {
+        user.tenantId = String(preferred.tenantId);
+        user.role = preferred.role || user.role;
+      }
+    } catch (error) {
+      // A membership lookup failure must never block signing in; the account
+      // simply starts in its own company.
+      console.log("Membership lookup failed:", error?.message);
+    }
+  }
   return {
     status: true,
     data: user,

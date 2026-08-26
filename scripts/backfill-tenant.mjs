@@ -56,6 +56,7 @@ const GLOBAL_COLLECTIONS = new Set([
   "logintokens",
   "passwordresettokens",
   "twofas",
+  "tenantmemberships",
 ]);
 
 // Where a collection's owning employee can be found, so rows can be attributed
