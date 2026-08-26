@@ -8,7 +8,11 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
 import CompanyModel from "@/models/companyModel";
 import AuditLogModel from "@/models/auditLogModel";
-import { getSMTPForFeature } from "@/server/email/emailSMTP";
+import {
+  resolveTenantFeatureMailbox,
+  sendTenantMail,
+} from "@/server/email/tenantMail";
+import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { sendMail } from "@/server/nodeMailerServer/nodemailerServer";
 import { visaReminderTemplate } from "@/server/email/templates/visaReminderTemplate";
 import { logAuditDirect } from "@/lib/audit";
@@ -131,45 +135,25 @@ export async function sendVisaReminderCore({
     companyName,
   });
 
-  const smtpRes = await getSMTPForFeature("HR");
-  if (!smtpRes?.success) {
-    await logAuditDirect({
-      actor,
-      action: "Visa.reminderSent",
-      module: "Visa",
-      entityId: employee._id,
-      description: `Failed to send ${milestone} visa reminder to ${name} (no HR email account)`,
-      status: "failure",
-      errorMessage: smtpRes?.message || "No HR SMTP configured",
-      metadata: {
-        milestone,
-        visaEndDate: visaEndDateISO,
-        channel,
-        toEmail,
-        employeeType,
-      },
-    });
-    return { success: false, message: "No HR email account configured" };
-  }
-
-  const smtp = JSON.parse(smtpRes.data);
+  const tenantId = employee.tenantId ? String(employee.tenantId) : null;
+  const hrMailbox = await resolveTenantFeatureMailbox(tenantId, "HR");
   // Copy to HR's mailbox (the email account's own address). Opt-in for manual
   // sends (admin ticks the box); always copied on the automated cron run.
-  const hrEmail = smtp?.toEmail;
+  const hrEmail = hrMailbox;
   const copyHr = channel === "auto" ? true : Boolean(ccHr);
   const cc = copyHr && hrEmail && hrEmail !== toEmail ? [hrEmail] : [];
 
-  const sendRes = await sendMail({
-    host: smtp.host,
-    port: smtp.port,
-    secure: smtp.secure,
-    userName: smtp.userName,
-    password: smtp.password,
-    fromName: smtp.fromName || "CDC HR",
-    toEmail,
+  // Addressed as the employee's own company, so the reminder carries that
+  // company's sender and branding rather than one fixed identity.
+  const sendRes = await sendTenantMail({
+    tenantId,
+    feature: "HR",
+    to: toEmail,
     cc,
     subject,
     html,
+    // The visa template is already a complete document.
+    raw: true,
   });
 
   const ok = Boolean(sendRes?.success);
@@ -215,8 +199,40 @@ export async function sendVisaReminderCore({
  * window (or already expired) and send the current milestone once each.
  * Safe to run repeatedly — dedupe prevents duplicate sends.
  */
+/**
+ * Daily visa reminders for every company.
+ *
+ * Runs from the scheduler with no session, so there is no tenant in context.
+ * Each company is handled inside its own runWithTenant() scope, which both
+ * scopes the employee queries and picks that company's sender — a single
+ * unscoped pass would have used one company's SMTP account for everyone.
+ */
 export async function runVisaReminderJob() {
   await connect();
+  const results = { processed: 0, sent: 0, skipped: 0, failed: 0, tenants: 0 };
+
+  const tenants = await escapeTenant("visa cron: iterate companies", () =>
+    CompanyModel.find({ delete: { $ne: true }, isActive: { $ne: false } })
+      .select("_id")
+      .lean()
+  );
+
+  for (const tenant of tenants) {
+    results.tenants++;
+    const one = await runWithTenant(String(tenant._id), () =>
+      runVisaRemindersForCurrentTenant()
+    );
+    results.processed += one.processed;
+    results.sent += one.sent;
+    results.skipped += one.skipped;
+    results.failed += one.failed;
+  }
+
+  return results;
+}
+
+/** One company's pass. Assumes a tenant is already in context. */
+async function runVisaRemindersForCurrentTenant() {
   const results = { processed: 0, sent: 0, skipped: 0, failed: 0 };
 
   const upper = new Date();

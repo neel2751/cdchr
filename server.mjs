@@ -257,9 +257,25 @@ app.prepare().then(() => {
 
   server.listen(port, () => {
     console.log("> Ready on http://localhost:" + port);
+    warmDatabaseConnection(port);
     scheduleVisaReminders(port);
   });
 });
+
+/**
+ * Open the database connection before real traffic arrives.
+ *
+ * The first query after a restart otherwise pays for the whole handshake — SRV
+ * lookup, TLS, auth — inside whatever request happened to be first. Tenant
+ * resolution has a deadline and would give up, so the first visitor after every
+ * deploy got an unresolved tenant. Hitting any route that touches the database
+ * is enough to establish the pool.
+ */
+function warmDatabaseConnection(serverPort) {
+  fetch(`http://127.0.0.1:${serverPort}/api/tenant/resolve?host=warmup.invalid`)
+    .then(() => console.log("[warmup] database connection ready"))
+    .catch((err) => console.log("[warmup] skipped:", err?.message));
+}
 
 // Daily visa-expiry reminder job. Dependency-free scheduler: triggers the
 // internal API route (which runs inside Next, so DB + path aliases resolve)

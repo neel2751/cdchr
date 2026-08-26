@@ -34,7 +34,13 @@ import {
 // Mongoose buffers queries for 10s when the connection is down. Far too long to
 // sit in front of a page load, so resolution gives up sooner and the caller
 // carries on unresolved.
-const LOOKUP_TIMEOUT_MS = 2_000;
+//
+// Not tighter than this: the FIRST lookup after a restart also pays for the
+// connection handshake (SRV lookup, TLS, auth), which against a remote cluster
+// comfortably exceeds two seconds. At 2s every deploy began with a request that
+// failed to resolve its tenant. server.mjs also warms the connection on boot so
+// this ceiling is rarely approached at all.
+const LOOKUP_TIMEOUT_MS = 5_000;
 
 /** Drop cached host lookups. Thin wrapper so this stays a server action. */
 export async function invalidateTenantCache(host) {

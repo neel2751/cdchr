@@ -19,7 +19,9 @@ const RESOLVE_FAIL_TTL_MS = 5_000;
 // Tenant resolution sits in front of every matched request, so it is never
 // allowed to hold one up. If it cannot answer in this long, the request goes
 // through unresolved.
-const RESOLVE_TIMEOUT_MS = 2_500;
+// Must exceed the resolver's own ceiling, or the proxy gives up while a
+// perfectly good lookup is still running.
+const RESOLVE_TIMEOUT_MS = 6_000;
 const resolveCache = new Map();
 const UNKNOWN = { type: "unknown", tenant: null };
 

@@ -747,7 +747,7 @@ Twelve commits on `feat/multi-tenancy-phase-1`. `main` untouched.
 | 3 — Enforce isolation | ✅ **live** | `TENANT_ENFORCEMENT=enforce` in production. `$lookup` rewritten automatically; auth scoped; `/api/role` and `/api/account/status` locked down; audit carries `tenantId`; 12 cross-tenant tests |
 | 4 — Branding | ✅ done | Per-company branding, applied server-side; logo is still a pasted URL, no upload |
 | 5 — Custom domains | 🟡 partial | CRUD + real DNS TXT verification + subdomain routing done. **TLS automation and dynamic Socket.IO CORS not done** |
-| 6 — Per-tenant email | ❌ not started | See the blocker below |
+| 6 — Per-tenant email | ✅ done | Per-company SMTP with platform fallback, branded templates, per-tenant cron; the index blocker is fixed and migrated |
 | 7 — Sockets, storage, plans | 🟡 partial | Plans/features/limits done. **Socket.IO still unauthenticated and broadcasting globally; S3 keys still have no tenant prefix** |
 | 8 — Lifecycle | 🟡 partial | Provisioning, suspend/reactivate done. No export, hard-delete or impersonation |
 
@@ -758,23 +758,20 @@ Delivered beyond the original plan:
 - **Three dead `$lookup` collection names** fixed; the leave list was broken for every role below super admin
 - **`escapeTenant` silently did nothing inside server actions** — Next bundles the action layer separately, so the AsyncLocalStorage existed twice
 
-## The next blocker, and it is closer than Phase 6
+## The SMTP blocker — fixed
 
-`models/emailAccountmodel.js` still carries
-
-```js
-{ feature: 1, isPrimary: 1 }  unique, where isPrimary: true
-```
-
-Only **one** company on the whole platform can have a primary sender per feature. This is not a future Phase 6 concern — the second tenant that configures email hits it immediately. It needs `tenantId` in the key.
+`emailaccounts` carried `{ feature, isPrimary }` unique, so only **one** company
+on the whole platform could have a primary sender per feature. The key now leads
+with `tenantId`, and `scripts/migrate-smtp-index.mjs` has replaced it in
+production — Mongoose creates the new index but never drops the old one, so it
+had to be explicit. The same script cleared the stale `companyId_*` indexes left
+by the tenant-field rename.
 
 ## Recommended order from here
 
-1. Fix the SMTP index (small, and it blocks tenant #2 today)
-2. Socket.IO handshake auth + per-tenant rooms — currently unauthenticated and every event is broadcast to every connected client
-3. TLS automation for custom domains, and Socket.IO CORS from verified domains
-4. S3 tenant prefixes
-5. Per-tenant email templates and sending
+1. Socket.IO handshake auth + per-tenant rooms — currently unauthenticated and every event is broadcast to every connected client
+2. TLS automation for custom domains, and Socket.IO CORS from verified domains
+3. S3 tenant prefixes
 
 ---
 

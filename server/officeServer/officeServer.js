@@ -5,7 +5,8 @@ import bcrypt from "bcryptjs";
 import { storeLeave } from "../leaveServer/leaveServer";
 import { createObjectId } from "@/lib/mongodb";
 import { getCompanyById } from "../companyServer/companyServer";
-import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
+import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
+import { emailButton } from "@/lib/emailTemplate";
 import { syncMissingLeaveTypesNew } from "../leaveServer/countLeaveServer";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
@@ -138,26 +139,24 @@ export const handleOfficeEmployee = withAudit(
         if (!isPreviousEmployee) {
           const companyData = await getCompanyById(company);
           const cData = JSON.parse(companyData?.data);
-          const type = "HR";
-          const response = await getSMTPForFeature(type);
-          if (response?.success) {
-            const emailData = JSON.parse(response?.data);
-            // register email we have to send the welcome mail with email and password with site link
-            const html = `<p>Dear ${name},</p>
-          <p>Welcome to our team! We are excited to have you on board.</p>
-          <p>Your login details are as follows:</p>
-          <p>Email: ${email}</p>
-          <p>Password: Cdc@1234</p>
-          <p>Please log in to your account using the following link:</p>
-          <p><a href="https://hr.cdc.construction">Click here to login</a></p>
-          <p>Thank you for joining us!</p>
-          <p>Best regards,</p>
-          <p>Hr Management</p>`;
-            // we have to add the company name on this subject
-            const subject = `Weclome to our ${cData.name} family`;
-            const smtp = { ...emailData, toEmail: email, html, subject };
-            await userRegisterEmail(smtp);
-          }
+          // The link has to point at the employee's own company, not at one
+          // hardcoded host.
+          const appUrl = await resolveTenantAppUrl(company);
+          const html = `<p>Dear ${name},</p>
+          <p>Welcome to the team. Your account has been created.</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p>Use the password your administrator gave you, or reset it from the
+          sign-in page.</p>
+          ${emailButton("Sign in", appUrl)}
+          <p>If the button does not work, open: ${appUrl}</p>`;
+          await sendTenantMail({
+            tenantId: company,
+            feature: "HR",
+            to: email,
+            subject: `Welcome to ${cData?.name || "the team"}`,
+            heading: "Your account is ready",
+            html,
+          });
         }
         recordAudit({
           entityId: employeeId,

@@ -6,7 +6,8 @@ import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
 import PasswordResetTokenModel from "@/models/passwordResetTokenModel";
 import { hashPassword } from "@/utils/bcrypt";
-import { sendMultipleEmail } from "../email/email";
+import { sendTenantMail, resolveTenantAppUrl } from "../email/tenantMail";
+import { emailButton } from "@/lib/emailTemplate";
 import { clearLockByEmail } from "@/lib/rateLimit";
 import { logAuditDirect } from "@/lib/audit";
 
@@ -75,29 +76,28 @@ export async function requestPasswordReset(email) {
       expiresAt: new Date(Date.now() + TOKEN_TTL_MIN * 60 * 1000),
     });
 
-    const baseUrl =
-      process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_WEB_URL || "";
+    // The link must point at the user's own company, not at one fixed host.
+    const tenantId = user.tenantId ? String(user.tenantId) : null;
+    const baseUrl = await resolveTenantAppUrl(tenantId);
     const link = `${baseUrl}/reset-password?uid=${user._id}&token=${rawToken}`;
     const name = user.name || user.firstName || "there";
     const html = `
-      <div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937">
         <p>Hi ${name},</p>
-        <p>We received a request to reset your Interior Studio Ltd HR password. Click the button
-        below to choose a new password. This link is valid for
-        ${TOKEN_TTL_MIN} minutes and can be used once.</p>
-        <p style="margin:24px 0">
-          <a href="${link}" style="background:#4f46e5;color:#fff;padding:10px 18px;
-          border-radius:6px;text-decoration:none">Reset password</a>
-        </p>
+        <p>We received a request to reset your password. Choose a new one with
+        the button below. The link is valid for ${TOKEN_TTL_MIN} minutes and can
+        be used once.</p>
+        ${emailButton("Reset password", link)}
         <p>If the button does not work, copy and paste this link:</p>
         <p style="word-break:break-all;color:#4f46e5">${link}</p>
         <p>If you did not request this, you can safely ignore this email — your
-        password will not change.</p>
-      </div>`;
+        password will not change.</p>`;
 
-    await sendMultipleEmail({
-      email: user.email,
-      subject: "Reset your Interior Studio Ltd HR password",
+    await sendTenantMail({
+      tenantId,
+      feature: "All",
+      to: user.email,
+      subject: "Reset your password",
+      heading: "Password reset",
       html,
     });
 

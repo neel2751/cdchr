@@ -3,7 +3,7 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
 import UserSession from "@/models/sessionModel";
-import { sendMail } from "../email/email";
+import { sendTenantMail } from "../email/tenantMail";
 import { getServerSideProps } from "../session/session";
 import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
@@ -420,7 +420,16 @@ export const storeSession = async (data) => {
     } else {
       const session = await UserSession.create(obj);
       if (session) {
-        await sendMail({ ...obj, email: data.email });
+        // Sent as the user's own company, so the notice carries their branding
+        // rather than whichever company the deployment was first built for.
+        await sendTenantMail({
+          tenantId: data.tenantId,
+          feature: "All",
+          to: data.email,
+          subject: "New sign-in to your account",
+          heading: "New sign-in detected",
+          html: loginNoticeBody(obj),
+        });
         return { status: true };
       }
     }
@@ -430,6 +439,21 @@ export const storeSession = async (data) => {
     return { status: false, message: "Failed to store session" };
   }
 };
+
+/** Body of the "new sign-in" notice; the branded shell is added by the sender. */
+function loginNoticeBody(info) {
+  const row = (label, value) =>
+    value ? `<p style="margin:4px 0"><strong>${label}:</strong> ${value}</p>` : "";
+  return `
+    <p>We noticed a sign-in to your account:</p>
+    ${row("IP address", info.ipAddress)}
+    ${row("Device", info.device)}
+    ${row("Browser", info.browser)}
+    ${row("Location", [info.city, info.country].filter(Boolean).join(", "))}
+    ${row("Time", new Date().toUTCString())}
+    <p>If this was you, no action is needed. If not, change your password and
+    contact your administrator.</p>`;
+}
 
 export const getSessionData = async () => {
   try {

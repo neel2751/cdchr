@@ -75,9 +75,26 @@ const emailAccountSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/**
+ * One primary sender per feature, PER COMPANY.
+ *
+ * This was `{ feature, isPrimary }`, which is platform-wide: once any company
+ * marked an "HR" sender primary, no other company could. `tenantId` is added by
+ * the tenant plugin (see lib/tenantPlugin.js) and leads the key here, so each
+ * company gets its own primary for each feature.
+ *
+ * Platform-level fallback senders have no tenantId; the partial filter keeps
+ * them out of the constraint so several may exist.
+ */
 emailAccountSchema.index(
-  { feature: 1, isPrimary: 1 },
-  { unique: true, partialFilterExpression: { isPrimary: true } }
+  { tenantId: 1, feature: 1, isPrimary: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      isPrimary: true,
+      tenantId: { $exists: true },
+    },
+  }
 );
 
 // Encrypt password before saving

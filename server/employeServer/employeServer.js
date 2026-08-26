@@ -6,7 +6,8 @@ import { getServerSideProps } from "../session/session";
 import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
 import { extractData } from "../officeServer/officeEmployeeDetails";
 import { createObjectId } from "@/lib/mongodb";
-import { getSMTPForFeature, userRegisterEmail } from "../email/emailSMTP";
+import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
+import { emailButton } from "@/lib/emailTemplate";
 import { decrypt } from "@/lib/algo";
 import SiteClockModel from "@/models/siteClockModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
@@ -288,25 +289,25 @@ export const handleEmploye = withAudit(
           const isPreviousEmployee =
             visaExp && !Number.isNaN(visaExp.getTime()) && visaExp < new Date();
           if (!isPreviousEmployee) {
-            const type = "HR";
-            const response = await getSMTPForFeature(type);
-            if (response?.success) {
-              const emailData = JSON.parse(response?.data);
-              // register email we have to send the welcome mail with email and password with site link
-              const html = `<p>Dear ${firstName} ${lastName},</p>
-          <p>Welcome to our team! We are excited to have you on board.</p>
-          <p>Your login details are as follows:</p>
-          <p>Email: ${email}</p>
-          <p>Password: ${password}</p>
-          <p>Please log in to your account using the following link:</p>
-          <p><a href="${process.env.NEXT_PUBLIC_WEB_URL}">Click here to login</a></p>
-          <p>Thank you for joining us!</p>
-          <p>Best regards,</p>
-          <p>Hr Management</p>`;
-              const subject = "Welcome to Our Team";
-              const smtp = { ...emailData, toEmail: email, html, subject };
-              await userRegisterEmail(smtp);
-            } else {
+            // The link points at the employee's own company; the sender and
+            // branding come from that company too.
+            const tenantId = result?.tenantId ? String(result.tenantId) : null;
+            const appUrl = await resolveTenantAppUrl(tenantId);
+            const html = `<p>Dear ${firstName} ${lastName},</p>
+          <p>Welcome to the team. Your account has been created.</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Password:</strong> ${password}</p>
+          ${emailButton("Sign in", appUrl)}
+          <p>If the button does not work, open: ${appUrl}</p>`;
+            const sent = await sendTenantMail({
+              tenantId,
+              feature: "HR",
+              to: email,
+              subject: "Welcome to the team",
+              heading: "Your account is ready",
+              html,
+            });
+            if (!sent?.success) {
               const data = {
                 success: true,
                 message: `Employee added successfully`,
