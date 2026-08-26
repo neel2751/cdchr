@@ -1,0 +1,233 @@
+import dns from "node:dns/promises";
+import crypto from "node:crypto";
+
+import { connect } from "@/db/db";
+import CompanyModel from "@/models/companyModel";
+import { createObjectId } from "@/lib/mongodb";
+import { normalizeHost, stripWww } from "@/lib/tenantHost";
+import { invalidateTenantCache } from "./tenantServer";
+
+/**
+ * Core tenant operations, shared by the two front doors that reach them:
+ * `tenantSettingsServer.js` (a company's own super admin, tenant resolved from
+ * the session) and `platformServer.js` (provider staff, tenant given by id).
+ *
+ * Deliberately NOT a "use server" module and deliberately unauthenticated —
+ * every function takes an explicit tenantId and trusts it. Authorization is the
+ * caller's job, and both callers do it before calling in. Nothing here may be
+ * exposed as a server action directly, or a tenant id from the browser would
+ * become an instruction.
+ */
+
+const DNS_PREFIX = "_verify";
+
+export const BRANDING_FIELDS = [
+  "appName",
+  "logoUrl",
+  "logoDarkUrl",
+  "faviconUrl",
+  "loginBackgroundUrl",
+  "primaryColor",
+  "accentColor",
+  "radius",
+  "supportEmail",
+  "emailFromName",
+  "emailFooterHtml",
+];
+
+/** Merge allow-listed branding fields onto a tenant. */
+export async function applyBranding(tenantId, data) {
+  await connect();
+  const before = await CompanyModel.findById(tenantId).lean().exec();
+  if (!before) return { success: false, message: "Company not found" };
+
+  // Allow-listed so a crafted payload cannot reach status, domains or anything
+  // else on the tenant document.
+  const branding = {};
+  for (const key of BRANDING_FIELDS) {
+    if (data?.[key] !== undefined) branding[key] = String(data[key]).trim();
+  }
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { branding: { ...(before.branding || {}), ...branding } } }
+  );
+  await invalidateTenantCache();
+
+  return {
+    success: true,
+    message: "Branding saved",
+    before: before.branding || {},
+    after: branding,
+  };
+}
+
+/** Set the `<slug>.<root>` address, rejecting one already in use. */
+export async function applySlug(tenantId, rawSlug) {
+  const slug = String(rawSlug || "").trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(slug)) {
+    return {
+      success: false,
+      message:
+        "Use lowercase letters, numbers or hyphens, not starting or ending with a hyphen",
+    };
+  }
+
+  await connect();
+  const taken = await CompanyModel.findOne({
+    slug,
+    _id: { $ne: createObjectId(tenantId) },
+  })
+    .lean()
+    .exec();
+  if (taken) return { success: false, message: "That address is taken" };
+
+  const before = await CompanyModel.findById(tenantId).lean().exec();
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { slug } }
+  );
+  await invalidateTenantCache();
+
+  return {
+    success: true,
+    message: "Workspace address saved",
+    before: { slug: before?.slug || "" },
+    after: { slug },
+  };
+}
+
+/** Register a hostname against a tenant, unverified. */
+export async function addDomain(tenantId, rawHost) {
+  const host = normalizeHost(rawHost);
+  if (!host || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) {
+    return { success: false, message: "Enter a valid domain, e.g. hr.acme.com" };
+  }
+
+  await connect();
+  // A hostname can only ever point at one tenant, so this must look across all
+  // of them — the one place a cross-tenant read is genuinely required.
+  const owner = await CompanyModel.findOne({
+    "domains.host": { $in: [host, stripWww(host)] },
+  })
+    .lean()
+    .exec();
+  if (owner) {
+    return {
+      success: false,
+      message:
+        String(owner._id) === String(tenantId)
+          ? "That domain is already added"
+          : "That domain is already in use by another company",
+    };
+  }
+
+  const tenant = await CompanyModel.findById(tenantId).lean().exec();
+  if (!tenant) return { success: false, message: "Company not found" };
+
+  const domain = {
+    host,
+    // The first domain becomes primary, so emails always have a URL to use.
+    isPrimary: (tenant.domains || []).length === 0,
+    verified: false,
+    verificationToken: crypto.randomBytes(16).toString("hex"),
+    sslStatus: "pending",
+    addedAt: new Date(),
+  };
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $push: { domains: domain } }
+  );
+  await invalidateTenantCache(host);
+
+  return {
+    success: true,
+    message: "Domain added — now add the DNS record to verify it",
+    after: { host },
+  };
+}
+
+/**
+ * Check the TXT record that proves control of the domain.
+ *
+ * Verification is what makes a domain route traffic (see resolveTenantByHost),
+ * so this can never be a "mark it done" toggle — without the DNS check anyone
+ * could claim any hostname and take over its routing.
+ */
+export async function verifyDomain(tenantId, rawHost) {
+  const host = normalizeHost(rawHost);
+  await connect();
+  const tenant = await CompanyModel.findById(tenantId).lean().exec();
+  const domain = (tenant?.domains || []).find((d) => d.host === host);
+  if (!domain) return { success: false, message: "Domain not found" };
+  if (domain.verified) return { success: true, message: "Already verified" };
+
+  const record = `${DNS_PREFIX}.${host}`;
+  let values = [];
+  try {
+    values = (await dns.resolveTxt(record)).flat();
+  } catch (err) {
+    return {
+      success: false,
+      message:
+        err?.code === "ENOTFOUND" || err?.code === "ENODATA"
+          ? `No TXT record found at ${record}. DNS changes can take a few minutes.`
+          : `Could not read DNS for ${record}`,
+    };
+  }
+
+  if (!values.includes(domain.verificationToken)) {
+    return {
+      success: false,
+      message: `TXT record found but the value does not match. Expected ${domain.verificationToken}`,
+    };
+  }
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId), "domains.host": host },
+    { $set: { "domains.$.verified": true, "domains.$.verifiedAt": new Date() } }
+  );
+  await invalidateTenantCache(host);
+
+  return { success: true, message: `${host} verified`, after: { host, verified: true } };
+}
+
+/** Choose the domain used to build absolute URLs. Must be verified first. */
+export async function setPrimaryDomain(tenantId, rawHost) {
+  const host = normalizeHost(rawHost);
+  await connect();
+  const tenant = await CompanyModel.findById(tenantId).lean().exec();
+  const domain = (tenant?.domains || []).find((d) => d.host === host);
+  if (!domain) return { success: false, message: "Domain not found" };
+  if (!domain.verified) {
+    return { success: false, message: "Verify the domain before making it primary" };
+  }
+
+  const domains = (tenant.domains || []).map((d) => ({
+    ...d,
+    isPrimary: d.host === host,
+  }));
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { domains } }
+  );
+  await invalidateTenantCache();
+
+  return {
+    success: true,
+    message: `${host} is now the primary domain`,
+    after: { primaryHost: host },
+  };
+}
+
+export async function removeDomain(tenantId, rawHost) {
+  const host = normalizeHost(rawHost);
+  await connect();
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $pull: { domains: { host } } }
+  );
+  await invalidateTenantCache(host);
+  return { success: true, message: `${host} removed`, before: { host } };
+}

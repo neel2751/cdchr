@@ -28,6 +28,9 @@
  *                        domain that already points at this deployment
  *   --platform-admin <email>   create a platform admin with this email
  *   --platform-name <string>   their display name (default: "Platform Admin")
+ *   --platform-password <pw>   set it non-interactively (warns if it is weak;
+ *                              prefer the prompt, which keeps it out of shell
+ *                              history and process listings)
  */
 import crypto from "node:crypto";
 import readline from "node:readline/promises";
@@ -268,13 +271,25 @@ async function main() {
     } else if (DRY_RUN) {
       console.log("  → would be created (password prompted on a real run)");
     } else {
-      const rl = readline.createInterface({ input: stdin, output: stdout });
-      const password = await rl.question("  Password (min 12 chars): ");
-      rl.close();
+      let password = flag("platform-password");
+      if (!password) {
+        const rl = readline.createInterface({ input: stdin, output: stdout });
+        password = await rl.question("  Password (min 12 chars): ");
+        rl.close();
+      }
 
-      if (!password || password.length < 12) {
-        console.error("\n  Password too short — no platform admin created.");
+      // A platform admin can see and change every tenant, so weakness here is
+      // worth shouting about — but the choice belongs to whoever runs this.
+      if (!password || password.length < 8) {
+        console.error("\n  Password must be at least 8 characters — not created.");
       } else {
+        if (password.length < 12) {
+          console.warn(
+            "\n  WARNING: this password is under 12 characters. A platform admin\n" +
+            "  can read and change every tenant's data. Change it soon, and rely on\n" +
+            "  the forced 2FA enrolment that applies on first login."
+          );
+        }
         await platformUsers.insertOne({
           name: flag("platform-name", "Platform Admin"),
           email,

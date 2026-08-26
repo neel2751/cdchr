@@ -160,14 +160,29 @@ export async function getRequestTenant() {
 }
 
 /**
+ * Refuse anyone who is not provider staff.
+ *
+ * The route gate in proxy.js is not enough on its own: a server action can be
+ * invoked from any page by id, so it never has to pass through /platform. Any
+ * cross-tenant reader below therefore checks the role itself.
+ */
+async function requirePlatformAdmin() {
+  const { props } = await getServerSideProps();
+  return props?.session?.user?.role === "platformAdmin";
+}
+
+/**
  * Paginated tenant list for the platform dashboard.
  *
- * Cross-tenant by design: this is provider-side, and callers are gated to
- * platformAdmin. Shaped like the other list actions ({ data: JSON string,
+ * Cross-tenant by design, so it is gated to platformAdmin here as well as at
+ * the route. Shaped like the other list actions ({ data: JSON string,
  * totalCount }) so it works with useFetchQuery unchanged.
  */
 export async function getTenants(filterData) {
   try {
+    if (!(await requirePlatformAdmin())) {
+      return { success: false, message: "Not authorised" };
+    }
     await connect();
 
     const search = filterData?.query?.trim() || "";
@@ -244,6 +259,9 @@ export async function getTenants(filterData) {
 /** Full tenant record for the platform detail view. */
 export async function getTenantById(id) {
   try {
+    if (!(await requirePlatformAdmin())) {
+      return { success: false, message: "Not authorised" };
+    }
     if (!id || !isValidObjectId(id)) {
       return { success: false, message: "Invalid tenant id" };
     }
@@ -288,6 +306,9 @@ export async function getBrandingForCurrentUser() {
 /** Headline counts for the platform dashboard. */
 export async function getPlatformStats() {
   try {
+    if (!(await requirePlatformAdmin())) {
+      return { success: false, message: "Not authorised" };
+    }
     await connect();
     const [total, active, suspended, withCustomDomain] = await Promise.all([
       CompanyModel.countDocuments({ delete: { $ne: true } }),

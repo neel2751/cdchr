@@ -7,6 +7,8 @@ import {
   Globe,
   PauseCircle,
   Users,
+  Plus,
+  Loader2,
 } from "lucide-react";
 
 import SearchDebounce from "@/components/search/searchDebounce";
@@ -21,6 +23,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { createTenant } from "@/server/tenantServer/platformServer";
 import { useFetchQuery } from "@/hooks/use-query";
 import { getTenants } from "@/server/tenantServer/tenantServer";
 
@@ -89,7 +107,10 @@ const TenantList = ({ searchParams, stats }) => {
           <div className="mb-4">
             <CardTitle>Tenants</CardTitle>
           </div>
-          <SearchDebounce placeholder="Search name, slug or domain" />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SearchDebounce placeholder="Search name, slug or domain" />
+            <NewTenantDialog />
+          </div>
         </CardHeader>
 
         <CardContent>
@@ -135,7 +156,12 @@ const TenantList = ({ searchParams, stats }) => {
                   {tenants.map((tenant) => (
                     <TableRow key={tenant._id}>
                       <TableCell>
-                        <div className="font-medium">{tenant.name}</div>
+                        <Link
+                          href={`/platform/tenants/${tenant._id}`}
+                          className="font-medium underline-offset-4 hover:underline"
+                        >
+                          {tenant.name}
+                        </Link>
                         {tenant.description && (
                           <div className="text-xs text-muted-foreground">
                             {tenant.description}
@@ -222,6 +248,89 @@ const TenantList = ({ searchParams, stats }) => {
         </CardContent>
       </Card>
     </div>
+  );
+};
+
+/** Provision a company. Status starts as "trial" until the plan is set. */
+const NewTenantDialog = () => {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  // Suggest an address from the name, but let it be overridden.
+  const onName = (value) => {
+    setName(value);
+    setSlug(
+      value
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 63)
+    );
+  };
+
+  const submit = () =>
+    startTransition(async () => {
+      const res = await createTenant({ name, slug });
+      if (res?.success) {
+        toast.success(res.message);
+        setOpen(false);
+        setName("");
+        setSlug("");
+        router.refresh();
+      } else {
+        toast.error(res?.message || "Could not create the company");
+      }
+    });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>
+          <Plus className="size-4" />
+          New company
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New company</DialogTitle>
+          <DialogDescription>
+            Creates an empty tenant. Add its super admin and branding afterwards.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="t-name">Company name</Label>
+            <Input
+              id="t-name"
+              value={name}
+              placeholder="Acme Ltd"
+              onChange={(e) => onName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="t-slug">Workspace address</Label>
+            <Input
+              id="t-slug"
+              value={slug}
+              placeholder="acme"
+              onChange={(e) => setSlug(e.target.value)}
+            />
+          </div>
+          <Button
+            className="w-full"
+            disabled={isPending || !name.trim() || !slug.trim()}
+            onClick={submit}
+          >
+            {isPending && <Loader2 className="size-4 animate-spin" />}
+            Create company
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
