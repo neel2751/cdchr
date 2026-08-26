@@ -151,9 +151,16 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL("/platform", req.url));
   }
 
-  // A platform admin has no place inside a tenant's app.
+  // A platform admin has no place inside a tenant's app — unless a support
+  // visit is in force, which is exactly a permission to look at one. Every
+  // query made during it is read-only (lib/tenantPlugin.js).
   if (userRole === "platformAdmin") {
-    return NextResponse.redirect(new URL("/platform", req.url));
+    const visit = user?.impersonation;
+    const live = visit?.expiresAt && new Date(visit.expiresAt) > new Date();
+    if (!live) {
+      return NextResponse.redirect(new URL("/platform", req.url));
+    }
+    return pass();
   }
 
   const customBrandDomain = "form.cdcproperty.management";

@@ -9,6 +9,7 @@ import {
 } from "@/server/2FAServer/TwoAuthserver";
 import { LoginData, storeSession } from "@/server/authServer/authServer";
 import { assertCanSwitchTenant } from "@/server/tenantServer/membershipServer";
+import { activeSupportSession } from "@/server/tenantServer/supportServer";
 import {
   checkLoginRateLimit,
   recordFailedLogin,
@@ -146,6 +147,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt(params) {
       const token = await authConfig.callbacks.jwt(params);
       const { trigger, session } = params;
+
+      // Checked on every call, not just updates: a visit must lapse on its own
+      // deadline even if the browser never asks again.
+      if (token?.impersonation?.expiresAt) {
+        if (new Date(token.impersonation.expiresAt) <= new Date()) {
+          token.impersonation = null;
+          token.tenantId = null;
+        }
+      }
+
       if (trigger !== "update" || !token?.id) return token;
 
       // Forced enrolment: accept only if 2FA is now genuinely enabled for this
@@ -162,6 +173,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session?.twoFactorVerified) {
         if (await hasRecentTwoFactorVerification(token.id)) {
           token.requiresTwoFactor = false;
+        }
+      }
+
+      // A support visit is applied from the database record, never from the
+      // payload: the browser asks to "refresh support state" and the server
+      // decides what that means. A revoked or expired visit therefore ends even
+      // if the cookie still claims it.
+      if (session?.refreshSupport && token.role === "platformAdmin") {
+        const visit = await activeSupportSession(token.id);
+        if (visit) {
+          token.impersonation = {
+            tenantId: String(visit.tenantId),
+            tenantName: visit.tenantName,
+            expiresAt: new Date(visit.expiresAt).toISOString(),
+            readOnly: true,
+          };
+          // Scoping every query to the visited company is the whole point.
+          token.tenantId = String(visit.tenantId);
+        } else {
+          token.impersonation = null;
+          token.tenantId = null;
         }
       }
 

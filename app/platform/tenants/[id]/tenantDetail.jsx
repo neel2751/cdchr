@@ -4,6 +4,15 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useSession } from "next-auth/react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -20,6 +29,7 @@ import {
   UserPlus,
   Download,
   AlertTriangle,
+  Eye,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +39,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  listSupportSessions,
+  startSupportSession,
+} from "@/server/tenantServer/supportServer";
 import {
   deleteTenantPermanently,
   exportTenant,
@@ -108,6 +122,7 @@ const TenantDetail = ({ tenant }) => {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <SupportVisitButton tenant={tenant} />
           {tenant.status !== "suspended" ? (
             <Button
               variant="destructive"
@@ -577,6 +592,81 @@ const MembersTab = ({ tenant, run, isPending }) => {
  * name has to be typed exactly, and the export sits directly above it — there
  * is nothing to export afterwards.
  */
+/**
+ * Open a read-only look at this company's data.
+ *
+ * A reason is required because it is written into the company's audit trail,
+ * and the visit expires on its own.
+ */
+const SupportVisitButton = ({ tenant }) => {
+  const { update } = useSession();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [minutes, setMinutes] = useState(30);
+  const [isPending, startPending] = useTransition();
+
+  const start = () =>
+    startPending(async () => {
+      const res = await startSupportSession(tenant._id, reason, minutes);
+      if (!res?.success) return toast.error(res?.message || "Could not start");
+      // The session is switched by the server from the record it just wrote.
+      await update({ refreshSupport: true });
+      toast.success(res.message);
+      window.location.assign("/admin/dashboard");
+    });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Eye className="size-4" />
+          View data
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Read-only support session</DialogTitle>
+          <DialogDescription>
+            Opens {tenant.name}&apos;s data as they see it. Every change is
+            blocked, and this is recorded against their company.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="reason">Reason</Label>
+            <Input
+              id="reason"
+              value={reason}
+              placeholder="Investigating ticket #123"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="minutes">Minutes (5-120)</Label>
+            <Input
+              id="minutes"
+              type="number"
+              min="5"
+              max="120"
+              value={minutes}
+              className="w-32"
+              onChange={(e) => setMinutes(e.target.value)}
+            />
+          </div>
+          <Button
+            className="w-full"
+            disabled={isPending || reason.trim().length < 5}
+            onClick={start}
+          >
+            {isPending && <Loader2 className="size-4 animate-spin" />}
+            Start read-only session
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const DataTab = ({ tenant, run, isPending }) => {
   const [confirm, setConfirm] = useState("");
   const [preview, setPreview] = useState(null);

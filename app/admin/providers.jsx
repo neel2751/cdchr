@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import SidebarWrapper from "@/components/sidebar/sidebarWrapper";
+import SupportBanner from "@/components/supportBanner";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -26,6 +27,8 @@ const AdminProviders = ({ children, branding }) => {
       <QueryClientProvider client={queryClient}>
         <BrandingContext.Provider value={branding || {}}>
           <NuqsAdapter>
+            {/* Renders only during a support visit, above everything else. */}
+            <SupportBanner />
             <SidebarWrapper>{children}</SidebarWrapper>
           </NuqsAdapter>
         </BrandingContext.Provider>

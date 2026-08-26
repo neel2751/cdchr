@@ -71,6 +71,9 @@ export const authConfig = {
         session.user.role = token.role;
         session.user.deviceId = token.deviceId;
         session.user.tenantId = token.tenantId ?? null;
+        // Drives the read-only enforcement in lib/tenantContext.js and the
+        // banner in the admin shell.
+        session.user.impersonation = token.impersonation ?? null;
         // Unlike v4, these are always present rather than only when truthy —
         // proxy.js reads the session (not the raw token) in v5, and it has to
         // be able to tell "false" from "not included".

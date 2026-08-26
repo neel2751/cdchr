@@ -749,7 +749,7 @@ Twelve commits on `feat/multi-tenancy-phase-1`. `main` untouched.
 | 5 — Custom domains | ✅ done | Claim/verify ownership, subdomain routing, Caddy on-demand TLS with an ask endpoint, dynamic socket CORS |
 | 6 — Per-tenant email | ✅ done | Per-company SMTP with platform fallback, branded templates, per-tenant cron; the index blocker is fixed and migrated |
 | 7 — Sockets, storage, plans | ✅ done | Socket handshake auth + per-company rooms, tenant-bound QR tokens, dynamic socket CORS, S3 tenant prefixes, feature flags and seat limits enforced |
-| 8 — Lifecycle | 🟡 mostly | Provisioning, suspend/reactivate, export and permanent delete done. **Support impersonation deliberately not built — see below** |
+| 8 — Lifecycle | ✅ done | Provisioning, suspend/reactivate, export, permanent delete, and read-only support sessions with a write-blocking layer |
 
 Delivered beyond the original plan:
 
