@@ -14,12 +14,30 @@ const S3 = new AWS.S3({
 });
 const Bucket = process.env.AWS_BUCKET_NAME;
 
+/**
+ * Where a company's objects live in the bucket.
+ *
+ * Keys were `<employeeId>/<file>`, which puts every company's documents in one
+ * flat namespace. A tenant prefix makes per-company export and deletion a
+ * prefix operation, and lets a bucket policy or lifecycle rule target one
+ * company. Objects written before this keep their old keys and are still read
+ * by their stored URL — this only shapes new writes.
+ */
+async function tenantScopedKey(employeeId, fileName) {
+  const { props } = await getServerSideProps();
+  const tenantId = props?.session?.user?.tenantId;
+  return tenantId
+    ? `tenants/${tenantId}/${employeeId}/${fileName}`
+    : `${employeeId}/${fileName}`;
+}
+
+
 export const uploadAWSMultipartDocument = async (file) => {
   const { props } = await getServerSideProps();
   const { _id: employeeId } = props?.session?.user;
   const params = {
     Bucket,
-    Key: `${employeeId}/${file.name}`,
+    Key: await tenantScopedKey(employeeId, file.name),
     ContentType: file.type,
     ACL: "private", // or "public-read" if needed
   };
@@ -34,7 +52,7 @@ export const getPresignedURLAWS = async (uploadId, partNumber, fileName) => {
   const { _id: employeeId } = props?.session?.user;
   const params = {
     Bucket,
-    Key: `${employeeId}/${fileName}`,
+    Key: await tenantScopedKey(employeeId, fileName),
     PartNumber: partNumber,
     UploadId: uploadId,
   };
@@ -55,7 +73,7 @@ export const completeUploadAwsMultipartDocument = async (
     const { _id: employeeId } = props?.session?.user;
     const params = {
       Bucket,
-      Key: `${employeeId}/${fileName}`,
+      Key: await tenantScopedKey(employeeId, fileName),
       MultipartUpload: {
         Parts: parts,
       },
@@ -74,7 +92,7 @@ export const listParts = async (uploadId, fileName) => {
   const { _id: employeeId } = props?.session?.user;
   const params = {
     Bucket,
-    Key: `${employeeId}/${fileName}`,
+    Key: await tenantScopedKey(employeeId, fileName),
     UploadId: uploadId,
   };
 
@@ -104,7 +122,7 @@ export const generatePreSignedURL = async (file) => {
   const { _id: employeeId } = props?.session?.user;
   const params = {
     Bucket,
-    Key: `${employeeId}/${file.name}`,
+    Key: await tenantScopedKey(employeeId, file.name),
     ContentType: file.type,
   };
   const putObjectCommand = new AWS.PutObjectCommand(params);

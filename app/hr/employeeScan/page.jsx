@@ -106,7 +106,7 @@ export default function EmployeeClockScanner({ siteId }) {
     if (!employeeId) return; // 🚨 wait for session to load
 
     if (!socketRef.current) {
-      socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+      socketRef.current = io({ withCredentials: true });
 
       socketRef.current.on("refresh-clock-table", (updatedEmployeeId) => {
         console.log(
@@ -423,7 +423,7 @@ export default function EmployeeClockScanner({ siteId }) {
 //         } catch {}
 
 //         if (!socketRef.current) {
-//           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+//           socketRef.current = io({ withCredentials: true });
 //         }
 
 //         socketRef.current.emit("employee-scan-qr", {
@@ -555,7 +555,7 @@ export default function EmployeeClockScanner({ siteId }) {
 //         } catch {}
 
 //         if (!socketRef.current) {
-//           socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+//           socketRef.current = io({ withCredentials: true });
 //         }
 
 //         socketRef.current.emit("employee-scan-qr", {
@@ -741,7 +741,7 @@ export function ScannerDialog({
         } catch {}
 
         if (!socketRef.current) {
-          socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+          socketRef.current = io({ withCredentials: true });
         }
 
         socketRef.current.emit("employee-scan-qr", {
@@ -978,7 +978,7 @@ export function SiteEmployeeScannerDialog({
         } catch {}
 
         if (!socketRef.current) {
-          socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+          socketRef.current = io({ withCredentials: true });
         }
 
         socketRef.current.emit("employee-scan-qr", {

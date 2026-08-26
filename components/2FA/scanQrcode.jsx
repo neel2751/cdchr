@@ -44,7 +44,7 @@ export default function ScanQrcode({ siteId }) {
         toast.success(response.message || "✅ QR Code scanned successfully!");
         // Initialize socket if not connected
         if (!socketRef.current) {
-          socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+          socketRef.current = io({ withCredentials: true });
           socketRef.current.on("connect", () => {
             if (response.employeeId) {
               socketRef.current.emit("stop-qr", response.employeeId);

@@ -5,6 +5,34 @@ import bcrypt from "bcryptjs";
 import { storeLeave } from "../leaveServer/leaveServer";
 import { createObjectId } from "@/lib/mongodb";
 import { getCompanyById } from "../companyServer/companyServer";
+import CompanyModel from "@/models/companyModel";
+import { checkSeats } from "@/lib/tenantPlan";
+import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
+
+/**
+ * Whether this company has room for one more employee.
+ *
+ * Fails open: a company must never be blocked from hiring because the limit
+ * could not be read.
+ */
+async function checkTenantSeats(tenantId) {
+  if (!tenantId) return { allowed: true };
+  try {
+    const tenant = await escapeTenant("seats: company limit", () =>
+      CompanyModel.findById(tenantId).select("limits").lean()
+    );
+    const limit = tenant?.limits?.maxEmployees ?? null;
+    if (!limit) return { allowed: true };
+
+    const used = await runWithTenant(String(tenantId), () =>
+      OfficeEmployeeModel.countDocuments({ delete: { $ne: true } })
+    );
+    return checkSeats({ limit, used, adding: 1 });
+  } catch (error) {
+    console.log("Seat check failed:", error?.message);
+    return { allowed: true };
+  }
+}
 import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
 import { emailButton } from "@/lib/emailTemplate";
 import { syncMissingLeaveTypesNew } from "../leaveServer/countLeaveServer";
@@ -103,6 +131,16 @@ export const handleOfficeEmployee = withAudit(
         $or: [{ email }, { phoneNumber }],
       });
       if (!userExist) {
+        // Seat limit. Unlimited unless the platform team has set a number, so
+        // this caps nobody who has not been given one.
+        const { props: sessionProps } = await getServerSideProps();
+        const seats = await checkTenantSeats(
+          sessionProps?.session?.user?.tenantId
+        );
+        if (!seats.allowed) {
+          return { success: false, message: seats.message };
+        }
+
         const newUser = new OfficeEmployeeModel({
           ...buildOfficeEmployeePayload(data),
           password: hashPass,

@@ -28,7 +28,7 @@ export default function ScannerModal({ siteId, open, onClose }) {
         }
 
         if (!socketRef.current) {
-          socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+          socketRef.current = io({ withCredentials: true });
         }
         socketRef.current.emit("stop-qr", response.employeeId);
 

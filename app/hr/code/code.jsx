@@ -24,7 +24,7 @@ export default function OfficeQRCode({ siteId, className }) {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+    socketRef.current = io({ withCredentials: true });
 
     socketRef.current.on("connect", () => {
       console.log("Office device connected");

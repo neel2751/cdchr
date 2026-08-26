@@ -748,7 +748,7 @@ Twelve commits on `feat/multi-tenancy-phase-1`. `main` untouched.
 | 4 — Branding | ✅ done | Per-company branding, applied server-side; logo is still a pasted URL, no upload |
 | 5 — Custom domains | 🟡 partial | CRUD + real DNS TXT verification + subdomain routing done. **TLS automation and dynamic Socket.IO CORS not done** |
 | 6 — Per-tenant email | ✅ done | Per-company SMTP with platform fallback, branded templates, per-tenant cron; the index blocker is fixed and migrated |
-| 7 — Sockets, storage, plans | 🟡 partial | Plans/features/limits done. **Socket.IO still unauthenticated and broadcasting globally; S3 keys still have no tenant prefix** |
+| 7 — Sockets, storage, plans | ✅ done | Socket handshake auth + per-company rooms, tenant-bound QR tokens, dynamic socket CORS, S3 tenant prefixes, feature flags and seat limits enforced |
 | 8 — Lifecycle | 🟡 partial | Provisioning, suspend/reactivate done. No export, hard-delete or impersonation |
 
 Delivered beyond the original plan:

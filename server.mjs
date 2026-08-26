@@ -5,6 +5,7 @@ import next from "next";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
+import { makeSocketAuth, tenantRoom } from "./lib/socketAuth.js";
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
 const port = 3000;
@@ -12,7 +13,9 @@ const port = 3000;
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
 
-const SECRET = process.env.NEXTAUTH_SECRET || ""; // Replace with env variable in prod
+const SECRET = process.env.NEXTAUTH_SECRET || "";
+// Auth.js v5 reads AUTH_SECRET first; NEXTAUTH_SECRET stays as the fallback.
+const AUTH_SECRET = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "";
 
 const qrRenderOptions = {
   errorCorrectionLevel: "M",
@@ -47,10 +50,23 @@ app.prepare().then(() => {
   const server = createServer((req, res) => handler(req, res));
   const io = new Server(server, {
     cors: {
-      origin: allowedSocketOrigins.length ? allowedSocketOrigins : false,
+      // Tenants live on their own domains, so a fixed list cannot cover them.
+      // Anything explicitly configured is allowed; otherwise the origin is
+      // checked against the tenant resolver, which only answers for domains
+      // that have been verified.
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true); // same-origin / non-browser
+        if (allowedSocketOrigins.includes(origin)) return callback(null, true);
+        isTenantOrigin(origin, port)
+          .then((ok) => callback(ok ? null : new Error("origin not allowed"), ok))
+          .catch(() => callback(new Error("origin not allowed"), false));
+      },
       credentials: true,
     },
   });
+
+  // Every connection must carry a valid session cookie and belong to a company.
+  io.use(makeSocketAuth(AUTH_SECRET));
 
   const activeEmployees = new Map(); // employeeId -> { count, interval, socketId }
   const completedEmployees = new Set(); // employeeIds that reached the limit
@@ -62,23 +78,31 @@ app.prepare().then(() => {
   const officeTokens = new Map(); // token -> { action, siteId, expiresAt, usedEmployees: Set() }
 
   io.on("connection", (socket) => {
-    console.log("Employee connected", socket.id);
+    // Confined to their own company's room: every broadcast below goes to this
+    // room rather than to every connected client.
+    const room = tenantRoom(socket.data.user.tenantId);
+    socket.join(room);
+    const toTenant = (event, payload) => io.to(room).emit(event, payload);
+    console.log(`Employee connected ${socket.id} (${room})`);
 
     /** ============================
      * Office device generates QR
      * ============================ */
     socket.on("generate-office-qr", async ({ action, siteId }) => {
-      const token = jwt.sign({ action, siteId }, SECRET, { expiresIn: "30s" });
+      const { tenantId } = socket.data.user;
+      const token = jwt.sign({ action, siteId, tenantId }, SECRET, {
+        expiresIn: "30s",
+      });
       const expiresAt = Date.now() + 30000;
 
-      officeTokens.set(token, { action, siteId, expiresAt });
+      officeTokens.set(token, { action, siteId, expiresAt, tenantId });
 
       socket.emit("new-office-qr", await buildQrPayload(token));
 
       // Automatically delete token after expiration
       setTimeout(() => {
         officeTokens.delete(token);
-        io.emit("office-qr-expired", token); // Notify office UI
+        toTenant("office-qr-expired", token); // Notify this company's office UI
         console.log(`Token expired: ${token}`);
       }, 30000);
     });
@@ -94,11 +118,18 @@ app.prepare().then(() => {
         return;
       }
 
+      // A code minted for one company must not be redeemable from another,
+      // even if it leaks — the token alone is not authority.
+      if (data.tenantId !== socket.data.user.tenantId) {
+        socket.emit("scan-error", "Token expired or invalid");
+        return;
+      }
+
       // Remove token immediately after first successful scan
       officeTokens.delete(token);
 
       // 🔹 Broadcast to all office UIs → remove QR
-      io.emit("office-qr-used", token);
+      toTenant("office-qr-used", token);
 
       // Record attendance
       console.log(
@@ -106,7 +137,7 @@ app.prepare().then(() => {
       );
 
       socket.emit("scan-success", { action: data.action });
-      io.emit("refresh-clock-table", employeeId);
+      toTenant("refresh-clock-table", employeeId);
     });
 
     /** ============================
@@ -115,8 +146,8 @@ app.prepare().then(() => {
     socket.on("office-qr-used", (token) => {
       // 🔹 Delete the token so it can’t be reusedf
       officeTokens.delete(token);
-      // 🔹 Broadcast to all office devices to hide this QR
-      io.emit("office-qr-used", token);
+      // 🔹 Tell this company's office devices to hide this QR
+      toTenant("office-qr-used", token);
       console.log(`QR token used and removed: ${token}`);
     });
 
@@ -150,9 +181,11 @@ app.prepare().then(() => {
           return;
         }
 
-        const token = jwt.sign({ employeeId }, SECRET, {
-          expiresIn: `${tokenExpiration}s`,
-        });
+        const token = jwt.sign(
+          { employeeId, tenantId: socket.data.user.tenantId },
+          SECRET,
+          { expiresIn: `${tokenExpiration}s` }
+        );
         socket.emit("new-qr-token", await buildQrPayload(token));
         count++;
         console.log(`Token ${count}/${tokenLimit} sent to ${employeeId}`);
@@ -189,9 +222,11 @@ app.prepare().then(() => {
           return;
         }
 
-        const token = jwt.sign({ employeeId, action, siteId }, SECRET, {
-          expiresIn: `${tokenExpiration}s`,
-        });
+        const token = jwt.sign(
+          { employeeId, action, siteId, tenantId: socket.data.user.tenantId },
+          SECRET,
+          { expiresIn: `${tokenExpiration}s` }
+        );
         socket.emit("new-qr-token", await buildQrPayload(token));
         count++;
         console.log(
@@ -221,7 +256,7 @@ app.prepare().then(() => {
 
     socket.on("admin-clock-update", (employeeId) => {
       console.log("🛎️ Server received admin-clock-update for:", employeeId);
-      io.emit("refresh-clock-table", employeeId);
+      toTenant("refresh-clock-table", employeeId);
     });
 
     socket.on("stop-qr", async (employeeId) => {
@@ -238,7 +273,7 @@ app.prepare().then(() => {
           if (employeeSocket) {
             employeeSocket.emit("token-limit-reached");
           }
-          io.emit("refresh-clock-table", employeeId); // send full data
+          toTenant("refresh-clock-table", employeeId); // send full data
         }
       }
     });
@@ -261,6 +296,26 @@ app.prepare().then(() => {
     scheduleVisaReminders(port);
   });
 });
+
+/**
+ * Is this origin a domain some company has verified?
+ *
+ * Asks the app's own resolver, which only answers for verified domains and for
+ * <slug>.<root> addresses — so an unverified claim cannot open a socket.
+ */
+async function isTenantOrigin(origin, serverPort) {
+  try {
+    const host = new URL(origin).hostname;
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/tenant/resolve?host=${encodeURIComponent(host)}`
+    );
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data?.type === "tenant" || data?.type === "platform";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Open the database connection before real traffic arrives.

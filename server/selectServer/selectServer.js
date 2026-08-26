@@ -3,6 +3,23 @@
 import { connect } from "@/db/db";
 import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
 import CompanyModel from "@/models/companyModel";
+import { filterMenuByFeatures } from "@/lib/tenantPlan";
+import { escapeTenant } from "@/lib/tenantContext";
+import { isValidObjectId } from "@/lib/mongodb";
+
+/** A company's module flags; empty (everything on) when it cannot be read. */
+async function getTenantFeatures(tenantId) {
+  if (!tenantId || !isValidObjectId(tenantId)) return {};
+  try {
+    const tenant = await escapeTenant("menu: company feature flags", () =>
+      CompanyModel.findById(tenantId).select("features").lean()
+    );
+    return tenant?.features || {};
+  } catch {
+    // Never hide the whole menu because a lookup failed.
+    return {};
+  }
+}
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import RoleBasedModel from "@/models/rolebasedModel";
@@ -340,8 +357,14 @@ export const getEmployeeMenu = async () => {
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
     const role = props?.session?.user?.role;
+    // Modules the company's plan excludes are removed for everyone, whatever
+    // their role — a super admin of a company without the CRM should not see it.
+    const features = await getTenantFeatures(props?.session?.user?.tenantId);
     if (role === "superAdmin") {
-      const menu = MENU.filter((item) => item?.role?.includes(role));
+      const menu = filterMenuByFeatures(
+        MENU.filter((item) => item?.role?.includes(role)),
+        features
+      );
       return { success: true, data: JSON.stringify(menu) };
     } else {
       await connect();
@@ -351,13 +374,16 @@ export const getEmployeeMenu = async () => {
       if (!menu) {
         return { success: false, message: "No Data Found" };
       } else {
-        const menuItem = mergeAndFilterMenus(COMMONMENUITEMS, MENU).filter(
-          (ie) =>
-            menu?.permissions?.includes(ie?.path) ||
-            // Derived pages (e.g. "previous employees") appear when the admin
-            // can access the matching parent page.
-            (DERIVED_ACCESS[ie?.path] &&
-              menu?.permissions?.includes(DERIVED_ACCESS[ie?.path])),
+        const menuItem = filterMenuByFeatures(
+          mergeAndFilterMenus(COMMONMENUITEMS, MENU).filter(
+            (ie) =>
+              menu?.permissions?.includes(ie?.path) ||
+              // Derived pages (e.g. "previous employees") appear when the admin
+              // can access the matching parent page.
+              (DERIVED_ACCESS[ie?.path] &&
+                menu?.permissions?.includes(DERIVED_ACCESS[ie?.path])),
+          ),
+          features
         );
         const data = {
           success: true,

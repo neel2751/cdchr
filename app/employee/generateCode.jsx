@@ -283,7 +283,7 @@ export default function SiteEmployeeScanner() {
     if (!employeeId || !siteId) return; // 🚨 wait until both exist
 
     if (!socketRef.current) {
-      socketRef.current = io(process.env.NEXT_PUBLIC_WEB_URL);
+      socketRef.current = io({ withCredentials: true });
 
       // 👇 make sure event matches what server emits
       socketRef.current.on("refresh-clock-table", (updatedEmployeeId) => {
