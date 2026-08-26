@@ -83,15 +83,15 @@ async function main() {
 
   // Departments are shared today (no tenant field) — one per tenant here so
   // Phase 2's backfill has something realistic to attribute.
+  const tenantA = oid();
+  const tenantB = oid();
   const deptA = oid();
   const deptB = oid();
   await db.collection("roletypes").insertMany([
-    { _id: deptA, roleTitle: "Operations", isActive: true, delete: false, createdAt: now, updatedAt: now },
-    { _id: deptB, roleTitle: "Engineering", isActive: true, delete: false, createdAt: now, updatedAt: now },
+    { _id: deptA, roleTitle: "Operations", companyId: tenantA, isActive: true, delete: false, createdAt: now, updatedAt: now },
+    { _id: deptB, roleTitle: "Engineering", companyId: tenantB, isActive: true, delete: false, createdAt: now, updatedAt: now },
   ]);
 
-  const tenantA = oid();
-  const tenantB = oid();
   const tenants = [
     {
       _id: tenantA,
@@ -168,6 +168,10 @@ async function main() {
     roleType: "Staff",
     department: dept,
     company: tenant,
+    // Both fields on purpose: `company` is the legacy reference the app has
+    // always had, `companyId` is what the tenant plugin filters on. Setting it
+    // here keeps fixtures self-contained instead of depending on a backfill run.
+    companyId: tenant,
     immigrationType: "British",
     employeType: "Full Time",
     joinDate: new Date(2024, 0, 1),
@@ -213,6 +217,7 @@ async function main() {
       status: "Active",
       version: 1,
       isDeleted: false,
+      companyId: tenantA,
       createdAt: now,
       updatedAt: now,
     },
@@ -225,6 +230,7 @@ async function main() {
       status: "Active",
       version: 1,
       isDeleted: false,
+      companyId: tenantB,
       createdAt: now,
       updatedAt: now,
     },

@@ -50,7 +50,7 @@ export async function getAttendanceReportData(params) {
       // 2. Lookup from General Employees
       {
         $lookup: {
-          from: "employees",
+          from: "employes",
           localField: "employeeId",
           foreignField: "_id",
           as: "generalInfo",

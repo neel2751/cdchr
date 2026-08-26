@@ -270,7 +270,7 @@ export async function getWeeklyRotaForSuperAdmin(filterData) {
       },
       {
         $lookup: {
-          from: "officeemployees",
+          from: "officeemployes",
           localField: "approvedBy",
           foreignField: "_id",
           as: "result",

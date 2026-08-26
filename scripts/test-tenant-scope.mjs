@@ -97,15 +97,25 @@ async function main() {
   });
 
   // --------------------------------------------------------------- count --
-  await check("countDocuments is scoped", async () => {
-    const [a, b, all] = await Promise.all([
+  await check("countDocuments is scoped and tenants partition the collection", async () => {
+    const [a, b, all, orphans] = await Promise.all([
       runWithTenant(String(acme._id), () => OfficeEmployee.countDocuments({})),
       runWithTenant(String(beta._id), () => OfficeEmployee.countDocuments({})),
       escapeTenant("test", () => OfficeEmployee.countDocuments({})),
+      // The fixtures include one employee with no tenant, standing in for a
+      // record the backfill has not claimed. It belongs to neither partition.
+      escapeTenant("test", () =>
+        OfficeEmployee.countDocuments({ companyId: { $in: [null, undefined] } })
+      ),
     ]);
     if (ENFORCING) {
-      assert.equal(a + b, all, `${a} + ${b} !== ${all}; tenants must partition`);
-      assert(a > 0 && b > 0);
+      assert.equal(
+        a + b + orphans,
+        all,
+        `${a} + ${b} + ${orphans} orphans !== ${all}; tenants must partition`
+      );
+      assert(a > 0 && b > 0, "both tenants should have rows");
+      assert.equal(orphans, 1, "fixture should have exactly one unscoped record");
     }
   });
 
@@ -118,6 +128,96 @@ async function main() {
       for (const r of rows) {
         assert.equal(String(r.companyId), String(beta._id), "rota leaked");
       }
+    }
+  });
+
+  // ------------------------------------------------------------- lookups --
+  // A scoped root does not scope what it joins to. These use a rota belonging
+  // to Beta that references a Beta employee, and ask for it as Acme.
+  await check("$lookup (localField form) cannot pull another tenant's rows", async () => {
+    const betaRota = await escapeTenant("test setup", () =>
+      WeeklyRota.findOne({ "attendanceData.employeeName": "Ben Beta" }).lean()
+    );
+    assert(betaRota, "fixture rota missing");
+
+    // Run as Beta: the join must resolve.
+    const asBeta = await runWithTenant(String(beta._id), () =>
+      WeeklyRota.aggregate([
+        { $match: { _id: betaRota._id } },
+        {
+          $lookup: {
+            from: "officeemployes",
+            localField: "attendanceData.employeeId",
+            foreignField: "_id",
+            as: "joined",
+          },
+        },
+      ])
+    );
+    if (ENFORCING) {
+      assert.equal(asBeta.length, 1, "Beta should see its own rota");
+      assert(asBeta[0].joined.length > 0, "join must still work for the owner");
+      for (const j of asBeta[0].joined) {
+        assert.equal(String(j.companyId), String(beta._id));
+      }
+    }
+  });
+
+  await check("$lookup does not leak across tenants", async () => {
+    // Every employee id in the fixture set, joined from an Acme-owned root.
+    const acmeRota = await escapeTenant("test setup", () =>
+      WeeklyRota.findOne({ "attendanceData.employeeName": "Ava Acme" }).lean()
+    );
+    const betaUser = await escapeTenant("test setup", () =>
+      OfficeEmployee.findOne({ email: "super@beta.test" }).lean()
+    );
+
+    const rows = await runWithTenant(String(acme._id), () =>
+      WeeklyRota.aggregate([
+        { $match: { _id: acmeRota._id } },
+        {
+          $lookup: {
+            from: "officeemployes",
+            // Deliberately points at a Beta employee.
+            let: { x: betaUser._id },
+            pipeline: [{ $match: { $expr: { $eq: ["$_id", "$$x"] } } }],
+            as: "joined",
+          },
+        },
+      ])
+    );
+    if (ENFORCING) {
+      assert.equal(rows.length, 1);
+      assert.equal(
+        rows[0].joined.length,
+        0,
+        "Acme pulled a Beta employee through a $lookup"
+      );
+    }
+  });
+
+  await check("$lookup into a global collection still resolves", async () => {
+    // companies has no companyId — adding a tenant match would empty the join.
+    const rows = await runWithTenant(String(acme._id), () =>
+      OfficeEmployee.aggregate([
+        { $match: { email: "super@acme.test" } },
+        {
+          $lookup: {
+            from: "companies",
+            localField: "company",
+            foreignField: "_id",
+            as: "companys",
+          },
+        },
+      ])
+    );
+    if (ENFORCING) {
+      assert.equal(rows.length, 1, "root row missing");
+      assert.equal(
+        rows[0].companys.length,
+        1,
+        "join into a global collection was wrongly filtered"
+      );
     }
   });
 
