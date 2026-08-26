@@ -732,3 +732,85 @@ mechanical.
    output will tell us the true size of Phase 3 far more accurately than any estimate here.
 5. **Audit every `aggregate()` with `$lookup`** and produce a checklist. This is the single
    highest-risk surface and it can be inventoried before any code changes.
+
+---
+
+# Progress report — where we are, where we stopped
+
+Twelve commits on `feat/multi-tenancy-phase-1`. `main` untouched.
+
+| Phase | State | Notes |
+|---|---|---|
+| 0 — Decisions | ✅ done | Shared DB + discriminator; field named `tenantId`, not `companyId`; Auth.js v5 with `trustHost` |
+| 1 — Tenant model + resolution | ✅ done | Full tenant schema, host resolution, `/platform` shell |
+| 2 — Context + plugin + backfill | ✅ done | 42 models scoped; production backfilled (336 docs, one tenant) |
+| 3 — Enforce isolation | ✅ **live** | `TENANT_ENFORCEMENT=enforce` in production. `$lookup` rewritten automatically; auth scoped; `/api/role` and `/api/account/status` locked down; audit carries `tenantId`; 12 cross-tenant tests |
+| 4 — Branding | ✅ done | Per-company branding, applied server-side; logo is still a pasted URL, no upload |
+| 5 — Custom domains | 🟡 partial | CRUD + real DNS TXT verification + subdomain routing done. **TLS automation and dynamic Socket.IO CORS not done** |
+| 6 — Per-tenant email | ❌ not started | See the blocker below |
+| 7 — Sockets, storage, plans | 🟡 partial | Plans/features/limits done. **Socket.IO still unauthenticated and broadcasting globally; S3 keys still have no tenant prefix** |
+| 8 — Lifecycle | 🟡 partial | Provisioning, suspend/reactivate done. No export, hard-delete or impersonation |
+
+Delivered beyond the original plan:
+
+- **Multi-company ownership** — `TenantMembership`, company switcher, per-company settings
+- **2FA bypass fixed** — the gate was cleared from the client's payload with no server check
+- **Three dead `$lookup` collection names** fixed; the leave list was broken for every role below super admin
+- **`escapeTenant` silently did nothing inside server actions** — Next bundles the action layer separately, so the AsyncLocalStorage existed twice
+
+## The next blocker, and it is closer than Phase 6
+
+`models/emailAccountmodel.js` still carries
+
+```js
+{ feature: 1, isPrimary: 1 }  unique, where isPrimary: true
+```
+
+Only **one** company on the whole platform can have a primary sender per feature. This is not a future Phase 6 concern — the second tenant that configures email hits it immediately. It needs `tenantId` in the key.
+
+## Recommended order from here
+
+1. Fix the SMTP index (small, and it blocks tenant #2 today)
+2. Socket.IO handshake auth + per-tenant rooms — currently unauthenticated and every event is broadcast to every connected client
+3. TLS automation for custom domains, and Socket.IO CORS from verified domains
+4. S3 tenant prefixes
+5. Per-tenant email templates and sending
+
+---
+
+# Domain ownership — claim, verify, and transfer
+
+## The problem with what is there now
+
+`addDomain` refuses a hostname the moment any other company has it listed, verified or not. So the first company to *type* a domain locks everyone else out, including the company that actually controls the DNS. A typo or a squatter blocks the rightful owner, and the only way out is a database edit.
+
+The unique index makes this structural:
+
+```js
+companySchema.index({ "domains.host": 1 }, { unique: true, sparse: true });
+```
+
+Two companies cannot even hold the same hostname as a pending claim.
+
+## The model we want
+
+Ownership is earned by proving DNS control, not by typing first.
+
+1. **Claiming is open.** Any company may add a hostname, even one another company has already claimed, as long as nobody has verified it. Each claim gets its own verification token.
+2. **Verifying is exclusive.** The first company to publish its token and pass the DNS check owns the domain. Every other pending claim on that hostname is dropped at that moment — they can never win it.
+3. **A verified domain is closed.** Adding a hostname already verified elsewhere is refused with a message that says so and points at support, rather than a bare "already in use".
+4. **Transfer is a human decision.** Only the platform team can release a verified domain, which returns it to the open pool.
+
+This is how Vercel, Netlify and Cloudflare for SaaS behave, and for the same reason: DNS control is the only trustworthy claim.
+
+### Why the check has to be at verification time
+
+Every claim gets a **different** token. Nothing stops the domain's real owner publishing two TXT records and letting two companies both pass the DNS check. So the exclusivity test cannot live in the DNS check alone — verification must also confirm that no other company has already verified this hostname, and both must happen together.
+
+### Schema and index
+
+The unique index has to go: it is what prevents a second pending claim. Uniqueness moves to "at most one **verified** claim per hostname", which a Mongo index cannot express across array elements — a `partialFilterExpression` applies to the document, so a company with one verified and one pending domain would index both.
+
+It is enforced in application code inside a transaction instead. The replica set already supports them, and the window is one document read plus one write.
+
+Each domain also gains `claimedBy` context so the platform console can show who else wanted a hostname and settle disputes.

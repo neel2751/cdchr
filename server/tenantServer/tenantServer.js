@@ -7,6 +7,7 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
 import { isTenantUsable, resolveBranding, toTenantSummary } from "@/lib/tenant";
 import { escapeTenant } from "@/lib/tenantContext";
+import { cacheGet, cacheInvalidate, cacheSet } from "@/lib/tenantCache";
 import { getServerSideProps } from "../session/session";
 import {
   hostCandidates,
@@ -29,41 +30,15 @@ import {
  * `proxy.js` and must agree.
  */
 
-// Domain→tenant mappings change rarely and this lookup sits on the request
-// path, so results are cached in process. Misses are cached too (for less
-// time), otherwise an unknown host would hit the database on every request.
-const CACHE_TTL_MS = 60_000;
-const MISS_TTL_MS = 10_000;
-// Mongoose buffers queries for 10s when the connection is down. That is far too
-// long to sit in front of a page load, so resolution gives up sooner and the
-// caller carries on unresolved.
+
+// Mongoose buffers queries for 10s when the connection is down. Far too long to
+// sit in front of a page load, so resolution gives up sooner and the caller
+// carries on unresolved.
 const LOOKUP_TIMEOUT_MS = 2_000;
-const hostCache = new Map();
 
-function cacheGet(key) {
-  const hit = hostCache.get(key);
-  if (!hit) return undefined;
-  if (hit.expiresAt < Date.now()) {
-    hostCache.delete(key);
-    return undefined;
-  }
-  return hit.value;
-}
-
-function cacheSet(key, value) {
-  hostCache.set(key, {
-    value,
-    expiresAt: Date.now() + (value ? CACHE_TTL_MS : MISS_TTL_MS),
-  });
-}
-
-/**
- * Drop cached host lookups. Call after any write that changes a tenant's
- * domains, slug or status, otherwise the change takes up to a minute to apply.
- */
+/** Drop cached host lookups. Thin wrapper so this stays a server action. */
 export async function invalidateTenantCache(host) {
-  if (host) hostCache.delete(normalizeHost(host));
-  else hostCache.clear();
+  cacheInvalidate(host ? normalizeHost(host) : undefined);
 }
 
 /**

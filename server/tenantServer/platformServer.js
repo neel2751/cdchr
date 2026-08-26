@@ -5,6 +5,7 @@ import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { resolveBranding } from "@/lib/tenant";
+import { normalizeHost } from "@/lib/tenantHost";
 import { runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
@@ -308,6 +309,63 @@ export async function platformSetPrimaryDomain(tenantId, host) {
     (id) => setPrimaryDomain(id, host),
     "Platform.setPrimaryDomain",
     "Set the primary domain"
+  );
+}
+
+/**
+ * Who currently owns a hostname, and who else has claimed it.
+ *
+ * The console needs this to settle a "that domain is ours" support request:
+ * releasing it returns the hostname to the open pool so the rightful company
+ * can verify it.
+ */
+export async function lookupDomain(rawHost) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (auth.error) return { success: false, message: auth.error };
+
+    const host = normalizeHost(rawHost);
+    if (!host) return { success: false, message: "Enter a domain" };
+
+    await connect();
+    const holders = await CompanyModel.find({ "domains.host": host })
+      .select("name slug domains")
+      .lean()
+      .exec();
+
+    return {
+      success: true,
+      data: JSON.stringify(
+        holders.map((c) => {
+          const d = (c.domains || []).find((x) => x.host === host);
+          return {
+            tenantId: String(c._id),
+            name: c.name,
+            verified: !!d?.verified,
+            addedAt: d?.addedAt || null,
+          };
+        })
+      ),
+    };
+  } catch (error) {
+    console.log("lookupDomain error:", error?.message);
+    return { success: false, message: "Could not look up the domain" };
+  }
+}
+
+/**
+ * Take a verified hostname away from a company.
+ *
+ * The manual half of the ownership rules: a verified domain is closed to
+ * everyone else, so when it genuinely belongs to another business the team
+ * releases it here and the rightful owner can then claim and verify it.
+ */
+export async function releaseDomain(tenantId, host) {
+  return asPlatformAdmin(
+    tenantId,
+    (id) => removeDomain(id, host),
+    "Platform.releaseDomain",
+    `Released ${normalizeHost(host)} back to the open pool`
   );
 }
 

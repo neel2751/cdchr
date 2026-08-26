@@ -17,15 +17,30 @@ const projectRoot = pathToFileURL(`${process.cwd()}/`).href;
 // the app's imports are written for the bundler ("@/lib/tenantContext").
 const CANDIDATES = ["", ".js", ".jsx", ".mjs", "/index.js"];
 
-export function resolve(specifier, context, next) {
-  if (!specifier.startsWith("@/")) return next(specifier, context);
-
-  const base = new URL(specifier.slice(2), projectRoot).href;
+/** Try the bundler's extension order against a resolved base URL. */
+function withExtension(base, context, next) {
   for (const ext of CANDIDATES) {
     const candidate = base + ext;
     if (existsSync(fileURLToPath(candidate))) return next(candidate, context);
   }
   return next(base, context);
+}
+
+export function resolve(specifier, context, next) {
+  if (specifier.startsWith("@/")) {
+    return withExtension(new URL(specifier.slice(2), projectRoot).href, context, next);
+  }
+
+  // Relative imports are extensionless too ("./tenantServer"), and Node only
+  // forgives that for the alias form unless it is handled here as well.
+  if (specifier.startsWith(".") && context.parentURL) {
+    const base = new URL(specifier, context.parentURL).href;
+    if (!/\.[mc]?jsx?$/.test(specifier)) {
+      return withExtension(base, context, next);
+    }
+  }
+
+  return next(specifier, context);
 }
 
 // Self-registering: `node --import <this file>` installs the hook above into

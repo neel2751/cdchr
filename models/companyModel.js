@@ -149,9 +149,16 @@ companySchema.index(
   { unique: true, partialFilterExpression: { slug: { $type: "string" } } }
 );
 
-// Multikey unique index — one hostname can never point at two tenants, and a
-// single tenant cannot list the same hostname twice.
-companySchema.index({ "domains.host": 1 }, { unique: true, sparse: true });
+// Deliberately NOT unique. Several companies may hold the same hostname as a
+// pending claim; ownership is decided by proving DNS control, not by adding it
+// first. A unique index here would let a typo or a squatter lock out the company
+// that actually controls the domain.
+//
+// The real rule — at most one *verified* claim per hostname — cannot be an index
+// across array elements, because a partialFilterExpression applies to the whole
+// document: a company with one verified and one pending domain would index both.
+// It is enforced in tenantOps.verifyDomain() inside a transaction instead.
+companySchema.index({ "domains.host": 1 });
 
 const CompanyModel =
   mongoose.models.Companie || mongoose.model("Companie", companySchema);
