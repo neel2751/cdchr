@@ -66,7 +66,7 @@ clockSchema.index({ employeeId: 1, date: -1, siteId: 1, isDeleted: 1 });
 clockSchema.index({ date: -1, siteId: 1, isDeleted: 1 });
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(clockSchema, "Clock");
 
 const ClockModel =

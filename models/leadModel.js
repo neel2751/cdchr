@@ -66,7 +66,7 @@ const leadSchema = new mongoose.Schema(
 );
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(leadSchema, "Lead");
 
 const LeadModel = mongoose.models.Lead || mongoose.model("Lead", leadSchema);

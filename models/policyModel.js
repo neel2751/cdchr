@@ -16,7 +16,7 @@ const policySchema = new mongoose.Schema(
 );
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(policySchema, "Policy");
 
 const PolicyModel =

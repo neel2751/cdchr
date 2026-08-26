@@ -57,7 +57,7 @@ const ctaSchema = new mongoose.Schema(
 );
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(ctaSchema, "Cta");
 
 const CtaModel = mongoose.models.Cta || mongoose.model("Cta", ctaSchema);

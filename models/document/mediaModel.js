@@ -58,7 +58,7 @@ const MediaSchema = new Schema(
 MediaSchema.index({ status: 1 });
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(MediaSchema, "Media");
 
 const MediaModel = models.Media || model("Media", MediaSchema);

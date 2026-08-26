@@ -50,7 +50,7 @@ export const authConfig = {
         // Tenant the account belongs to. Recorded for later phases; nothing
         // reads it for authorization yet, and it is null for accounts with no
         // company set.
-        token.companyId = user.companyId ? String(user.companyId) : null;
+        token.tenantId = user.tenantId ? String(user.tenantId) : null;
         token.requiresTwoFactor = user.requiresTwoFactor ?? false;
         token.mustSetup2FA = user.mustSetup2FA ?? false;
       }
@@ -73,7 +73,7 @@ export const authConfig = {
         session.user._id = token.id;
         session.user.role = token.role;
         session.user.deviceId = token.deviceId;
-        session.user.companyId = token.companyId ?? null;
+        session.user.tenantId = token.tenantId ?? null;
         // Unlike v4, these are always present rather than only when truthy —
         // proxy.js reads the session (not the raw token) in v5, and it has to
         // be able to tell "false" from "not included".

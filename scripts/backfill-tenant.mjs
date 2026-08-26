@@ -1,24 +1,32 @@
 /**
- * Phase 2 backfill: give every existing document a `companyId`.
+ * Phase 2 backfill: give every existing document a `tenantId`.
  *
  * Until this has run, tenant enforcement cannot be switched on — an unscoped
  * document is invisible once queries start filtering by tenant.
  *
  * Attribution, in order:
- *   1. A document that already has `companyId` is left alone.
+ *   1. A document that already has `tenantId` is left alone.
  *   2. Office employees inherit their existing `company` field where set.
  *   3. Documents that reference an employee (employeeId / approvedBy / …)
  *      inherit that employee's tenant.
  *   4. Everything left over goes to the default tenant (--tenant, or the only
  *      tenant if there is exactly one).
  *
- * Idempotent: every update is conditional on companyId being absent, so it can
+ * --single skips steps 2 and 3 and puts everything in one tenant. Use it when
+ * the existing `company` field is a reporting label rather than a customer
+ * boundary — which is the usual case for a business that has been running
+ * single-tenant. Without it, employees split by their `company` value and their
+ * leave, clocks and rotas follow, which makes each group invisible to the other
+ * once enforcement is on.
+ *
+ * Idempotent: every update is conditional on tenantId being absent, so it can
  * be re-run safely and resumed after an interruption.
  *
  * Usage:
  *   node scripts/backfill-tenant.mjs --dry-run
  *   node scripts/backfill-tenant.mjs --tenant <tenantId>
  *   node scripts/backfill-tenant.mjs --tenant <tenantId> --collection weeklyrotas
+ *   node scripts/backfill-tenant.mjs --tenant <tenantId> --single
  */
 import dotenv from "dotenv";
 import mongoose from "mongoose";
@@ -27,6 +35,8 @@ dotenv.config();
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
+// Everything to one tenant: ignore the per-employee attribution entirely.
+const SINGLE = args.includes("--single");
 
 function flag(name, fallback) {
   const i = args.indexOf(`--${name}`);
@@ -36,7 +46,7 @@ function flag(name, fallback) {
 }
 
 // Collections that legitimately have no tenant. Must match GLOBAL_MODELS in
-// lib/tenantPlugin.js — if the two drift, either documents get a companyId the
+// lib/tenantPlugin.js — if the two drift, either documents get a tenantId the
 // application never filters on, or enforcement rejects rows this never touched.
 const GLOBAL_COLLECTIONS = new Set([
   "companies",
@@ -77,7 +87,12 @@ async function main() {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
   const db = mongoose.connection.db;
   console.log(
-    `${DRY_RUN ? "DRY RUN — nothing will be written\n" : ""}Database: ${db.databaseName}\n`
+    `${DRY_RUN ? "DRY RUN — nothing will be written\n" : ""}Database: ${db.databaseName}`
+  );
+  console.log(
+    SINGLE
+      ? "Mode: --single (every document to one tenant; `company` stays a label)\n"
+      : "Mode: attributed (employees split by their `company` field)\n"
   );
 
   // ------------------------------------------------------- default tenant --
@@ -143,7 +158,7 @@ async function main() {
 
   for (const name of collections) {
     const col = db.collection(name);
-    const missing = { companyId: { $exists: false } };
+    const missing = { tenantId: { $exists: false } };
 
     const total = await col.countDocuments({});
     const todo = await col.countDocuments(missing);
@@ -159,17 +174,17 @@ async function main() {
     let byOwnField = 0;
 
     // 2. Office employees carry their own company reference.
-    if (name === "officeemployes") {
+    if (!SINGLE && name === "officeemployes") {
       const q = { ...missing, company: { $exists: true, $ne: null } };
       byOwnField = await col.countDocuments(q);
       if (!DRY_RUN && byOwnField) {
         // $set from another field needs an aggregation-pipeline update.
-        await col.updateMany(q, [{ $set: { companyId: "$company" } }]);
+        await col.updateMany(q, [{ $set: { tenantId: "$company" } }]);
       }
     }
 
     // 3. Inherit from the employee the row belongs to.
-    const refField = EMPLOYEE_REFS[name];
+    const refField = SINGLE ? null : EMPLOYEE_REFS[name];
     if (refField) {
       const byTenant = new Map();
       const cursor = col.find(
@@ -189,7 +204,7 @@ async function main() {
         if (!DRY_RUN) {
           await col.updateMany(
             { _id: { $in: ids }, ...missing },
-            { $set: { companyId: new mongoose.Types.ObjectId(tenant) } }
+            { $set: { tenantId: new mongoose.Types.ObjectId(tenant) } }
           );
         }
       }
@@ -200,7 +215,7 @@ async function main() {
       ? todo - byOwnField - byEmployee
       : await col.countDocuments(missing);
     if (!DRY_RUN && remaining) {
-      await col.updateMany(missing, { $set: { companyId: defaultOid } });
+      await col.updateMany(missing, { $set: { tenantId: defaultOid } });
     }
 
     totals.byOwnField += byOwnField;
@@ -223,13 +238,13 @@ async function main() {
     for (const name of collections) {
       const n = await db
         .collection(name)
-        .countDocuments({ companyId: { $exists: false } });
+        .countDocuments({ tenantId: { $exists: false } });
       if (n) stragglers.push(`${name}=${n}`);
     }
     console.log(
       stragglers.length
         ? `\nWARNING: still unscoped: ${stragglers.join(", ")}`
-        : "\nEvery document now has a companyId."
+        : "\nEvery document now has a tenantId."
     );
   }
 

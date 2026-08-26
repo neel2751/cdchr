@@ -88,7 +88,7 @@ behaviour is not. The shape it produces:
 { $lookup: {
     from: "roletypes",
     let: { dep: "$department" },
-    pipeline: [{ $match: { $expr: { $eq: ["$_id", "$$dep"] }, companyId: tenantId } }],
+    pipeline: [{ $match: { $expr: { $eq: ["$_id", "$$dep"] }, tenantId } }],
     as: "departments",
 } }
 ```
@@ -96,7 +96,7 @@ behaviour is not. The shape it produces:
 The rewrite is careful about four things:
 
 - **Global collections are left alone.** `companies`, `platformusers` and the
-  auth-time collections have no `companyId`; adding a match would silently empty
+  auth-time collections have no `tenantId`; adding a match would silently empty
   the join. Verified by test.
 - **Array `localField` keeps Mongo's semantics** — an array matches if *any*
   element matches, so the generated `$expr` branches on `$isArray`.

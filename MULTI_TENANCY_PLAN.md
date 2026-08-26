@@ -66,7 +66,7 @@ company field at all**.
 There are three dead `// companyId` comments in `models/leaveSettingModel.js:4-7`,
 `models/payrollLockModel.js:5-7` and `server/leaveSettingServer.js:114` — a previous
 intention that was never carried through. `models/document/documentModel.js:33` and
-`models/expense/expenseModel.js:65` do have a `companyId`, but it is used as a
+`models/expense/expenseModel.js:65` do have a `tenantId`, but it is used as a
 *business* attribute (which company an expense belongs to), not enforced as a boundary.
 
 ### 1.3 Authentication is global, not per-tenant
@@ -153,7 +153,7 @@ SMTP account table with `host`, `port`, `secure`, `userName`, **AES-encrypted `p
 `isDeleted`, plus test-connection helpers and `getSMTPForFeature(feature)` with a
 primary→any-active fallback.
 
-**This second system is 80% of a per-tenant email setup already.** It needs a `companyId`
+**This second system is 80% of a per-tenant email setup already.** It needs a `tenantId`
 and a changed unique index — see the landmine in §1.8.
 
 ### 1.7 Real-time (Socket.IO) has no auth and broadcasts globally
@@ -187,7 +187,7 @@ emailAccountSchema.index(
 );
 ```
 Only **one** primary SMTP account per feature can exist **across the entire platform**.
-Acme sets a primary "HR" sender; Beta cannot. Must become `{ companyId, feature, isPrimary }`.
+Acme sets a primary "HR" sender; Beta cannot. Must become `{ tenantId, feature, isPrimary }`.
 
 **b) `models/officeModel.js`** (reception users)
 ```js
@@ -195,7 +195,7 @@ email: { type: String, required: true, unique: true }
 ```
 Globally unique reception email. Two companies both using `reception@…` — or the same
 managed-services provider running reception for both — collide. Must become a compound
-unique index with `companyId`.
+unique index with `tenantId`.
 
 ### 1.9 Other findings that affect the design
 
@@ -214,7 +214,7 @@ unique index with `companyId`.
   `{ success: false, message }` instead of rethrowing. Tenant guards that throw inside a
   transaction will be converted into soft failures — needs care.
 - **`withAudit` / `recordAudit`** (`lib/audit.js`) is a clean single choke point using
-  **`AsyncLocalStorage`**. Adding `companyId` to audit logs is a one-file change — and
+  **`AsyncLocalStorage`**. Adding `tenantId` to audit logs is a one-file change — and
   more importantly, **this file is the proven in-repo pattern for the tenant-context
   mechanism proposed in §3.2**.
 - **`getSuperAdmins()`** is used to pick email recipients for rota reminders
@@ -231,10 +231,10 @@ unique index with `companyId`.
 
 Three realistic options:
 
-### Option A — Shared database, shared collections, `companyId` on every document
+### Option A — Shared database, shared collections, `tenantId` on every document
 **Recommended.**
 
-- One connection, one database, one set of collections. Every document gets `companyId`.
+- One connection, one database, one set of collections. Every document gets `tenantId`.
   Every query is filtered by it.
 - **Pros:** No change to deployment or connection handling. Cross-tenant reporting for the
   platform dashboard is trivial. One migration per schema change. Cheapest to run.
@@ -324,15 +324,15 @@ const tenantContext = new AsyncLocalStorage();
 
 export function getTenantId() {
   const store = tenantContext.getStore();
-  if (!store?.companyId) throw new TenantContextError("No tenant in context");
-  return store.companyId;
+  if (!store?.tenantId) throw new TenantContextError("No tenant in context");
+  return store.tenantId;
 }
 
 export function withTenant(handler) {          // wraps a server action
   return async (...args) => {
     const session = await getServerSession(options);
-    const companyId = session?.user?.companyId;    // authoritative: from the JWT
-    return tenantContext.run({ companyId, role: session?.user?.role }, () => handler(...args));
+    const tenantId = session?.user?.tenantId;      // authoritative: from the JWT
+    return tenantContext.run({ tenantId, role: session?.user?.role }, () => handler(...args));
   };
 }
 ```
@@ -343,23 +343,23 @@ automatic filter:
 ```js
 // lib/tenantPlugin.js  (sketch)
 export function tenantPlugin(schema) {
-  schema.add({ companyId: { type: ObjectId, ref: "Companie", index: true } });
+  schema.add({ tenantId: { type: ObjectId, ref: "Companie", index: true } });
 
   // Reads & writes
   schema.pre(/^find|^count|^update|^delete|^replace/, function () {
     if (this.getOptions?.().skipTenant) return;
-    this.where({ companyId: getTenantId() });
+    this.where({ tenantId: getTenantId() });
   });
 
   // Inserts
   schema.pre("save", function () {
-    if (!this.companyId) this.companyId = getTenantId();
+    if (!this.tenantId) this.tenantId = getTenantId();
   });
 
   // Aggregations — see the caveat below
   schema.pre("aggregate", function () {
     if (this.options?.skipTenant) return;
-    this.pipeline().unshift({ $match: { companyId: getTenantId() } });
+    this.pipeline().unshift({ $match: { tenantId: getTenantId() } });
   });
 }
 ```
@@ -376,7 +376,7 @@ match, e.g.:
 { $lookup: {
     from: "roletypes",
     let: { dep: "$department" },
-    pipeline: [{ $match: { $expr: { $eq: ["$_id", "$$dep"] }, companyId: tenantId } }],
+    pipeline: [{ $match: { $expr: { $eq: ["$_id", "$$dep"] }, tenantId } }],
     as: "departments",
 } }
 ```
@@ -410,7 +410,7 @@ call an internal `/api/tenant/resolve?host=…` route backed by an **in-process 
 
 ### 3.4 Authentication changes
 
-- **JWT gains `companyId` and `companySlug`** (`option.js` `jwt`/`session` callbacks).
+- **JWT gains `tenantId` and `companySlug`** (`option.js` `jwt`/`session` callbacks).
 - **`LoginData` becomes tenant-scoped**: `findOne({ email, companyId, delete: { $ne: true } })`.
   Email uniqueness moves from global to per-tenant — one person can legitimately exist in
   two workspaces, which is a feature, not a bug.
@@ -434,7 +434,7 @@ New route segment `/platform`, served **only** on the platform apex host:
 - Tenant list, create, suspend, delete (with data export)
 - Per-tenant: branding editor, domain management + verification status, SMTP setup,
   feature/plan toggles, seat counts, storage usage
-- Platform-wide audit log (`AuditLog` gains `companyId`, plus platform-actor entries)
+- Platform-wide audit log (`AuditLog` gains `tenantId`, plus platform-actor entries)
 - "Impersonate / support login" — time-boxed, always audited, visibly banner-flagged
 
 ---
@@ -515,7 +515,7 @@ domain.
 
 The `EmailAccountModel` design is already close. Changes:
 
-1. Add `companyId` to `models/emailAccountmodel.js`.
+1. Add `tenantId` to `models/emailAccountmodel.js`.
 2. **Change the unique index** from `{ feature, isPrimary }` to
    `{ companyId, feature, isPrimary }` (see §1.8a — this blocks tenant #2 otherwise).
 3. `getSMTPForFeature(feature)` → `getSMTPForFeature(feature, companyId)`, with a fallback
@@ -540,7 +540,7 @@ spam and will be blamed on us.
 Each phase is independently shippable and leaves the app working.
 
 ### Phase 0 — Decisions and foundations *(no behaviour change)*
-- Confirm Option A (shared DB + `companyId`).
+- Confirm Option A (shared DB + `tenantId`).
 - Decide the platform apex domain and subdomain scheme.
 - Resolve the **`NEXTAUTH_URL` / NextAuth v4 vs Auth.js v5** question (§3.4) — it gates Phase 5.
 - Decide the custom-domain TLS approach (§5).
@@ -581,8 +581,8 @@ Two decisions made during implementation, both deviating slightly from the sketc
 
 ### Phase 2 — Tenant context + backfill *(shadow mode)* ✅ *implemented*
 - Build the tenant context (AsyncLocalStorage) and `lib/tenantPlugin.js` (§3.2).
-- Apply the plugin to all tenant-scoped schemas; add `companyId` + compound indexes.
-- Migration script backfilling `companyId` on every collection.
+- Apply the plugin to all tenant-scoped schemas; add `tenantId` + compound indexes.
+- Migration script backfilling `tenantId` on every collection.
 - **Shadow mode:** the plugin *logs* every query that runs without tenant context instead
   of throwing. Run in production until the log is silent.
 
@@ -591,7 +591,7 @@ Delivered:
 | File | Purpose |
 |---|---|
 | `lib/tenantContext.js` | AsyncLocalStorage scope + per-request session fallback |
-| `lib/tenantPlugin.js` | Adds `companyId`, filters reads/writes/aggregates, flags unscoped `$lookup` |
+| `lib/tenantPlugin.js` | Adds `tenantId`, filters reads/writes/aggregates, flags unscoped `$lookup` |
 | `scripts/backfill-tenant.mjs` | Idempotent backfill with per-employee attribution |
 | `scripts/seed-dev-fixtures.mjs` | Two-tenant fixtures (refuses any non-local database) |
 | `scripts/test-tenant-scope.mjs` | 9 cross-tenant isolation tests (`npm run tenant:test`) |
@@ -620,6 +620,13 @@ tenant in context" despite being correctly wrapped. Both `runWithTenant` and
 converted. The §9 "highest-risk surface" is now a mechanically-produced checklist rather
 than a manual audit.
 
+**The tenant field is `tenantId`, not `companyId`.** `expenses`,
+`expensecategories` and `documents` already had a `companyId` of their own — a
+business attribute the user picks on the form. Reusing that name would have
+fused two meanings: a user choosing a different company on an expense could
+later hide the row from their own tenant. `expense.companyId` keeps its meaning;
+`expense.tenantId` is the boundary.
+
 **Escape hatches so far** (`grep escapeTenant` lists every one): the login account
 lookup, the platform console's employee counts, and the two proxy-called routes
 `/api/role` and `/api/account/status`, both reached over HTTP without a cookie and pinned
@@ -634,11 +641,11 @@ of Phase 3 is still an estimate.
 ### Phase 3 — Enforce isolation
 - Flip the plugin to fail-closed.
 - Convert all `$lookup` stages to tenant-matched pipeline form (§3.2 caveat).
-- Tenant-scope `LoginData`; add `companyId` to the JWT; add the cross-tenant middleware
+- Tenant-scope `LoginData`; add `tenantId` to the JWT; add the cross-tenant middleware
   guard; fix cookie scoping.
 - Fix the two unique indexes (§1.8).
 - Lock down `/api/role` and `/api/account/status`.
-- Add `companyId` to `withAudit` / `logAuditDirect`.
+- Add `tenantId` to `withAudit` / `logAuditDirect`.
 - **Automated cross-tenant tests**: seed two tenants, then assert every list/detail server
   action returns nothing for the other tenant's IDs.
 
@@ -655,13 +662,13 @@ of Phase 3 is still an estimate.
 - Fix `process.env.NEXTAUTH_URL` usages to derive origin per request.
 
 ### Phase 6 — Per-tenant email
-- `companyId` on `EmailAccountModel` + index change + resolution fallback chain.
+- `tenantId` on `EmailAccountModel` + index change + resolution fallback chain.
 - Branded template layer; retire the legacy transport.
 - Per-tenant cron iteration.
 
 ### Phase 7 — Real-time, storage, plans
 - Socket.IO handshake auth (verify the NextAuth JWT) + `tenant:{id}` rooms; replace every
-  `io.emit` with a room emit. Add `companyId` to QR token claims and verify it.
+  `io.emit` with a room emit. Add `tenantId` to QR token claims and verify it.
 - Tenant-prefixed S3 keys; per-tenant storage accounting.
 - Feature flags / plan gating; seat limits; per-tenant rate limiting (`lib/rateLimit.js`).
 
@@ -688,7 +695,7 @@ of Phase 3 is still an estimate.
 | Backfill migration mis-assigns historical records | High | Dry-run with counts per collection; take a full backup; make the script idempotent and re-runnable |
 | `NEXT_PUBLIC_ALGO_KEY` means encrypted IDs are not a boundary | Medium | Never rely on ID obfuscation for authorisation; every action re-checks tenant |
 | Custom-domain TLS rate limits / failed issuance | Medium | Always keep `slug.ourapp.com` working as a fallback; surface `sslStatus` in the UI |
-| Cross-tenant reporting queries slow down as tenants grow | Medium | Every compound index leads with `companyId` |
+| Cross-tenant reporting queries slow down as tenants grow | Medium | Every compound index leads with `tenantId` |
 | `withTransaction` swallowing tenant-guard errors | Low | Rethrow `TenantContextError` specifically |
 
 ---

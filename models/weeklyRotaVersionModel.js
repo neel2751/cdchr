@@ -71,7 +71,7 @@ weeklyRotaVersionSchema.index({ rotaId: 1, version: -1 });
 weeklyRotaVersionSchema.index({ weekStartDate: -1 });
 
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
-// compiled, or the hooks and companyId field are not attached.
+// compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(weeklyRotaVersionSchema, "WeeklyRotaVersion");
 
 const WeeklyRotaVersionModel =

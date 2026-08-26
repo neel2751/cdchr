@@ -340,7 +340,7 @@ export const LoginData = async (email, password, deviceId) => {
   // Which tenant this account belongs to. Only office employees carry one
   // today and it is frequently unset, so it is recorded on the session for
   // later phases — nothing enforces it yet.
-  user.companyId = user.company ? String(user.company) : null;
+  user.tenantId = user.company ? String(user.company) : null;
   return {
     status: true,
     data: user,

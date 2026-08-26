@@ -59,7 +59,7 @@ async function main() {
     if (ENFORCING) {
       assert(rows.length > 0, "expected some rows");
       for (const r of rows) {
-        assert.equal(String(r.companyId), String(acme._id), `leaked ${r.email}`);
+        assert.equal(String(r.tenantId), String(acme._id), `leaked ${r.email}`);
       }
     } else {
       // Shadow mode must not change results.
@@ -105,7 +105,7 @@ async function main() {
       // The fixtures include one employee with no tenant, standing in for a
       // record the backfill has not claimed. It belongs to neither partition.
       escapeTenant("test", () =>
-        OfficeEmployee.countDocuments({ companyId: { $in: [null, undefined] } })
+        OfficeEmployee.countDocuments({ tenantId: { $in: [null, undefined] } })
       ),
     ]);
     if (ENFORCING) {
@@ -126,7 +126,7 @@ async function main() {
     );
     if (ENFORCING) {
       for (const r of rows) {
-        assert.equal(String(r.companyId), String(beta._id), "rota leaked");
+        assert.equal(String(r.tenantId), String(beta._id), "rota leaked");
       }
     }
   });
@@ -158,7 +158,7 @@ async function main() {
       assert.equal(asBeta.length, 1, "Beta should see its own rota");
       assert(asBeta[0].joined.length > 0, "join must still work for the owner");
       for (const j of asBeta[0].joined) {
-        assert.equal(String(j.companyId), String(beta._id));
+        assert.equal(String(j.tenantId), String(beta._id));
       }
     }
   });
@@ -197,7 +197,7 @@ async function main() {
   });
 
   await check("$lookup into a global collection still resolves", async () => {
-    // companies has no companyId — adding a tenant match would empty the join.
+    // companies has no tenantId — adding a tenant match would empty the join.
     const rows = await runWithTenant(String(acme._id), () =>
       OfficeEmployee.aggregate([
         { $match: { email: "super@acme.test" } },
@@ -268,7 +268,7 @@ async function main() {
   await check("save stamps the current tenant", async () => {
     const doc = new WeeklyRota({ weekStartDate: new Date(2020, 0, 6) });
     await runWithTenant(String(beta._id), () => doc.save());
-    assert.equal(String(doc.companyId), String(beta._id));
+    assert.equal(String(doc.tenantId), String(beta._id));
     await escapeTenant("test cleanup", () => WeeklyRota.deleteOne({ _id: doc._id }));
   });
 
