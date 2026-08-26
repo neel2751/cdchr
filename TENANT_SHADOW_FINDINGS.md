@@ -188,3 +188,79 @@ Server actions could not be driven against the live cluster — that needs a rea
 login, which I do not have. The shadow re-run therefore covers the local
 fixtures only. Driving the 91 read-shaped actions against production, signed in
 as a real user, is worth doing before enforcement.
+
+---
+
+# Enforcement enabled — validation
+
+`TENANT_ENFORCEMENT=enforce` is now set in `.env`. Everything below was run
+after the backfill (336 documents, 40 collections, one tenant).
+
+## Against the production database (read-only)
+
+Every scoped model counted with and without the tenant filter:
+
+```
+models loaded 46   with data 33   empty 6   LOSING ROWS 0
+```
+
+All 33 populated collections return identical counts scoped and unscoped —
+`OfficeEmploye(19) LeaveRequest(64) Attendance(29) SiteAssignment(25)
+ClockRecord(20) Clock(19) …`. Enforcement hides nothing.
+
+The real `officeServer` pipeline returns the same 18 rows with both joins
+intact: 15 company joins (proving the global-collection exemption works —
+`companies` has no `tenantId`, so it is not filtered) and 18 department joins
+(proving `roletypes`, which *does* carry one, still resolves).
+
+The app boots against production in enforce mode with no server errors: public
+pages 200, anonymous redirect correct, login error codes intact.
+
+## Against two-tenant fixtures (full app, logged in)
+
+| Check | Result |
+|---|---|
+| Login under enforcement | works; session carries `tenantId` |
+| `/admin/dashboard`, `/officeEmployee`, `/weeklyRota`, `/attendance` | 200 |
+| 91 read-shaped server actions driven | 91 executed |
+| Tenant-scope failures | **0** |
+| Real filtering in action output | `getOfficeEmployee` returned only Acme's 3 employees — Beta's never appeared |
+
+That last row is the one that matters: isolation confirmed in real product
+output, not just in a test harness.
+
+## New bug found — leave requests are broken for non-superAdmin ⚠️
+
+`server/leaveServer/getLeaveServer.js:36-44`
+
+```js
+const lookup =
+  role === "superAdmin"
+    ? { from: "officeemployes", localField: "employeeId", foreignField: "_id", as: "employees" }
+    : {};                       // <-- becomes  $lookup: {}
+```
+
+For any role other than `superAdmin` the stage is an empty object, and Mongo
+rejects the whole pipeline:
+
+```
+MongoServerError: must specify 'pipeline' when 'from' is empty  (FailedToParse)
+```
+
+**Pre-existing, not caused by this work** — it appears twice in the shadow-mode
+log captured before the `$lookup` rewrite existed. The rewrite correctly leaves
+it alone (it returns early when `from` is absent).
+
+Effect: the leave-request list fails for admins and ordinary users; only super
+admins see it. The fix is to omit the stage rather than push an empty object —
+build the pipeline conditionally instead of always including `$lookup: lookup`.
+
+Not fixed here: it is outside the enforcement task, and repairing it makes a
+screen that currently errors start returning data.
+
+## Remaining gap
+
+Nobody has signed into the **production** app in a browser under enforcement —
+that needs real credentials. Everything above is either read-only against
+production or a full logged-in run against fixtures. Worth doing before the
+branch merges.
