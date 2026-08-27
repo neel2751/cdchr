@@ -125,13 +125,22 @@ async function main() {
 
         const target = newKey(tenantId, src.category, entry.key);
 
+        // The dry run checks the bucket too. It previously reported "would
+        // move N" purely from the records, so it looked healthy even when not
+        // one of those objects was present — exactly the case that matters
+        // before committing to a migration.
+        const present = await objectExists(entry.key);
+
         if (DRY_RUN) {
-          console.log(`  ${entry.key}\n    -> ${target}`);
-          stats.moved++;
+          console.log(
+            `  ${present ? "     " : "MISSING "} ${entry.key}\n    -> ${target}`
+          );
+          if (present) stats.moved++;
+          else stats.missing++;
           continue;
         }
 
-        if (!(await objectExists(entry.key))) {
+        if (!present) {
           // The record points at an object that is not in the bucket. Left
           // alone: rewriting the key would only move a dangling reference.
           console.log(`  MISSING in bucket, left as-is: ${entry.key}`);
@@ -164,6 +173,14 @@ async function main() {
         }
       }
     }
+  }
+
+  if (stats.missing && stats.missing === stats.moved + stats.missing) {
+    console.log(
+      "\nNOT ONE recorded object was found in this bucket. Either the wrong\n" +
+        "bucket is configured, or these files live elsewhere. Migrating now would\n" +
+        "do nothing; check AWS_BUCKET_NAME before going further."
+    );
   }
 
   console.log(
