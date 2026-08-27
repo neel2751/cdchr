@@ -8,6 +8,14 @@ import { isKeyInTenant } from "@/lib/tenantAssets";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Asset categories readable without a session.
+ *
+ * Everything else a company stores is private. Kept explicit rather than
+ * inferred, so adding a public category is a deliberate act.
+ */
+const PUBLIC_CATEGORIES = new Set(["branding", "qr-codes"]);
+
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -42,10 +50,10 @@ export async function GET(req, { params }) {
 
     const [, tenantId, category] = key.split("/");
 
-    if (category === "branding") {
-      // A logo is shown on the sign-in page, before anyone has a session, so it
-      // cannot require one. Nothing else under branding/ is sensitive — it is
-      // the company's own public identity.
+    if (PUBLIC_CATEGORIES.has(category)) {
+      // These appear before anyone has a session: a logo on the sign-in page, a
+      // QR logo on the visitor form reached by scanning a code. Both are the
+      // company's own public identity, and neither is sensitive.
       const tenant = await withDb(() =>
         CompanyModel.findById(tenantId).select("_id").lean()
       );
@@ -71,7 +79,7 @@ export async function GET(req, { params }) {
         // Branding rarely changes and is requested on every page load; private
         // assets must not be cached by shared proxies.
         "Cache-Control":
-          category === "branding"
+          PUBLIC_CATEGORIES.has(category)
             ? "public, max-age=3600, stale-while-revalidate=86400"
             : "private, no-store",
       },

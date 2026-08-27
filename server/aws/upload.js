@@ -421,11 +421,16 @@ export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
 }
 
 /**
- * A direct bucket URL for an object.
+ * A durable, publicly reachable URL for an object.
  *
- * Ownership is checked even though this only builds a string: the object may be
- * publicly readable, and echoing an arbitrary key back is the same class of
- * mistake as signing one.
+ * Returns a first-party /api/asset path rather than a direct bucket URL. The
+ * bucket blocks public reads — as it should — so an S3 URL would simply 403,
+ * and a signed one expires, which is no use for a logo embedded in a page or an
+ * email. The asset route serves the public categories and requires a session
+ * for everything else.
+ *
+ * Ownership is still checked: echoing back an arbitrary key is the same class
+ * of mistake as signing one.
  */
 export async function getPublicUrl({ key }) {
   if (!key) {
@@ -436,8 +441,7 @@ export async function getPublicUrl({ key }) {
   }
   try {
     const safeKey = await assertKeyOwnedByTenant(key);
-    const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${safeKey}`;
-    return { success: true, url };
+    return { success: true, url: `/api/asset/${safeKey}` };
   } catch (error) {
     return { success: false, message: error.message };
   }
