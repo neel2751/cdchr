@@ -811,3 +811,167 @@ The unique index has to go: it is what prevents a second pending claim. Uniquene
 It is enforced in application code inside a transaction instead. The replica set already supports them, and the window is one document read plus one write.
 
 Each domain also gains `claimedBy` context so the platform console can show who else wanted a hostname and settle disputes.
+
+---
+
+# §4.4 asset storage — audit and plan
+
+You were right to ask. §4.4 said two things: put tenant assets under
+`tenants/{tenantId}/…` in our own bucket, and let tenants upload a logo rather
+than paste an external URL. **Neither is finished, and the gap is worse than
+"unfinished" — object storage is the one place where tenant isolation is not
+enforced at all.**
+
+Everything else in this project is scoped by the Mongoose plugin. S3 has no
+equivalent, so every S3 call site is on its own — and most of them are not.
+
+## What is actually done
+
+| §4.4 promise | State |
+|---|---|
+| Tenant prefix on employee document keys | ✅ `tenants/{tenantId}/{employeeId}/…` (Phase 7) |
+| Media/document *records* isolated | ✅ `Media` and `Document` carry `tenantId` and are filtered by the plugin |
+| Tenant prefix everywhere else | ❌ QR codes, expense receipts, generic uploads |
+| Logo upload | ❌ still a pasted URL |
+| Assets served from our own origin | ❌ any external URL is accepted |
+
+## Finding 1 — any signed URL, for any object, to any tenant 🔴
+
+`server/aws/upload.js` is a `"use server"` module, so **every export is a server
+action invocable by id** from any authenticated browser. Confirmed present in
+the build manifest:
+
+```
+generateDownloadUrl      deleteFileFromS3       generatePreSignedUrl
+uploadImage              getPublicUrl           generatePreSignedGetURL
+createMultipartUpload
+```
+
+Three of those take a **raw object key from the caller and never check it**:
+
+```js
+export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
+  const params = { Bucket, Key: key };          // key straight from the client
+  const url = await getSignedUrl(S3, command, { expiresIn });
+```
+
+```js
+export async function deleteFileFromS3(key) {
+  const params = { Bucket, Key: key };          // same
+  await S3.send(new AWS.DeleteObjectCommand(params));
+```
+
+So an authenticated user of company A can call `generateDownloadUrl` with
+company B's key and receive a working signed URL for it — the read is done with
+the *server's* credentials, so nothing about the caller's tenant applies. And
+`deleteFileFromS3` will delete any object in the bucket.
+
+The keys are not secret. `tenants/{tenantId}/{employeeId}/{filename}` is built
+from two ObjectIds the app already exposes, and older objects are just
+`{employeeId}/{filename}`. `employeDocument.jsx` and `employee-files.jsx` pass
+`item.key` from a list the browser holds, so the shape is visible to anyone who
+opens developer tools.
+
+**This is the "they can see another company's media" problem, and it is live.**
+It is not caught by the Phase 3 work: the tenant plugin governs MongoDB, and
+none of this touches MongoDB.
+
+## Finding 2 — two upload paths never got the tenant prefix 🟠
+
+`tenantScopedKey()` is only used by the employee-document functions. Two other
+writers build their own keys:
+
+| Where | Key | Problem |
+|---|---|---|
+| `qrServer.js` | `qr-codes/{timestamp}-{name}` | shared namespace, and `access: "public"` |
+| `expenseServer.js` | `{companyId}/{projectId}/expenses/receipts/…` | uses the **business** `companyId`, not `tenantId` |
+
+The expense one is the subtler mistake: `companyId` there is the company a user
+*picks on the form*, which since the rename is explicitly not the tenant
+boundary. Two tenants that both reference the same company record would write
+receipts into the same prefix.
+
+## Finding 3 — the logo is still an arbitrary external URL 🟠
+
+§4.4 warned about exactly this. `next.config.mjs` pins
+
+```
+img-src 'self' data: blob: https://*.amazonaws.com https://cdc.construction https://res.cloudinary.com
+```
+
+and a fixed `images.remotePatterns`. A tenant pasting `https://their-cdn.com/logo.png`
+gets a silently broken image, because neither list can be extended per request.
+The branding form accepts it anyway and the preview renders it locally, so the
+failure only shows up in production.
+
+There is also a smaller privacy point: an external logo URL means every page
+load beacons to a third-party host chosen by the tenant.
+
+## Finding 4 — the credentials in `.env` are dead ⚪
+
+A read-only `ListObjectsV2` against the configured bucket returns:
+
+```
+The AWS Access Key Id you provided does not exist in our records.
+```
+
+So S3 is currently non-functional in this environment — uploads and downloads
+would both fail. That also means I could not measure how many objects still sit
+under the old un-prefixed keys. Worth resolving before any migration, since the
+migration needs working credentials.
+
+## Plan
+
+### Step 1 — close the IDOR (must come first)
+
+Nothing else matters while any key can be signed on request. Three changes:
+
+1. **Never accept a key from the client.** `generateDownloadUrl` and
+   `deleteFileFromS3` should take a *record id* — a `Document`/`Media` `_id` —
+   look the row up through the tenant-scoped model, and use the key stored on
+   it. The plugin then does the isolation work, exactly as it does everywhere
+   else. The two client components already have the record to hand.
+2. **Assert the prefix as a second line of defence.** A small
+   `assertKeyBelongsToTenant(key)` that rejects anything not under
+   `tenants/{sessionTenantId}/`, applied to every S3 call. Cheap, and it turns
+   a future mistake into a refusal rather than a leak.
+3. **Stop exporting raw-key helpers as server actions.** Move the low-level
+   functions into a non-`"use server"` module (as `tenantOps.js` already does
+   for tenant writes) so only the safe wrappers are reachable by id.
+
+### Step 2 — one key builder, used everywhere
+
+Make `tenantScopedKey()` the only way a key is constructed, and give it a
+category: `tenants/{tenantId}/{category}/{...}`. Convert `qr-codes` and expense
+receipts onto it, and change the expense path to use `tenantId` rather than the
+business `companyId`.
+
+### Step 3 — migrate the existing objects
+
+Needs working credentials. A script that lists every key not under `tenants/`,
+resolves its owner (the employee id is the first segment; `Document`/`Media`
+rows carry both the key and now a `tenantId`), copies it to the new key, updates
+the stored key on the record, then deletes the original — in that order, so a
+failure leaves a duplicate rather than a dangling reference. Dry-run first,
+same as the other migrations.
+
+### Step 4 — logo upload, and stop accepting external URLs
+
+Add an upload control to the branding form that writes to
+`tenants/{tenantId}/branding/` and stores the resulting key. Serve it through a
+first-party route (`/api/asset/[...key]`) that checks the tenant and streams
+from S3, so the CSP and `remotePatterns` lists stay fixed and no external host
+is contacted. Then make `logoUrl` reject off-origin URLs rather than accepting
+one that will not render.
+
+### Step 5 — per-tenant storage accounting
+
+Once every key is prefixed, `ListObjectsV2` on `tenants/{tenantId}/` gives usage
+directly, which makes `limits.maxStorageBytes` enforceable the same way
+`maxEmployees` already is.
+
+### Suggested order
+
+Step 1 is the only urgent one — it is a live cross-tenant read and delete. Steps
+2 and 4 are the visible product work. Step 3 needs credentials restored. Step 5
+is small once 2 is done.
