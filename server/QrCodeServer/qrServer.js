@@ -46,7 +46,7 @@ export async function createQrCode(data) {
     const { url, key } = await generatePreSignedUrl({
       fileName: generateFileName,
       contentType: images.type,
-      path: "qr-codes",
+      path: "qr-codes", // category within this company's prefix
       access: "public",
     });
 
@@ -271,7 +271,7 @@ export async function editQrCode(data, id) {
       const { url, key } = await generatePreSignedUrl({
         fileName: image.name,
         contentType: image.type,
-        path: "qr-codes",
+        path: "qr-codes", // category within this company's prefix
         access: "public",
       });
 

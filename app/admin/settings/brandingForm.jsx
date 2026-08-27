@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import Image from "next/image";
 import { Loader2 } from "lucide-react";
 
@@ -8,7 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateTenantBranding } from "@/server/tenantServer/tenantSettingsServer";
+import {
+  updateTenantBranding,
+  uploadTenantLogo,
+} from "@/server/tenantServer/tenantSettingsServer";
 
 const FIELDS = [
   {
@@ -17,12 +22,7 @@ const FIELDS = [
     placeholder: "Acme People",
     help: "Shown in the sidebar, the browser tab and outgoing email.",
   },
-  {
-    name: "logoUrl",
-    label: "Logo URL",
-    placeholder: "/images/Interiorlogo.svg",
-    help: "Square works best. Upload to your own storage and paste the link.",
-  },
+
   {
     name: "faviconUrl",
     label: "Favicon URL",
@@ -44,9 +44,10 @@ const FIELDS = [
 ];
 
 const BrandingForm = ({ tenant, run, isPending }) => {
+  const router = useRouter();
+  const [uploading, setUploading] = useState(false);
   const [values, setValues] = useState(() => ({
     appName: tenant.storedBranding?.appName || "",
-    logoUrl: tenant.storedBranding?.logoUrl || "",
     faviconUrl: tenant.storedBranding?.faviconUrl || "",
     supportEmail: tenant.storedBranding?.supportEmail || "",
     emailFromName: tenant.storedBranding?.emailFromName || "",
@@ -58,6 +59,34 @@ const BrandingForm = ({ tenant, run, isPending }) => {
   const onSubmit = (e) => {
     e.preventDefault();
     run(() => updateTenantBranding(tenant._id, values));
+  };
+
+  /**
+   * Upload rather than a pasted URL.
+   *
+   * next.config.mjs pins img-src and images.remotePatterns, and neither can be
+   * extended per request — so a third-party link renders in this preview and
+   * then silently fails in production. Uploading stores it under the company's
+   * own prefix and serves it from /api/asset, which is first-party.
+   */
+  const onLogoPicked = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await uploadTenantLogo(tenant._id, body);
+      if (res?.success) {
+        toast.success(res.message || "Logo uploaded");
+        router.refresh();
+      } else {
+        toast.error(res?.message || "Upload failed");
+      }
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   };
 
   // Falls back to the platform default so the preview always shows something.
@@ -86,6 +115,25 @@ const BrandingForm = ({ tenant, run, isPending }) => {
               )}
             </div>
           ))}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="logoFile">Logo</Label>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                id="logoFile"
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                disabled={uploading || isPending}
+                onChange={onLogoPicked}
+                className="text-sm file:mr-3 file:rounded-md file:border file:bg-background file:px-3 file:py-1.5 file:text-sm"
+              />
+              {uploading && <Loader2 className="size-4 animate-spin" />}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              PNG, JPEG, SVG or WebP, under 1 MB. Stored with your company and
+              served from this site, so it works everywhere the app appears.
+            </p>
+          </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="primaryColor">Primary colour</Label>

@@ -4,6 +4,10 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getServerSideProps } from "../session/session";
 import axios from "axios";
 import { generateRandomFileName } from "@/utils/generateRandomFileName";
+import {
+  assertKeyOwnedByTenant,
+  tenantAssetKey,
+} from "@/lib/tenantAssets";
 
 const S3 = new AWS.S3({
   region: process.env.AWS_REGION,
@@ -23,12 +27,15 @@ const Bucket = process.env.AWS_BUCKET_NAME;
  * company. Objects written before this keep their old keys and are still read
  * by their stored URL — this only shapes new writes.
  */
-async function tenantScopedKey(employeeId, fileName) {
+async function tenantScopedKey(employeeId, fileName, category = "documents") {
   const { props } = await getServerSideProps();
   const tenantId = props?.session?.user?.tenantId;
-  return tenantId
-    ? `tenants/${tenantId}/${employeeId}/${fileName}`
-    : `${employeeId}/${fileName}`;
+  if (!tenantId) {
+    // Without a company there is nowhere isolated to put the object, and a
+    // shared namespace is what this exists to prevent.
+    throw new Error("Cannot store a file without a company in context");
+  }
+  return tenantAssetKey({ tenantId, category, parts: [employeeId, fileName] });
 }
 
 
@@ -160,18 +167,13 @@ const uploadFileOnSignedUrl = async (file, signedUrl) => {
   }
 };
 
-export const generatePreSignedGetURL = async (key) => {
-  const params = {
-    Bucket,
-    Key: key,
-  };
-  const command = new AWS.GetObjectCommand(params);
-  const signedUrl = await getSignedUrl(S3, command, {
-    expiresIn: 60,
-  });
-  console.log(signedUrl);
-};
-
+/**
+ * A signed PUT for a browser upload.
+ *
+ * `path` used to be written into the key verbatim, so a caller chose where the
+ * object landed — including inside another company's prefix. It is now only a
+ * category *within* the caller's own prefix.
+ */
 export async function generatePreSignedUrl({
   path,
   fileName,
@@ -186,16 +188,22 @@ export async function generatePreSignedUrl({
     if (!fileName || !contentType) {
       throw new Error("File name and content type are required.");
     }
-    if (!path) {
-      path = "uploads"; // Default path if not provided
+
+    const { props } = await getServerSideProps();
+    const tenantId = props?.session?.user?.tenantId;
+    if (!tenantId) {
+      throw new Error("Cannot store a file without a company in context");
     }
-    if (access === "public" && !path.startsWith("public")) {
-      path = `public/${path}`;
-    }
+
+    const key = tenantAssetKey({
+      tenantId,
+      category: path || "uploads",
+      parts: [fileName],
+    });
 
     const params = {
       Bucket,
-      Key: `${path}/${fileName}`,
+      Key: key,
       ContentType: contentType,
     };
     const command = new AWS.PutObjectCommand(params);
@@ -203,12 +211,7 @@ export async function generatePreSignedUrl({
       expiresIn: 3600, // URL valid for 1 hour
     });
 
-    return {
-      success: true,
-      url,
-      fileName,
-      key: `${path}/${fileName}`,
-    };
+    return { success: true, url, fileName, key };
   } catch (error) {
     console.error("Error generating pre-signed URL:", error);
     return {
@@ -232,22 +235,26 @@ export async function createMultipartUpload({
     if (!fileName || !contentType) {
       throw new Error("File name and content type are required.");
     }
-    if (!path) {
-      path = "uploads"; // Default path if not provided
+    const { props } = await getServerSideProps();
+    const tenantId = props?.session?.user?.tenantId;
+    if (!tenantId) {
+      throw new Error("Cannot store a file without a company in context");
     }
-    if (access === "public" && !path.startsWith("public")) {
-      path = `public/${path}`;
-    }
-    // Generate a random file name to avoid conflicts
-    const key = generateRandomFileName(fileName);
+
+    // `path` was only ever placed in a `path:` property, which is not an S3
+    // parameter and was dropped by the SDK — so every multipart upload landed
+    // at the bucket root, unprefixed, whatever the caller asked for.
+    const key = tenantAssetKey({
+      tenantId,
+      category: path || "uploads",
+      parts: [generateRandomFileName(fileName)],
+    });
+
     const params = {
       Bucket,
-      path: `${path}/${key}`,
       Key: key,
       ContentType: contentType,
     };
-    console.log("Creating multipart upload with params:", params);
-    // Log the S3 client configuration
     const command = new AWS.CreateMultipartUploadCommand(params);
     const response = await S3.send(command);
     return {
@@ -312,11 +319,16 @@ export async function uploadImage({ file, path, access = "private" }) {
   return uploaded.filter((f) => f !== null);
 }
 
+/**
+ * Remove one object. Same reasoning as generateDownloadUrl, with more at stake:
+ * unchecked, this deleted any object in the bucket.
+ */
 export async function deleteFileFromS3(key) {
   try {
+    const safeKey = await assertKeyOwnedByTenant(key);
     const params = {
       Bucket,
-      Key: key,
+      Key: safeKey,
     };
     const command = new AWS.DeleteObjectCommand(params);
     await S3.send(command);
@@ -327,11 +339,20 @@ export async function deleteFileFromS3(key) {
   }
 }
 
+/**
+ * A time-limited link to one object.
+ *
+ * The key arrives from the browser — file lists hand it out — so ownership is
+ * checked before anything is signed. Without that, this signs whatever it is
+ * given using the server's credentials, which is a read of any object in the
+ * bucket by anyone with an account.
+ */
 export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
   try {
+    const safeKey = await assertKeyOwnedByTenant(key);
     const params = {
       Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
+      Key: safeKey,
     };
     const command = new AWS.GetObjectCommand(params);
     const url = await getSignedUrl(S3, command, { expiresIn });
@@ -348,6 +369,13 @@ export async function generateDownloadUrl({ key, expiresIn = 3600 }) {
   }
 }
 
+/**
+ * A direct bucket URL for an object.
+ *
+ * Ownership is checked even though this only builds a string: the object may be
+ * publicly readable, and echoing an arbitrary key back is the same class of
+ * mistake as signing one.
+ */
 export async function getPublicUrl({ key }) {
   if (!key) {
     return {
@@ -355,9 +383,11 @@ export async function getPublicUrl({ key }) {
       message: "Key is required to generate public URL",
     };
   }
-  const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
-  return {
-    success: true,
-    url,
-  };
+  try {
+    const safeKey = await assertKeyOwnedByTenant(key);
+    const url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${safeKey}`;
+    return { success: true, url };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
 }

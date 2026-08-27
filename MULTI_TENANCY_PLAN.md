@@ -975,3 +975,41 @@ directly, which makes `limits.maxStorageBytes` enforceable the same way
 Step 1 is the only urgent one — it is a live cross-tenant read and delete. Steps
 2 and 4 are the visible product work. Step 3 needs credentials restored. Step 5
 is small once 2 is done.
+
+---
+
+## Outcome — steps 1, 2, 4 and 5 built; step 3 is written and waiting
+
+| Step | State |
+|---|---|
+| 1 — close the IDOR | ✅ every S3 export now scopes or checks its key |
+| 2 — one key builder | ✅ `tenantAssetKey()`; QR, receipts and multipart converted |
+| 3 — migrate existing objects | ⏸ script written and dry-run clean; needs working AWS credentials |
+| 4 — logo upload, first-party serving | ✅ upload + `/api/asset/[...key]` |
+| 5 — storage accounting | ✅ `tenantStorageUsage()` + `checkStorage()` |
+
+`lib/tenantAssets.js` decides ownership two ways: the key is under the caller's
+`tenants/{tenantId}/` prefix, or — for objects written before prefixing — a
+record the caller's company owns references it. The second is what lets this
+ship before the migration runs, and it is why the migration is not urgent.
+
+Two things the audit missed and the work turned up:
+
+- **`createMultipartUpload` wrote to the bucket root.** Its `path` was placed in
+  a `path:` property, which is not an S3 parameter, so the SDK dropped it. Every
+  multipart upload ignored its requested location entirely.
+- **`getPublicUrl` echoed any key** into a bucket URL. It only builds a string,
+  but for a publicly-readable object that string is the object, so it is checked
+  now too.
+
+`generatePreSignedGetURL` was deleted: it signed a URL and then only
+`console.log`ged it, returning nothing.
+
+### Still to do
+
+- Run `scripts/migrate-s3-tenant-prefix.mjs` once credentials work. Its dry run
+  against production records lists **13 objects** to move.
+- Wire `checkStorage()` into the upload path, the way `checkSeats()` is wired
+  into employee creation. The reader exists; nothing calls it yet.
+- The bucket should also get a policy denying access outside `tenants/`, so a
+  future mistake in application code cannot reach the flat namespace.

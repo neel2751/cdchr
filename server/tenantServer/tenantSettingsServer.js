@@ -7,6 +7,7 @@ import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { isTenantUsable, resolveBranding } from "@/lib/tenant";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
+import { storeTenantLogo, ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES } from "../aws/branding";
 import {
   addDomain,
   applyBranding,
@@ -190,6 +191,53 @@ export const setPrimaryTenantDomain = withAudit(
   "Tenant.setPrimaryDomain",
   async (tenantId, host) =>
     asCompanyAdmin(tenantId, (id) => setPrimaryDomain(id, host), "Set the primary domain"),
+  { module: "Tenant" }
+);
+
+/**
+ * Upload a logo for one company.
+ *
+ * Stored under the company's own branding prefix and served from
+ * /api/asset/... — a first-party URL, so the fixed CSP img-src and
+ * images.remotePatterns lists keep working. A pasted third-party URL renders in
+ * the settings preview and then silently fails in production, which is why this
+ * exists rather than leaving it to a text field.
+ */
+export const uploadTenantLogo = withAudit(
+  "Tenant.uploadLogo",
+  async (tenantId, formData) => {
+    const auth = await requireCompanyAdmin(tenantId);
+    if (auth.error) return { success: false, message: auth.error };
+
+    const file = formData?.get?.("file");
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return { success: false, message: "No file received" };
+    }
+    if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+      return {
+        success: false,
+        message: "Use a PNG, JPEG, SVG or WebP image",
+      };
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      return { success: false, message: "Keep the logo under 1 MB" };
+    }
+
+    const result = await storeTenantLogo(auth.tenantId, file);
+    if (!result.success) return result;
+
+    // Point branding at the new object.
+    const applied = await applyBranding(auth.tenantId, { logoUrl: result.url });
+    if (!applied.success) return applied;
+
+    recordAudit({
+      module: "Tenant",
+      entityId: auth.tenantId,
+      after: { logoUrl: result.url },
+      description: "Uploaded a company logo",
+    });
+    return { success: true, message: "Logo uploaded" };
+  },
   { module: "Tenant" }
 );
 

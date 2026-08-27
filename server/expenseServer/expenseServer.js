@@ -692,16 +692,14 @@ export async function addExpenseAction(data) {
 
     let uploadReceipts = [];
     if (data?.receipt) {
+      // The category only, not a location: generatePreSignedUrl puts it under
+      // this company's own prefix. The old value keyed on the *business*
+      // companyId — a value the user picks on the form — which since the rename
+      // is explicitly not the tenant boundary, so two companies referencing the
+      // same record would have shared a prefix.
       uploadReceipts = await uploadImage({
         file: data.receipt,
-        path:
-          companyId && createObjectId(companyId)
-            ? projectId && createObjectId(projectId)
-              ? `${companyId}/${projectId}/expenses/receipts`
-              : `${companyId}/expenses/receipts`
-            : projectId && createObjectId(projectId)
-            ? `${projectId}/expenses/receipts`
-            : "expenses/receipts",
+        path: projectId ? `expenses/receipts/${projectId}` : "expenses/receipts",
         access: "private",
       });
       if (!uploadReceipts || uploadReceipts?.length === 0) {
