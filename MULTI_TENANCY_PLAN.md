@@ -1007,8 +1007,18 @@ Two things the audit missed and the work turned up:
 
 ### Still to do
 
-- Run `scripts/migrate-s3-tenant-prefix.mjs` once credentials work. Its dry run
-  against production records lists **13 objects** to move.
+- ~~Run `scripts/migrate-s3-tenant-prefix.mjs`~~ — resolved, though not by
+  migrating. The old bucket (`hrcdc`) is gone and its 13 objects with it;
+  storage is now `demo-hr-sterlixit`, which starts empty and is confirmed
+  read/write/delete from the app. There was nothing to move, so the 13 records
+  that still pointed at the old bucket were pruned with `--prune-missing`:
+  11 file references removed from four employees' document sets, 2 media rows
+  deleted, every business record kept. Affected records were dumped to a
+  git-ignored JSON backup first. Verified afterwards: 0 file references recorded,
+  0 dangling.
+
+  Two people will notice: the QR feature has lost its stored logo and needs one
+  re-uploaded, and four employees' document lists are now empty.
 - ~~Wire `checkStorage()` into the upload path~~ — done.
   `server/aws/storageGuard.js` checks the allowance before every write:
   `generatePreSignedUrl`, `createMultipartUpload`, `uploadAWSMultipartDocument`,

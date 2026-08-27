@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Backups written by scripts/migrate-s3-tenant-prefix.mjs --prune-missing.
+# They contain production records and must never be committed.
+s3-prune-backup-*.json

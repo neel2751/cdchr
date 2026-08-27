@@ -11,13 +11,23 @@
  * Order per object: copy, update the record, delete the original. A failure
  * therefore leaves a duplicate rather than a record pointing at nothing.
  *
+ * --prune-missing removes references to objects that are not in the bucket.
+ * Use it when the old storage is genuinely gone: the records otherwise offer
+ * downloads that can only 404. It removes the *file reference*, never the
+ * business record around it — an expense keeps its amount and approval, it just
+ * stops claiming to have a receipt. Affected records are written to a JSON
+ * backup first.
+ *
  * Usage:
  *   node scripts/migrate-s3-tenant-prefix.mjs --dry-run
  *   node scripts/migrate-s3-tenant-prefix.mjs
  *   node scripts/migrate-s3-tenant-prefix.mjs --limit 50
+ *   node scripts/migrate-s3-tenant-prefix.mjs --prune-missing --dry-run
+ *   node scripts/migrate-s3-tenant-prefix.mjs --prune-missing
  */
 import dotenv from "dotenv";
 import mongoose from "mongoose";
+import { writeFileSync } from "node:fs";
 import {
   S3Client,
   CopyObjectCommand,
@@ -29,6 +39,7 @@ dotenv.config();
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
+const PRUNE = args.includes("--prune-missing");
 const LIMIT = (() => {
   const i = args.indexOf("--limit");
   return i === -1 ? Infinity : parseInt(args[i + 1], 10) || Infinity;
@@ -95,7 +106,9 @@ async function main() {
     `${DRY_RUN ? "DRY RUN — nothing will be written\n" : ""}Bucket: ${Bucket}\n`
   );
 
-  const stats = { already: 0, moved: 0, missing: 0, noTenant: 0, failed: 0 };
+  const stats = { already: 0, moved: 0, missing: 0, noTenant: 0, failed: 0, pruned: 0 };
+  // Everything about to be changed, kept so a mistaken prune can be undone.
+  const backup = [];
 
   for (const src of SOURCES) {
     const col = db.collection(src.collection);
@@ -132,19 +145,56 @@ async function main() {
         const present = await objectExists(entry.key);
 
         if (DRY_RUN) {
-          console.log(
-            `  ${present ? "     " : "MISSING "} ${entry.key}\n    -> ${target}`
-          );
-          if (present) stats.moved++;
-          else stats.missing++;
+          if (present) {
+            console.log(`       ${entry.key}\n    -> ${target}`);
+            stats.moved++;
+          } else {
+            stats.missing++;
+            if (PRUNE) {
+              console.log(
+                `  would prune ${src.collection} ${doc._id}` +
+                  `\n    ${entry.key}` +
+                  `\n    (${src.arrayField ? "removes this file from the record" : "deletes the media row"})`
+              );
+              stats.pruned++;
+            } else {
+              console.log(`  MISSING ${entry.key}\n    -> ${target}`);
+            }
+          }
           continue;
         }
 
         if (!present) {
-          // The record points at an object that is not in the bucket. Left
-          // alone: rewriting the key would only move a dangling reference.
-          console.log(`  MISSING in bucket, left as-is: ${entry.key}`);
           stats.missing++;
+
+          if (!PRUNE) {
+            // Rewriting the key would only relocate a dangling reference.
+            console.log(`  MISSING in bucket, left as-is: ${entry.key}`);
+            continue;
+          }
+
+          backup.push({
+            collection: src.collection,
+            _id: String(doc._id),
+            key: entry.key,
+            record: doc,
+          });
+
+          if (src.arrayField) {
+            // Pull just this file out of the array. The record itself — an
+            // expense, an employee's document set — is a business record and
+            // stays.
+            await col.updateOne(
+              { _id: doc._id },
+              { $pull: { [src.arrayField]: { key: entry.key } } }
+            );
+          } else {
+            // A media row IS the file, so nothing survives it.
+            await col.deleteOne({ _id: doc._id });
+          }
+
+          console.log(`  pruned dangling reference: ${entry.key}`);
+          stats.pruned++;
           continue;
         }
 
@@ -175,7 +225,7 @@ async function main() {
     }
   }
 
-  if (stats.missing && stats.missing === stats.moved + stats.missing) {
+  if (!PRUNE && stats.missing && stats.missing === stats.moved + stats.missing) {
     console.log(
       "\nNOT ONE recorded object was found in this bucket. Either the wrong\n" +
         "bucket is configured, or these files live elsewhere. Migrating now would\n" +
@@ -187,6 +237,7 @@ async function main() {
     `\nalready prefixed : ${stats.already}` +
       `\n${DRY_RUN ? "would move" : "moved"}       : ${stats.moved}` +
       `\nmissing in bucket: ${stats.missing}` +
+      (PRUNE ? `\npruned references: ${stats.pruned}` : "") +
       `\nrecords with no company: ${stats.noTenant}` +
       `\nfailed           : ${stats.failed}`
   );
@@ -195,6 +246,12 @@ async function main() {
     console.log(
       "\nRecords with no company cannot be placed. Run scripts/backfill-tenant.mjs first."
     );
+  }
+
+  if (PRUNE && backup.length) {
+    const path = `s3-prune-backup-${Date.now()}.json`;
+    writeFileSync(path, JSON.stringify(backup, null, 2));
+    console.log(`\nBacked up ${backup.length} affected record(s) to ${path}`);
   }
 
   console.log(DRY_RUN ? "\nDry run — nothing written." : "\nDone.");
