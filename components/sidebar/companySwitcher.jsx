@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useSession } from "next-auth/react";
+import { usePathname } from "next/navigation";
 import { Building2, Check, ChevronsUpDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +15,7 @@ import {
 } from "../ui/dropdown-menu";
 import { SidebarMenuButton } from "../ui/sidebar";
 import { getMyTenants } from "@/server/tenantServer/membershipServer";
+import { switchDestination } from "@/lib/roleHome";
 
 /**
  * Switch which company the session is acting as.
@@ -27,6 +29,7 @@ import { getMyTenants } from "@/server/tenantServer/membershipServer";
  */
 const CompanySwitcher = () => {
   const { data: session, update } = useSession();
+  const pathname = usePathname();
   const [tenants, setTenants] = useState([]);
   const [isPending, startTransition] = useTransition();
   const activeId = session?.user?.tenantId;
@@ -53,9 +56,12 @@ const CompanySwitcher = () => {
       await update({ switchTenantId: tenantId });
       const target = tenants.find((t) => t.tenantId === tenantId);
       toast.success(`Switched to ${target?.name || "company"}`);
-      // Full reload: the tenant decides what every query returns, so cached
-      // data from the previous company must not survive the switch.
-      window.location.assign("/admin/dashboard");
+      // Stay on the page you were on — switching company while looking at Media
+      // Management should show that company's media, not send you to the
+      // dashboard. Still a full reload, because the tenant decides what every
+      // query returns and cached data from the previous company must not
+      // survive the switch.
+      window.location.assign(switchDestination(pathname, target?.role));
     });
   };
 
