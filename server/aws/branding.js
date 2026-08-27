@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { tenantAssetKey } from "@/lib/tenantAssets";
+import { assertStorageAllows, noteStorageDelta } from "./storageGuard";
 import { generateRandomFileName } from "@/utils/generateRandomFileName";
 
 /**
@@ -36,6 +37,9 @@ const s3 = new S3Client({
  */
 export async function storeTenantLogo(tenantId, file) {
   try {
+    const room = await assertStorageAllows(tenantId, file?.size || 0);
+    if (!room.allowed) return { success: false, message: room.message };
+
     const key = tenantAssetKey({
       tenantId,
       category: "branding",
@@ -51,6 +55,8 @@ export async function storeTenantLogo(tenantId, file) {
         ContentType: file.type,
       })
     );
+
+    noteStorageDelta(tenantId, file?.size || 0);
 
     return { success: true, url: `/api/asset/${key}` };
   } catch (error) {

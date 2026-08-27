@@ -404,6 +404,11 @@ const DomainsTab = ({ tenant, run, isPending }) => {
 const PlanTab = ({ tenant, run, isPending }) => {
   const [plan, setPlan] = useState(tenant.billing?.plan || "standard");
   const [seats, setSeats] = useState(tenant.billing?.seats ?? "");
+  const [storageMb, setStorageMb] = useState(
+    tenant.limits?.maxStorageBytes
+      ? Math.round(tenant.limits.maxStorageBytes / (1024 * 1024))
+      : ""
+  );
   const [features, setFeatures] = useState(() => {
     const base = {};
     for (const key of Object.keys(FEATURE_LABELS)) {
@@ -438,6 +443,22 @@ const PlanTab = ({ tenant, run, isPending }) => {
               onChange={(e) => setSeats(e.target.value)}
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="storage">Storage allowance (MB)</Label>
+            <Input
+              id="storage"
+              type="number"
+              min="1"
+              value={storageMb}
+              placeholder="unlimited"
+              onChange={(e) => setStorageMb(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {tenant.storage
+                ? `${(tenant.storage.bytes / (1024 * 1024)).toFixed(1)} MB in use across ${tenant.storage.objects} files`
+                : "Current usage unavailable"}
+            </p>
+          </div>
         </div>
 
         <div>
@@ -468,6 +489,10 @@ const PlanTab = ({ tenant, run, isPending }) => {
                 plan,
                 seats: seats === "" ? null : seats,
                 features,
+                limits: {
+                  maxStorageBytes:
+                    storageMb === "" ? null : Number(storageMb) * 1024 * 1024,
+                },
               })
             )
           }

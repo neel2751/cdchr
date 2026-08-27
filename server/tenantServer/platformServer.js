@@ -10,6 +10,7 @@ import { runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { invalidateTenantCache } from "./tenantServer";
+import { tenantStorageUsage } from "../aws/branding";
 import {
   addDomain,
   applyBranding,
@@ -90,6 +91,15 @@ export async function getTenantDetail(tenantId) {
       OfficeEmployeeModel.countDocuments({ delete: { $ne: true } })
     );
 
+    // Best-effort: the console should still render if the bucket is
+    // unreachable, so a failure here shows "unknown" rather than an error page.
+    let storage = null;
+    try {
+      storage = await tenantStorageUsage(tenantId);
+    } catch (error) {
+      console.log("tenant storage usage unavailable:", error?.message);
+    }
+
     return {
       success: true,
       data: JSON.stringify({
@@ -112,6 +122,7 @@ export async function getTenantDetail(tenantId) {
         limits: tenant.limits || {},
         billing: tenant.billing || {},
         employeeCount,
+        storage,
         createdAt: tenant.createdAt,
         platformRootDomain: process.env.PLATFORM_ROOT_DOMAIN || "",
       }),

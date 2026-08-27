@@ -8,6 +8,10 @@ import {
   assertKeyOwnedByTenant,
   tenantAssetKey,
 } from "@/lib/tenantAssets";
+import {
+  assertStorageAllows,
+  noteStorageDelta,
+} from "./storageGuard";
 
 const S3 = new AWS.S3({
   region: process.env.AWS_REGION,
@@ -41,7 +45,11 @@ async function tenantScopedKey(employeeId, fileName, category = "documents") {
 
 export const uploadAWSMultipartDocument = async (file) => {
   const { props } = await getServerSideProps();
-  const { _id: employeeId } = props?.session?.user;
+  const { _id: employeeId, tenantId } = props?.session?.user;
+
+  const room = await assertStorageAllows(tenantId, file?.size || 0);
+  if (!room.allowed) return { success: false, message: room.message };
+
   const params = {
     Bucket,
     Key: await tenantScopedKey(employeeId, file.name),
@@ -50,6 +58,8 @@ export const uploadAWSMultipartDocument = async (file) => {
   };
   const command = new AWS.CreateMultipartUploadCommand(params);
   const { UploadId } = await S3.send(command);
+
+  noteStorageDelta(tenantId, file?.size || 0);
 
   return { uploadId: UploadId };
 };
@@ -179,6 +189,7 @@ export async function generatePreSignedUrl({
   fileName,
   access = "private",
   contentType,
+  fileSize = 0,
 }) {
   try {
     const validAccessTypes = ["public", "private"];
@@ -193,6 +204,13 @@ export async function generatePreSignedUrl({
     const tenantId = props?.session?.user?.tenantId;
     if (!tenantId) {
       throw new Error("Cannot store a file without a company in context");
+    }
+
+    // Checked before the URL is handed out: once a signed PUT exists the bytes
+    // are already authorised, and refusing afterwards means deleting them.
+    const room = await assertStorageAllows(tenantId, fileSize);
+    if (!room.allowed) {
+      return { success: false, message: room.message };
     }
 
     const key = tenantAssetKey({
@@ -211,6 +229,11 @@ export async function generatePreSignedUrl({
       expiresIn: 3600, // URL valid for 1 hour
     });
 
+    // The upload is now permitted, so count it. A signed URL that goes unused
+    // over-counts slightly until the next measurement, which is the safe
+    // direction to be wrong in.
+    noteStorageDelta(tenantId, fileSize);
+
     return { success: true, url, fileName, key };
   } catch (error) {
     console.error("Error generating pre-signed URL:", error);
@@ -226,6 +249,7 @@ export async function createMultipartUpload({
   contentType,
   path = "uploads",
   access = "private",
+  fileSize = 0,
 }) {
   try {
     const validAccessTypes = ["public", "private"];
@@ -239,6 +263,11 @@ export async function createMultipartUpload({
     const tenantId = props?.session?.user?.tenantId;
     if (!tenantId) {
       throw new Error("Cannot store a file without a company in context");
+    }
+
+    const room = await assertStorageAllows(tenantId, fileSize);
+    if (!room.allowed) {
+      return { success: false, message: room.message };
     }
 
     // `path` was only ever placed in a `path:` property, which is not an S3
@@ -257,6 +286,8 @@ export async function createMultipartUpload({
     };
     const command = new AWS.CreateMultipartUploadCommand(params);
     const response = await S3.send(command);
+    noteStorageDelta(tenantId, fileSize);
+
     return {
       success: true,
       uploadId: response.UploadId,
@@ -282,12 +313,17 @@ export async function uploadImage({ file, path, access = "private" }) {
   const uploaded = await Promise.all(
     files.map(async (f) => {
       const fileName = generateRandomFileName(f.name);
-      const { url, key } = await generatePreSignedUrl({
+      const { url, key, success, message } = await generatePreSignedUrl({
         fileName: fileName,
         contentType: f.type,
         path,
         access,
+        fileSize: f.size,
       });
+
+      // Refused by the storage allowance — surfaced rather than swallowed, so
+      // the caller can tell the user why nothing was stored.
+      if (success === false) throw new Error(message || "Upload refused");
 
       try {
         const res = await axios.put(url, f, {
@@ -330,8 +366,23 @@ export async function deleteFileFromS3(key) {
       Bucket,
       Key: safeKey,
     };
+    // Size before removal, so the cached usage can be reduced by it.
+    let freed = 0;
+    try {
+      const head = await S3.send(
+        new AWS.HeadObjectCommand({ Bucket, Key: safeKey })
+      );
+      freed = head?.ContentLength || 0;
+    } catch {
+      // Not fatal: the figure is re-measured on its own schedule.
+    }
+
     const command = new AWS.DeleteObjectCommand(params);
     await S3.send(command);
+
+    const { props } = await getServerSideProps();
+    noteStorageDelta(props?.session?.user?.tenantId, -freed);
+
     return { success: true, message: "File deleted successfully" };
   } catch (error) {
     console.error("Error deleting file from S3:", error);

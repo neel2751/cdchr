@@ -1009,7 +1009,23 @@ Two things the audit missed and the work turned up:
 
 - Run `scripts/migrate-s3-tenant-prefix.mjs` once credentials work. Its dry run
   against production records lists **13 objects** to move.
-- Wire `checkStorage()` into the upload path, the way `checkSeats()` is wired
-  into employee creation. The reader exists; nothing calls it yet.
+- ~~Wire `checkStorage()` into the upload path~~ — done.
+  `server/aws/storageGuard.js` checks the allowance before every write:
+  `generatePreSignedUrl`, `createMultipartUpload`, `uploadAWSMultipartDocument`,
+  `uploadImage` and `storeTenantLogo`. Checked *before* a signed URL is issued,
+  because once one exists the bytes are already authorised and refusing
+  afterwards means deleting them.
+
+  Measuring usage means listing every object under the prefix, which is far too
+  expensive per upload — so it is measured once, cached for five minutes, and
+  then moved by the size of each write. Without that running total a burst would
+  all be waved through against one stale figure; a test drives eight 2 MB
+  uploads at a 10 MB allowance and asserts exactly five are accepted. Deletes
+  reduce the figure by the object's real size, read before removal.
+
+  Fails open when the allowance or the bucket cannot be read, matching
+  `checkSeats`: an unreadable bucket means an unenforced limit, which is the
+  safer of the two failures. The platform console now shows current usage
+  beside the allowance, so the number can be set against something real.
 - The bucket should also get a policy denying access outside `tenants/`, so a
   future mistake in application code cannot reach the flat namespace.
