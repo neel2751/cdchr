@@ -1,4 +1,4 @@
-import ExpenseTable from "@/app/(feature)/Expense/category/expenseTable";
+import ExpenseTable from "@/app/(feature)/Expense/expenseTable";
 import { DateRangeFilter } from "@/components/filters/filterDate/filterDateRange";
 import SearchDebounce from "@/components/filters/search/search-debounce";
 import {
@@ -16,6 +16,8 @@ import AddSiteExpense from "./siteExpense/addSiteExpense";
 export default function SiteExpense() {
   const { searchParams, filter } = useCommonContext();
   const siteId = (searchParams && searchParams[0]) || "";
+  // AddSiteExpense owns the form fields, so the edit dialog lives there too.
+  const [editing, setEditing] = React.useState(null);
   const filterParams = {
     projectId: siteId,
     page: parseInt(filter?.page || "1"),
@@ -32,7 +34,10 @@ export default function SiteExpense() {
               Manage and track expenses related to site projects.
             </CardDescription>
           </div>
-          <AddSiteExpense />
+          <AddSiteExpense
+            editing={editing}
+            onCloseEdit={() => setEditing(null)}
+          />
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between mb-4">
@@ -40,7 +45,7 @@ export default function SiteExpense() {
             <DateRangeFilter />
           </div>
           <div className="overflow-x-auto">
-            <ExpenseTable filter={filterParams} />
+            <ExpenseTable filter={filterParams} onEdit={setEditing} />
           </div>
         </CardContent>
       </Card>

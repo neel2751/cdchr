@@ -1,13 +1,13 @@
-import AddExpense from "@/app/(feature)/Expense/category/addExpense";
+import ExpenseDialog from "@/app/(feature)/Expense/expenseDialog";
 import { Button } from "@/components/ui/button";
 import { useCommonContext } from "@/context/commonContext";
 import { useFetchQuery } from "@/hooks/use-query";
 import { decrypt } from "@/lib/algo";
-import { getSelectExpenseCategoryBySite } from "@/server/selectServer/selectServer";
+import { getSelectExpenseCategoryBySite } from "@/server/expenseServer/expenseServer";
 import { Plus } from "lucide-react";
 import React from "react";
 
-export default function AddSiteExpense() {
+export default function AddSiteExpense({ editing, onCloseEdit }) {
   const { searchParams } = useCommonContext();
   const [open, setOpen] = React.useState(false);
   const onClose = () => {
@@ -99,9 +99,8 @@ export default function AddSiteExpense() {
       acceptedFileTypes: ["image/jpeg", "image/png", "application/pdf"],
       maxFiles: 2,
       maxFileSize: 5 * 1024 * 1024, // 5 MB
-      validationOptions: {
-        required: "Please upload a receipt",
-      },
+      // Optional, matching the label and addExpenseAction — see the note on the
+      // same field in app/(feature)/Expense/addExpenseButton.jsx.
     },
   ];
   return (
@@ -110,11 +109,12 @@ export default function AddSiteExpense() {
         <Plus />
         Add Expense
       </Button>
-      <AddExpense
+      <ExpenseDialog
         fields={fields}
         siteId={decryptedSiteId}
-        open={open}
-        onClose={onClose}
+        open={open || Boolean(editing)}
+        onClose={editing ? onCloseEdit : onClose}
+        expense={editing}
       />
     </>
   );

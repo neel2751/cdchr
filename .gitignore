@@ -44,3 +44,10 @@ next-env.d.ts
 # They contain production records and must never be committed.
 s3-prune-backup-*.json
 documents-purge-backup-*.json
+
+# Playwright. Traces and screenshots capture whatever was on screen at the
+# moment a test failed, including seeded personal data, so they stay local.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

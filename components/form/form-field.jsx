@@ -127,7 +127,10 @@ export const FormSelect = ({ field }) => {
         rules={field?.validationOptions}
         render={({ field: { onChange, value } }) => (
           <Select onValueChange={onChange} value={value || ""}>
-            <SelectTrigger>
+            {/* FormLabel points htmlFor at the field name, so the trigger has
+                to carry that id — without it the label is orphaned and a screen
+                reader announces the control unnamed. */}
+            <SelectTrigger id={field?.name}>
               <SelectValue placeholder={field?.placeholder} />
             </SelectTrigger>
 
@@ -393,6 +396,9 @@ export const FormDate = ({ field }) => {
             <Popover>
               <PopoverTrigger asChild>
                 <Button
+                  // Same reason as FormSelect: FormLabel's htmlFor needs a
+                  // control with this id, or the label names nothing.
+                  id={field.name}
                   variant={"outline"}
                   className={cn(
                     "w-full justify-start text-left font-normal",
@@ -590,6 +596,10 @@ export const SearchableSelect = ({ field }) => {
             <Popover open={open} onOpenChange={setOpen}>
               <PopoverTrigger asChild>
                 <Button
+                  // FormLabel points htmlFor at the field name, so the trigger
+                  // needs that id or the label names nothing — this is the
+                  // component `type: "select"` actually renders.
+                  id={field.name}
                   variant="outline"
                   // role="combobox"
                   disabled={field.disabled}
@@ -711,6 +721,9 @@ export const FormMultipleSelect = ({ field }) => {
             <Popover open={open} onOpenChange={setOpen}>
               <PopoverTrigger asChild>
                 <Button
+                  // Same as FormSelect and FormDate: FormLabel's htmlFor needs
+                  // a control carrying this id, or the label names nothing.
+                  id={field.name}
                   variant="outline"
                   aria-expanded={open}
                   className={`w-full justify-between h-auto ${

@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "./auth.config";
 import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
+import { isPathAllowed } from "./lib/tenantPlan";
 import {
   TENANT_HEADERS,
   isPlatformHost,
@@ -260,6 +261,31 @@ async function checkRoleMiddleware(req) {
       // unless you want high-security mode.
       return pass();
     }
+  }
+
+  // --- Plan gating ---------------------------------------------------------
+  // A module the company's plan excludes is removed from the sidebar
+  // (selectServer.getEmployeeMenu), but that only hides the door. This closes
+  // it for anyone who types the URL, super admins included — which is why it
+  // sits above the role checks below rather than among them.
+  //
+  // Two conditions before it will deny, because the flags here come from the
+  // *hostname*, and data decisions belong to the session (see lib/tenantContext).
+  // The hostname must have resolved to a real tenant, and that tenant must be
+  // the one the session belongs to. Anything else — an unresolved host, a
+  // single-domain deployment, a mismatch — falls through untouched, exactly as
+  // the rest of this file fails open.
+  //
+  // Not a substitute for the checks inside the actions themselves: this guards
+  // navigation only. See requireExpenseAccess in server/expenseServer.
+  if (
+    resolution?.type === "tenant" &&
+    resolution.tenant?.id &&
+    user?.tenantId &&
+    String(resolution.tenant.id) === String(user.tenantId) &&
+    !isPathAllowed(resolution.tenant.features, requestedPath)
+  ) {
+    return NextResponse.redirect(new URL("/unauthorized", req.url));
   }
 
   const rolePathMap = {

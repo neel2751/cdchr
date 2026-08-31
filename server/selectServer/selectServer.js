@@ -4,29 +4,15 @@ import { connect } from "@/db/db";
 import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
 import CompanyModel from "@/models/companyModel";
 import { filterMenuByFeatures } from "@/lib/tenantPlan";
-import { escapeTenant } from "@/lib/tenantContext";
+import { getTenantFeatures } from "@/lib/tenantFeatures";
 import { isValidObjectId } from "@/lib/mongodb";
-
-/** A company's module flags; empty (everything on) when it cannot be read. */
-async function getTenantFeatures(tenantId) {
-  if (!tenantId || !isValidObjectId(tenantId)) return {};
-  try {
-    const tenant = await escapeTenant("menu: company feature flags", () =>
-      CompanyModel.findById(tenantId).select("features").lean()
-    );
-    return tenant?.features || {};
-  } catch {
-    // Never hide the whole menu because a lookup failed.
-    return {};
-  }
-}
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import RoleBasedModel from "@/models/rolebasedModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import ProjectSiteModel from "@/models/siteProjectModel";
 import { getServerSideProps } from "../session/session";
-import { COMMONMENUITEMS, MENU, PERSONAL_MENU, DERIVED_ACCESS } from "@/data/menu";
+import { COMMONMENUITEMS, MENU, DERIVED_ACCESS } from "@/data/menu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
@@ -34,7 +20,6 @@ import CommonLeaveModel from "@/models/commonLeaveModel";
 import mongoose from "mongoose";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { createObjectId } from "@/lib/mongodb";
-import ExpenseCategoryModel from "@/models/expense/expenseCategoryModel";
 import FormTemplateModel from "@/models/formTemplateModel";
 
 export const getSelectRoleType = async () => {
@@ -292,31 +277,42 @@ export const getSelectEmployee = async () => {
   }
 };
 
+/**
+ * The companies the caller may filter by — which is only ever their own.
+ *
+ * A company IS a tenant here, and `Companie` is in GLOBAL_MODELS, so it carries
+ * no tenant plugin and nothing filtered this. It listed every company on the
+ * platform, meaning any admin of any tenant could read every other customer's
+ * name out of a filter dropdown.
+ *
+ * Scoped to the session's tenant instead. That leaves exactly one option for a
+ * normal user, which is also why the filter that uses it now hides itself: an
+ * employee's `company` always equals their tenant, so filtering by it inside a
+ * tenant could never narrow anything.
+ */
 export const getSelectCompanies = async () => {
   try {
-    // await connect();
-    const company = await CompanyModel.aggregate([
-      {
-        $match: { delete: false, isActive: true }, // Filters documents where delete is false
-      },
-      {
-        $project: {
-          _id: 0,
-          value: "$_id", // Renames `_id` to `value`
-          label: "$name", // Renames `roleTitle` to `name`
-        },
-      },
-    ]).exec();
-    if (!company || company?.length === 0) {
+    const { props } = await getServerSideProps();
+    const tenantId = props?.session?.user?.tenantId;
+    if (!tenantId || !isValidObjectId(tenantId)) {
       return { success: false, message: "No Data Found" };
-    } else {
-      const roleData = JSON.stringify(company);
-      const data = {
-        success: true,
-        data: roleData,
-      };
-      return data;
     }
+
+    await connect();
+    const company = await CompanyModel.findOne({
+      _id: createObjectId(tenantId),
+      delete: { $ne: true },
+      isActive: { $ne: false },
+    })
+      .select("_id name")
+      .lean();
+
+    if (!company) return { success: false, message: "No Data Found" };
+
+    return {
+      success: true,
+      data: JSON.stringify([{ value: company._id, label: company.name }]),
+    };
   } catch (err) {
     console.log(err);
     return { success: false, message: "Error Occured" };
@@ -511,74 +507,11 @@ export const getSelectLeaveRequestForEmployee = async () => {
   }
 };
 
-export const getSelectExpenseCategory = async ({ companyId, projectId }) => {
-  try {
-    console.log("companyId:", companyId, "projectId:", projectId);
-    await connect();
-    const match = { isActive: true, isDeleted: false };
-    if (companyId) {
-      match.companyId = createObjectId(companyId);
-
-      if (projectId) {
-        match.projectIds = { $in: [createObjectId(projectId)] };
-      } else {
-        // ✅ Match categories not tied to any project (no projectIds OR empty array)
-        match.$or = [
-          { projectIds: { $exists: false } },
-          { projectIds: { $size: 0 } },
-        ];
-      }
-    }
-
-    const categories = await ExpenseCategoryModel.aggregate([
-      { $match: match },
-      {
-        $project: {
-          _id: 0,
-          value: "$_id", // Renames `_id` to `value`
-          label: "$name", // Renames `roleTitle` to `name`
-        },
-      },
-    ]).exec();
-    const data = {
-      success: true,
-      data: JSON.stringify(categories),
-    };
-    return data;
-  } catch (err) {
-    console.log(" Error fetching expense categories:", err);
-    return { success: false, message: "Error Occured" };
-  }
-};
-export const getSelectExpenseCategoryBySite = async ({ projectId }) => {
-  try {
-    await connect();
-    const categories = await ExpenseCategoryModel.aggregate([
-      {
-        $match: {
-          isActive: true,
-          isDeleted: false,
-          projectIds: { $in: [createObjectId(projectId)] },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          value: "$_id", // Renames `_id` to `value`
-          label: "$name", // Renames `roleTitle` to `name`
-        },
-      },
-    ]).exec();
-    const data = {
-      success: true,
-      data: JSON.stringify(categories),
-    };
-    return data;
-  } catch (err) {
-    console.log("Error fetching expense categories by site:", err);
-    return { success: false, message: "Error Occured" };
-  }
-};
+// getSelectExpenseCategory and getSelectExpenseCategoryBySite used to live here.
+// They moved to server/expenseServer/expenseServer.js so that they sit behind
+// requireExpenseAccess with the rest of the feature — every other export in this
+// file is readable by any signed-in user, which is the wrong default for a
+// module a company's plan can exclude.
 
 export const getSelectFormTemplates = async () => {
   try {

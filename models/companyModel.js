@@ -52,6 +52,11 @@ const brandingSchema = new mongoose.Schema(
     accentColor: { type: String },
     radius: { type: String },
     supportEmail: { type: String },
+    // Shown on customer-facing output — the expense invoice is the first thing
+    // to use it. Free text on purpose: international formats, extensions and
+    // "0800 …" spacing are all legitimate, and normalising them would be wrong
+    // more often than right.
+    supportPhone: { type: String },
     emailFromName: { type: String },
     emailFooterHtml: { type: String },
   },
@@ -69,6 +74,7 @@ const featuresSchema = new mongoose.Schema(
     documents: { type: Boolean, default: true },
     devices: { type: Boolean, default: true },
     ai: { type: Boolean, default: true },
+    announcements: { type: Boolean, default: true },
   },
   { _id: false }
 );

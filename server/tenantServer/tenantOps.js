@@ -33,6 +33,7 @@ export const BRANDING_FIELDS = [
   "accentColor",
   "radius",
   "supportEmail",
+  "supportPhone",
   "emailFromName",
   "emailFooterHtml",
 ];

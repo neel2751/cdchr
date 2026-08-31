@@ -38,9 +38,17 @@ const ReceiptFileSchema = new mongoose.Schema(
 
 const expenseSchema = new mongoose.Schema(
   {
+    // Who filed it. The actions also used to set `createdBy`, `updatedBy` and
+    // `isActive`, none of which were on this schema — so Mongoose dropped all
+    // three on every write and the approval check that read `createdBy` matched
+    // nobody. This field is the filer; `updatedBy` below is now real.
     employeeId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
+    },
+    // Who last changed it — in practice whoever approved or rejected it.
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
     },
     title: {
       type: String,
@@ -51,6 +59,9 @@ const expenseSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
+      // The last line of defence. The actions validate too, but a schema rule
+      // also covers the direct writes a script or a migration might make.
+      min: [0, "Amount cannot be negative"],
     },
     description: {
       type: String,
@@ -91,6 +102,10 @@ const expenseSchema = new mongoose.Schema(
 // Tenant scoping (lib/tenantPlugin.js). Must run before the model is
 // compiled, or the hooks and tenantId field are not attached.
 applyTenantScope(expenseSchema, "Expense");
+
+// The site-expense tab's query: one project's spend, newest first. The plugin
+// adds { tenantId, createdAt }, which does not serve the projectId filter.
+expenseSchema.index({ tenantId: 1, projectId: 1, date: -1 });
 
 const ExpenseModel =
   mongoose.models.Expense || mongoose.model("Expense", expenseSchema);

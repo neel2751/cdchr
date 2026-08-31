@@ -79,6 +79,7 @@ const FEATURE_LABELS = {
   documents: "Documents",
   devices: "Devices",
   ai: "AI",
+  announcements: "Announcements",
 };
 
 const TenantDetail = ({ tenant }) => {
@@ -198,6 +199,7 @@ const BrandingTab = ({ tenant, run, isPending }) => {
     appName: tenant.storedBranding?.appName || "",
     logoUrl: tenant.storedBranding?.logoUrl || "",
     supportEmail: tenant.storedBranding?.supportEmail || "",
+    supportPhone: tenant.storedBranding?.supportPhone || "",
     emailFromName: tenant.storedBranding?.emailFromName || "",
     primaryColor: tenant.storedBranding?.primaryColor || "",
   }));
@@ -213,6 +215,7 @@ const BrandingTab = ({ tenant, run, isPending }) => {
           ["appName", "Application name", "Acme People"],
           ["logoUrl", "Logo URL", "https://…/logo.svg"],
           ["supportEmail", "Support email", "support@acme.com"],
+          ["supportPhone", "Support phone", "020 7946 0000"],
           ["emailFromName", "Email sender name", "Acme HR"],
           ["primaryColor", "Primary colour", "oklch(0.55 0.21 258)"],
         ].map(([key, label, placeholder]) => (

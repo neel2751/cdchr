@@ -5,7 +5,12 @@ import { connect } from "@/db/db";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
-import { isTenantUsable, resolveBranding, toTenantSummary } from "@/lib/tenant";
+import {
+  isTenantUsable,
+  resolveBranding,
+  resolveLocale,
+  toTenantSummary,
+} from "@/lib/tenant";
 import { escapeTenant } from "@/lib/tenantContext";
 import { cacheGet, cacheInvalidate, cacheSet } from "@/lib/tenantCache";
 import { getServerSideProps } from "../session/session";
@@ -271,12 +276,19 @@ export async function getBrandingForCurrentUser() {
 
     await connect();
     const tenant = await CompanyModel.findById(tenantId)
-      .select("name branding")
+      .select("name branding locale")
       .lean()
       .exec();
     if (!tenant) return null;
 
-    return { name: tenant.name, ...resolveBranding(tenant) };
+    // `locale` rides along with branding rather than getting its own fetch and
+    // its own context: every consumer that needs a currency is already a
+    // consumer of branding, and one round trip beats two for the same page.
+    return {
+      name: tenant.name,
+      ...resolveBranding(tenant),
+      locale: resolveLocale(tenant),
+    };
   } catch (error) {
     // Branding is cosmetic — never let it break the page it decorates.
     console.log("getBrandingForCurrentUser error:", error?.message);

@@ -29,11 +29,24 @@ const FIELDS = [
     placeholder: "/favicon.ico",
   },
   {
+    name: "loginBackgroundUrl",
+    label: "Sign-in background image URL",
+    placeholder: "https://…/office.jpg",
+    help: "Shown beside the sign-in form on your company's address. Leave empty for the default.",
+  },
+  {
     name: "supportEmail",
     label: "Support email",
     placeholder: "support@acme.com",
-    help: "Used in the footer of emails the system sends.",
+    help: "Used in the footer of emails the system sends, and on expense invoices.",
     type: "email",
+  },
+  {
+    name: "supportPhone",
+    label: "Support phone",
+    placeholder: "020 7946 0000",
+    help: "Shown on expense invoices. Leave empty to omit it.",
+    type: "tel",
   },
   {
     name: "emailFromName",
@@ -49,7 +62,9 @@ const BrandingForm = ({ tenant, run, isPending }) => {
   const [values, setValues] = useState(() => ({
     appName: tenant.storedBranding?.appName || "",
     faviconUrl: tenant.storedBranding?.faviconUrl || "",
+    loginBackgroundUrl: tenant.storedBranding?.loginBackgroundUrl || "",
     supportEmail: tenant.storedBranding?.supportEmail || "",
+    supportPhone: tenant.storedBranding?.supportPhone || "",
     emailFromName: tenant.storedBranding?.emailFromName || "",
     primaryColor: tenant.storedBranding?.primaryColor || "",
   }));

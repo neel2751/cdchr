@@ -27,6 +27,24 @@ function withExtension(base, context, next) {
 }
 
 export function resolve(specifier, context, next) {
+  // Request-scoped and unresolvable outside Next's own loader. lib/audit.js
+  // imports it at module scope, so it has to resolve to something for any
+  // script that touches the audit log. See the stub for why it throws.
+  if (specifier === "next/headers") {
+    return next(new URL("./next-headers-stub.mjs", import.meta.url).href, context);
+  }
+
+  // Next ships its subpaths (next/server, next/navigation, …) as plain files
+  // with no "exports" map, so ESM resolution never appends the extension the
+  // bundler would. Reached transitively: lib/audit.js -> session -> next-auth.
+  if (specifier.startsWith("next/")) {
+    return withExtension(
+      new URL(`node_modules/${specifier}`, projectRoot).href,
+      context,
+      next
+    );
+  }
+
   if (specifier.startsWith("@/")) {
     return withExtension(new URL(specifier.slice(2), projectRoot).href, context, next);
   }

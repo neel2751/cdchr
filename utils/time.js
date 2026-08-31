@@ -38,12 +38,48 @@ export function getUKTime({ format = "HH:mm", asDateObject = false }) {
   return `${dateParts.hour}:${dateParts.minute}`;
 }
 
+/**
+ * Format an amount in a company's own currency.
+ *
+ * The locale is derived from the currency rather than fixed at "en-GB", so EUR
+ * renders as "€1.234,56" where a German company expects it instead of
+ * "€1,234.56". Defaults stay GBP/en-GB, so every existing caller is unchanged.
+ *
+ * Pass `tenantBranding.locale.currency` — see resolveLocale() in lib/tenant.js.
+ * A component can reach it through useBranding().
+ */
+const CURRENCY_LOCALE = {
+  GBP: "en-GB",
+  EUR: "de-DE",
+  USD: "en-US",
+  INR: "en-IN",
+  AUD: "en-AU",
+  CAD: "en-CA",
+};
+
 export const formatCurrency = (value, currency = "GBP") => {
-  if (value === "NaN") return "£0.00";
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency,
-  }).format(value);
+  // null and "" are excluded before Number() sees them: both coerce to 0, and
+  // "£0.00" where there is no figure at all is a quietly wrong answer rather
+  // than a missing one. Also covers the literal "NaN" the old signature
+  // special-cased, and the undefined that used to render "£NaN".
+  if (value === null || value === undefined || value === "") return "—";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+
+  const code = currency || "GBP";
+  try {
+    return new Intl.NumberFormat(CURRENCY_LOCALE[code] || "en-GB", {
+      style: "currency",
+      currency: code,
+    }).format(amount);
+  } catch {
+    // An unrecognised currency code throws rather than degrading. A wrong
+    // symbol beats a blank page.
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: "GBP",
+    }).format(amount);
+  }
 };
 
 export const formatDate = (date, formatStr = "dd/MM/yyyy") => {

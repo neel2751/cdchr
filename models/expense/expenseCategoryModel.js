@@ -14,6 +14,7 @@ const expenseCategorySchema = new mongoose.Schema(
     budget: {
       type: Number,
       required: true,
+      min: [0, "Budget cannot be negative"],
     },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,

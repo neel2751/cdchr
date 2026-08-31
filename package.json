@@ -11,7 +11,14 @@
     "tenant:seed": "node scripts/seed-tenant.mjs",
     "tenant:fixtures": "node scripts/seed-dev-fixtures.mjs",
     "tenant:backfill": "node scripts/backfill-tenant.mjs",
-    "tenant:test": "node --import ./scripts/lib/alias-loader.mjs scripts/test-tenant-scope.mjs"
+    "tenant:test": "node --import ./scripts/lib/alias-loader.mjs scripts/test-tenant-scope.mjs",
+    "announcements:test": "node --import ./scripts/lib/alias-loader.mjs scripts/test-announcements.mjs",
+    "expense:test": "node --import ./scripts/lib/action-loader.mjs scripts/test-expense.mjs",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:seed": "MONGO_DB_URL=\"mongodb://127.0.0.1:27017/cdchr_dev?replicaSet=rs0\" node --import ./scripts/lib/alias-loader.mjs scripts/seed-dev-fixtures.mjs",
+    "audit:duplicate-emails": "node scripts/find-duplicate-emails.mjs",
+    "audit:smtp": "node scripts/audit-smtp-accounts.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",
@@ -77,6 +84,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "^16.2.10",

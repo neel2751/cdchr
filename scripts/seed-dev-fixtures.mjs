@@ -19,9 +19,14 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
+import { FIXTURE_PASSWORD, TOTP_SECRET } from "./lib/fixture-secrets.mjs";
+
 dotenv.config();
 
-const PASSWORD = "Password123!dev";
+// Kept in scripts/lib/fixture-secrets.mjs rather than here, because this file
+// runs main() on import — anything importing a constant from it would seed a
+// database as a side effect.
+const PASSWORD = FIXTURE_PASSWORD;
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "mongo"];
 
 function assertLocal(uri) {
@@ -73,6 +78,8 @@ async function main() {
     "loginattempts",
     "usersessions",
     "twofas",
+    "rolebaseds",
+    "projectsites",
   ]) {
     await db.collection(name).deleteMany({});
   }
@@ -235,6 +242,93 @@ async function main() {
       updatedAt: now,
     },
   ]);
+
+  // --- Permission grants -------------------------------------------------
+  // An `admin` reaches a page through their role's permission list, not their
+  // role name — proxy.js and every server-side guard check the same list. With
+  // no RoleBased row an admin fixture is refused everywhere, which makes them
+  // useless for testing anything an admin is supposed to be able to do.
+  const ADMIN_PAGES = [
+    "/admin/dashboard",
+    "/admin/expense",
+    "/admin/announcements",
+    "/admin/officeEmployee",
+    "/admin/siteAssign",
+  ];
+  await db.collection("rolebaseds").insertMany([
+    {
+      _id: oid(),
+      name: "Fixture admin",
+      employeeId: employees[1]._id, // admin@acme.test
+      permissions: ADMIN_PAGES,
+      isActive: true,
+      isDeleted: false,
+      tenantId: tenantA,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: oid(),
+      name: "Fixture admin",
+      employeeId: employees[4]._id, // admin@beta.test
+      permissions: ADMIN_PAGES,
+      isActive: true,
+      isDeleted: false,
+      tenantId: tenantB,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
+
+  // --- Sites -------------------------------------------------------------
+  // One per tenant. `siteDelete` and `isActive` are not decoration: the site
+  // dropdown queries on both, so a row without them exists but can never be
+  // chosen — which is how the expense filters ended up with an empty site list.
+  const siteA = oid();
+  const siteB = oid();
+  await db.collection("projectsites").insertMany([
+    {
+      _id: siteA,
+      siteName: "Acme Yard",
+      siteType: "site",
+      siteDelete: false,
+      isActive: true,
+      tenantId: tenantA,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: siteB,
+      siteName: "Beta Yard",
+      siteType: "site",
+      siteDelete: false,
+      isActive: true,
+      tenantId: tenantB,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
+
+  // --- Two-factor --------------------------------------------------------
+  // auth.js forces every admin, super admin and platform admin through 2FA: if
+  // it is not yet enabled they are pinned to /setup-2fa, and no fixture account
+  // could reach the app at all. Enabling it with a *known* secret means a test
+  // can generate a real TOTP code and pass the real challenge, rather than the
+  // gate being weakened to let tests through.
+  //
+  // TOTP_SECRET is a fixture value and must never be used anywhere else.
+  await db.collection("twofas").insertMany(
+    [employees[0], employees[1], employees[3], employees[4]].map((e) => ({
+      _id: oid(),
+      employeeId: e._id,
+      secret: TOTP_SECRET,
+      isEnabled: true,
+      isVerified: true,
+      isDeleted: false,
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
 
   console.log("Tenants");
   for (const t of tenants) {
