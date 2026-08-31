@@ -43,7 +43,11 @@ export default function ExpenseList({ filter }) {
    */
   const { data: categoryData } = useFetchQuery({
     fetchFn: getSelectExpenseCategory,
-    queryKey: ["expense-category-options", projectFilter || "all"],
+    // Under the "expense-categories" root so that creating or deleting a
+    // category — which invalidates that root — refreshes these options too.
+    // A separate root meant the filter kept offering a category after it was
+    // deleted, and missed one just created.
+    queryKey: ["expense-categories", "filter-options", projectFilter || "all"],
     params: projectFilter ? { projectId: projectFilter } : {},
   });
 

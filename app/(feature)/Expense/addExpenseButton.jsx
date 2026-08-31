@@ -51,7 +51,9 @@ export default function AddAdminExpense({ editing, onCloseEdit }) {
     // Loads immediately — previously it waited for a company to be chosen, so
     // the category dropdown sat empty until the user picked the only option in
     // a list of one.
-    queryKey: ["expense-categories", scopedProject],
+    // Shares the "expense-categories" root with the list and the filter, so one
+    // invalidation after a create or delete refreshes all three.
+    queryKey: ["expense-categories", "form-options", scopedProject],
     params: { projectId: scopedProject },
   });
 

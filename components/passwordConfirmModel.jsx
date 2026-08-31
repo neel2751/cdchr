@@ -20,7 +20,9 @@ export default function PasswordConfirmModal({ open, onClose, onSuccess }) {
 
   const { mutate: handleConfirm, isPending: loading } = useSubmitMutation({
     mutationFn: async () => await verifyPassword(password),
-    invalidateKey: ["password"],
+    // No invalidateKey: checking a password does not change any list. It used
+    // to pass ["password"], which named no query and, before the invalidation
+    // call was corrected, refetched the entire cache on every confirmation.
     onSuccessMessage: () => "Password verified successfully!",
     onClose: () => {
       onSuccess();

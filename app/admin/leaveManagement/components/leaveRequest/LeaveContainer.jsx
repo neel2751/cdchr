@@ -33,7 +33,10 @@ export default function LeaveContainer() {
   const { mutate: submitLeaveRequest } = useSubmitMutation({
     mutationFn: async (data) =>
       storeEmployeeLeaveData(data, initialValues?._id),
-    invalidateKey: ["leave-requests"],
+    // The key LeaveRequestTableNew below actually queries. "leave-requests"
+    // matched nothing and only appeared to work while every mutation refetched
+    // the whole cache.
+    invalidateKey: ["employee-leave-request"],
     onSuccessMessage: () => "Leave request submitted successfully",
     onClose: () => handleClose(),
   });

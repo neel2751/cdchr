@@ -34,7 +34,9 @@ const LeaveRequestNew = ({
   const { mutate: submitLeaveRequest } = useSubmitMutation({
     mutationFn: async (data) =>
       storeEmployeeLeaveData(data, initialValues?._id),
-    invalidateKey: ["leave-requests"],
+    // The leave list on the employee-details screen this dialog opens from.
+    // "leave-requests" is not a key anything queries.
+    invalidateKey: ["leaveDeatils"],
     onSuccessMessage: () => "Leave request submitted successfully",
     onClose: () => {
       setShowDialog(false);

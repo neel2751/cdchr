@@ -66,7 +66,7 @@ export default function CategoryList() {
   const safePage = Math.min(page, totalPages);
 
   // The page belongs in the key, or React Query serves page 1 from cache.
-  const queryKey = ["expense-categories", safePage];
+  const queryKey = ["expense-categories", "list", safePage];
 
   const { data, isLoading, isError, error } = useFetchQuery({
     fetchFn: getAllExpenseCategories,
@@ -230,7 +230,9 @@ function ModelExpenseCategory({
   const { mutate: onSubmit } = useSubmitMutation({
     mutationFn: async (data) =>
       await addExpenseCategoryAction(data, initialValues?._id || null),
-    invalidateKey: queryKey,
+    // The whole family, not just this page's slice: a new category has to reach
+    // the form and filter option lists as well.
+    invalidateKey: ["expense-categories"],
     onSuccessMessage: (message) =>
       message || "Expense category added successfully",
     onClose: () => setShowDialog(),

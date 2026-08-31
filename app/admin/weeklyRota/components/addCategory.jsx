@@ -15,7 +15,9 @@ const AddCategory = () => {
 
   const { mutate: handleSubmit, isPending } = useSubmitMutation({
     mutationFn: async (data) => handleAttendanceCategory(data),
-    invalidateKey: ["selectAttendanceCategories"],
+    // Both consumers of getSelectAttendanceCategory cache it under
+    // "selectCategories"; "selectAttendanceCategories" matched nothing.
+    invalidateKey: ["selectCategories"],
     onSuccessMessage: (response) => ` Category created successfully`,
     onClose: () => setOpen(false),
   });

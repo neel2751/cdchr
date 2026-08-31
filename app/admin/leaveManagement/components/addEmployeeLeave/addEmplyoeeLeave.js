@@ -137,7 +137,9 @@ export const AddEmploeeLeave = () => {
 
   const { mutate: submitLeaveRequest } = useSubmitMutation({
     mutationFn: async (data) => await adminEmployeeLeaveRequest(data),
-    invalidateKey: ["admin-leave-requests"],
+    // Rendered inside LeaveContainer, above the same request table.
+    // "admin-leave-requests" is not a key anything queries.
+    invalidateKey: ["employee-leave-request"],
     onSuccessMessage: () => "Leave request submitted successfully",
     onClose: () => setShowDialog(false),
   });
