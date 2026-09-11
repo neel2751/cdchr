@@ -24,6 +24,59 @@ import { normalizeDateToUTC } from "@/lib/formatDate";
 import { getLeaveYearString } from "@/helper/getLeaveYearString";
 import { getLeaveSettings } from "../leaveSettingServer";
 import { create } from "lodash";
+import {
+  hasSickNote,
+  needsSickNote,
+  SICK_NOTE_REQUIRED_MESSAGE,
+} from "@/lib/sickNote";
+
+/**
+ * The date a request should be recorded as having been raised.
+ *
+ * Defaults to today. An admin entering a historical record may pass the real
+ * date it was raised so the notice period reads correctly; an employee cannot,
+ * since backdating their own request would rewrite how much notice they gave.
+ * A future date is ignored — notice cannot be given after the fact.
+ */
+function resolveSubmitDate(leaveSubmitDate, adminId) {
+  const today = normalizeDateToUTC(new Date());
+  if (!adminId || !leaveSubmitDate) return today;
+
+  const chosen = normalizeDateToUTC(new Date(leaveSubmitDate));
+  if (!chosen || Number.isNaN(chosen.getTime())) return today;
+
+  return chosen > today ? today : chosen;
+}
+
+/**
+ * Normalises the sick note a form sends us into the shape stored on the leave
+ * request, and refuses the request when the note is required but missing.
+ *
+ * The rule is enforced here rather than in each form so every route in —
+ * employee, admin-for-employee and the edit flow — is covered by one check.
+ */
+function resolveSickNote({ leaveType, leaveDates, sickNote, uploadedBy }) {
+  const note = Array.isArray(sickNote) ? sickNote[0] : sickNote;
+
+  if (needsSickNote(leaveType, leaveDates) && !hasSickNote(note)) {
+    return { success: false, message: SICK_NOTE_REQUIRED_MESSAGE };
+  }
+
+  if (!hasSickNote(note)) return { success: true, sickNote: undefined };
+
+  return {
+    success: true,
+    sickNote: {
+      key: note.key,
+      fileName: note.fileName,
+      fileSize: note.fileSize,
+      fileType: note.fileType,
+      access: note.access || "private",
+      uploadedAt: new Date(),
+      uploadedBy: uploadedBy ? createObjectId(uploadedBy) : undefined,
+    },
+  };
+}
 
 export async function storeEmployeeLeaveData(data, requestId) {
   try {
@@ -49,6 +102,7 @@ export async function storeEmployeeLeaveData(data, requestId) {
         isHalfDay: data.leaveType === "Half Day",
         halfDayType: data.halfDayType || null,
         leaveReason: data.leaveReason || "",
+        sickNote: data.sickNote,
         submitBy: employeeId,
       });
       return response;
@@ -669,6 +723,21 @@ export async function addLeaveRequest({
 
   const { leaveType, leaveDates, leaveReason } = data;
 
+  // 0️⃣ Sick note gate — checked before anything is deducted or inserted.
+  const sickNoteCheck = resolveSickNote({
+    leaveType,
+    leaveDates,
+    sickNote: data.sickNote,
+    uploadedBy: adminId || employeeId,
+  });
+  if (!sickNoteCheck.success) return sickNoteCheck;
+
+  // When an admin records leave that was taken months ago, stamping it with
+  // today's date reads as a request raised after the leave had already started
+  // — which is what drove the notice period negative. Only an admin may set it,
+  // and never into the future; an employee's own request is always "now".
+  const submittedOn = resolveSubmitDate(data.leaveSubmitDate, adminId);
+
   const settings = await getLeaveSettings();
   const startMonth = settings?.leaveYearStartMonth || 4;
 
@@ -775,8 +844,10 @@ export async function addLeaveRequest({
     const leaveStartDate = sortedDates[0];
     const leaveEndDate = sortedDates[sortedDates.length - 1];
 
+    // A backdated record was also decided back then, so the approval carries
+    // the same date rather than today's.
     const approved = adminId
-      ? { approvedBy: adminId, approvedDate: new Date() }
+      ? { approvedBy: adminId, approvedDate: submittedOn }
       : {};
 
     requestsToInsert.push({
@@ -788,10 +859,15 @@ export async function addLeaveRequest({
       leaveStartDate,
       leaveEndDate,
       leaveReason,
-      leaveSubmitDate: normalizeDateToUTC(new Date()),
+      leaveSubmitDate: submittedOn,
       leaveStatus: adminId ? "Approved" : "Pending",
       isPaid: leaveType !== "Unpaid Leave",
       leaveBreakdown: [{ leaveType, leaveYear, leaveDays }],
+      // A submission can split across leave years and into unpaid days; the
+      // same note belongs to every piece of it.
+      ...(sickNoteCheck.sickNote
+        ? { sickNote: sickNoteCheck.sickNote }
+        : {}),
       ...approved,
       addByAdmin: !!adminId,
     });
@@ -812,6 +888,10 @@ export async function addHalfDayLeave({
   await connect();
 
   const { leaveType, leaveDates, halfDayType, leaveReason } = data;
+
+  // Same rule as a full-day request: an admin may record when a historical
+  // half day was actually raised, an employee may not.
+  const submittedOn = resolveSubmitDate(data.leaveSubmitDate, adminId);
 
   const settings = await getLeaveSettings();
   const startMonth = settings?.leaveYearStartMonth || 4;
@@ -919,14 +999,14 @@ export async function addHalfDayLeave({
 
   for (const item of finalDeductions) {
     const approved = adminId
-      ? { approvedBy: adminId, approvedDate: new Date() }
+      ? { approvedBy: adminId, approvedDate: submittedOn }
       : {};
 
     requestsToInsert.push({
       employeeId: createObjectId(employeeId),
       leaveYear: item.leaveYear,
       leaveType: item.leaveType,
-      leaveSubmitDate: normalizeDateToUTC(new Date()),
+      leaveSubmitDate: submittedOn,
       leaveStatus: adminId ? "Approved" : "Pending",
       leaveReason,
       leaveDates: [item.date], // 🔥 SINGLE DATE
@@ -963,6 +1043,7 @@ export async function editLeaveRequestAdvanced({
   isHalfDay,
   halfDayType,
   leaveReason,
+  sickNote,
   submitBy,
 }) {
   return await withTransaction(async (session) => {
@@ -978,6 +1059,20 @@ export async function editLeaveRequestAdvanced({
     if (!oldLeaves.length) {
       throw new Error("No valid leave requests found to edit");
     }
+
+    // A record an admin entered for a past absence keeps the date it was
+    // originally raised — re-saving it should not turn a historical entry into
+    // one submitted today. An employee editing their own request gets a fresh
+    // submit date, since the notice they are giving really is from today.
+    const carriedSubmitDate = oldLeaves.find((leave) => leave.addByAdmin)
+      ?.leaveSubmitDate;
+
+    // An edit that does not re-upload keeps the note already on file, so
+    // changing a date on a long sick leave does not ask for it again.
+    const carriedSickNote =
+      sickNote ||
+      oldLeaves.find((leave) => leave.sickNote?.key)?.sickNote?.toObject?.() ||
+      oldLeaves.find((leave) => leave.sickNote?.key)?.sickNote;
 
     // 4️⃣ Overlap validation for new dates
     const overlap = await LeaveRequestModel.find({
@@ -1052,6 +1147,8 @@ export async function editLeaveRequestAdvanced({
           leaveDates: newLeaveDates,
           leaveType,
           leaveReason,
+          sickNote: carriedSickNote,
+          leaveSubmitDate: carriedSubmitDate,
         },
         employeeId,
         adminId: submitBy !== employeeId ? submitBy : null,

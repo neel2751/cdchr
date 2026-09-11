@@ -927,6 +927,16 @@ export const FormImageUpload = ({ field }) => {
 
   return (
     <div className="space-y-2">
+      {/* Opt-in: a bare dropzone is fine next to an obvious heading, but a
+          field that appears conditionally needs to name itself. */}
+      {field.showLabel && field.labelText && (
+        <div className="space-y-1">
+          <FormLabel name={field?.name} labelText={field?.labelText} />
+          {field.description && (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          )}
+        </div>
+      )}
       <Controller
         name={field.name}
         control={control}

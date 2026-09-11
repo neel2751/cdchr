@@ -342,7 +342,7 @@ const LeaveRequestCard = ({ data, handleEdit, handleDelete, queryKey }) => {
         </div>
       </CardHeader>
 
-      {["Approved", "Rejected", "Expired", "Cancelled"].includes(
+      {["Approved", "Rejected", "Expired", "Cancelled", "Rolled Back"].includes(
         data?.leaveStatus,
       ) ? (
         <></>

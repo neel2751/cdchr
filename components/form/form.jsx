@@ -19,6 +19,7 @@ import { Loader2 } from "lucide-react";
 import { isObjectEmpty } from "@/lib/object";
 import { useEffect, useRef } from "react";
 import useGlobalForm from "@/hooks/useGlobalForm";
+import { cn } from "@/lib/utils";
 
 export function GlobalForm({
   fields,
@@ -29,6 +30,10 @@ export function GlobalForm({
   resetForm = true, // Whether to reset form after submission
   isHide = false, // Whether to hide the submit button
   btnProps = {}, // Additional props for the submit button
+  // Styling for the row holding the submit button. A long form inside a
+  // scrolling container uses it to pin that row to the bottom; the caller owns
+  // the classes because only it knows the padding it has to bleed through.
+  footerClassName,
 }) {
   // const method = useForm({
   //   defaultValues: initialValues || {},
@@ -265,7 +270,7 @@ export function GlobalForm({
           </div>
         ))}
         {!isHide && (
-          <div className="mt-7">
+          <div className={cn("mt-7", footerClassName)}>
             <Button {...btnProps} disabled={isLoading} type="submit">
               {isLoading ? (
                 <>
