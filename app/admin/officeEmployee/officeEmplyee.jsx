@@ -10,7 +10,8 @@ import {
   resetOfficeEmployeePassword,
   emergencyLockdownAccount,
 } from "@/server/officeServer/officeServer";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import React, { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import EmployeTabel from "./employeTabel";
@@ -294,8 +295,21 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   const immigrationField = field.find((it) => it.name === "immigrationType");
   const options = immigrationField?.options || [];
 
+  // `status` is fixed per page (active vs previous), so it is not a filter the
+  // user set and must not be counted or cleared.
+  const activeFilterCount = ["company", "role", "type", "visaStatus"].filter(
+    (key) => filter[key]
+  ).length;
+
+  const clearFilters = () =>
+    updateFilter({ company: "", role: "", type: "", visaStatus: "" });
+
   return (
-    <div className="p-4 w-full mx-auto overflow-scroll">
+    // `overflow-scroll` here used to make the whole page scroll sideways to
+    // reach the table's later columns. The table now owns its own scrolling, so
+    // this only needs to not overflow: min-w-0 lets the flex/grid parent shrink
+    // it instead of letting the wide table dictate the page width.
+    <div className="w-full min-w-0 p-4">
       <CommonContext.Provider
         value={{
           officeEmployeeData,
@@ -326,69 +340,80 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
               />
             )}
             <CardHeader>
-              <div className="mb-4">
-                <CardTitle>
-                  {isPrevious
-                    ? "Previous Office Employees"
-                    : "Office Management"}
-                </CardTitle>
-              </div>
-              <div className="flex items-center justify-between">
-                <SearchDebounce />
-                <div className="flex gap-2">
-                  <div>
-                    <SelectFilter
-                      label="Department"
-                      value={filter?.role || ""}
-                      frameworks={[
-                        { label: "All", value: "" },
-                        ...selectRoleType,
-                      ]}
-                      placeholder="All"
-                      onChange={(e) => updateFilter({ role: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    <SelectFilter
-                      label="Company"
-                      value={filter.company}
-                      frameworks={[
-                        { label: "All", value: "" },
-                        ...selectCompany,
-                      ]}
-                      placeholder="All"
-                      onChange={(e) => updateFilter({ company: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    <SelectFilter
-                      label="Immigration"
-                      value={filter?.type || ""}
-                      frameworks={[{ label: "All", value: "" }, ...options]}
-                      placeholder="All"
-                      onChange={(e) => updateFilter({ type: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    <SelectFilter
-                      label="Visa"
-                      value={filter?.visaStatus || ""}
-                      frameworks={VISA_STATUS_OPTIONS}
-                      placeholder="All Visa"
-                      onChange={(e) => updateFilter({ visaStatus: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  {!isPrevious && (
-                    <Button onClick={handleAdd}>
-                      <Plus />
-                      Add
-                    </Button>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CardTitle>
+                    {isPrevious ? "Previous Office Staff" : "Office Staff"}
+                  </CardTitle>
+                  {totalCount > 0 && (
+                    <Badge variant="secondary" className="tabular-nums">
+                      {totalCount}
+                    </Badge>
                   )}
                 </div>
+                {!isPrevious && (
+                  <Button onClick={handleAdd}>
+                    <Plus className="mr-1 size-4" />
+                    Add employee
+                  </Button>
+                )}
+              </div>
+
+              {/* Filters wrap instead of overflowing, and say how many are
+                  active — four dropdowns all reading "All" gave no clue that a
+                  short result list was the filters' doing rather than the data's. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-56 flex-1">
+                  <SearchDebounce placeholder="Search name or email..." />
+                </div>
+                <SelectFilter
+                  label="Department"
+                  value={filter?.role || ""}
+                  frameworks={[{ label: "All", value: "" }, ...selectRoleType]}
+                  placeholder="All"
+                  onChange={(e) => updateFilter({ role: e })}
+                  noData="No Data found"
+                />
+                {/* Only shown when there is a genuine choice. Inside a tenant
+                    every employee belongs to that one company, so the filter
+                    could never narrow anything — see getSelectCompanies. */}
+                {selectCompany.length > 1 && (
+                  <SelectFilter
+                    label="Company"
+                    value={filter.company}
+                    frameworks={[{ label: "All", value: "" }, ...selectCompany]}
+                    placeholder="All"
+                    onChange={(e) => updateFilter({ company: e })}
+                    noData="No Data found"
+                  />
+                )}
+                <SelectFilter
+                  label="Immigration"
+                  value={filter?.type || ""}
+                  frameworks={[{ label: "All", value: "" }, ...options]}
+                  placeholder="All"
+                  onChange={(e) => updateFilter({ type: e })}
+                  noData="No Data found"
+                />
+                <SelectFilter
+                  label="Visa"
+                  value={filter?.visaStatus || ""}
+                  frameworks={VISA_STATUS_OPTIONS}
+                  placeholder="All Visa"
+                  onChange={(e) => updateFilter({ visaStatus: e })}
+                  noData="No Data found"
+                />
+                {activeFilterCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="text-neutral-500"
+                  >
+                    <X className="mr-1 size-4" />
+                    Clear {activeFilterCount}
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -396,7 +421,27 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
               {isError && <div> Something went wrong</div>}
 
               {officeEmployeeData.length <= 0 ? (
-                <div className="text-center text-gray-500">No Data found</div>
+                // Distinguishes "you filtered everything out" from "there is
+                // nothing here", and offers the way back.
+                <div className="py-12 text-center">
+                  <p className="text-sm text-gray-500">
+                    {activeFilterCount > 0 || query
+                      ? "No one matches these filters."
+                      : isPrevious
+                        ? "No previous office staff."
+                        : "No office staff yet."}
+                  </p>
+                  {(activeFilterCount > 0 || query) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={clearFilters}
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                </div>
               ) : (
                 <EmployeTabel />
               )}

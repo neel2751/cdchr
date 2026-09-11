@@ -4,6 +4,33 @@ import { withTransaction } from "@/lib/mongodb";
 import { decrypt, encrypt } from "@/lib/algo";
 import EmailAccountModel from "@/models/emailAccountmodel";
 import { connect } from "@/db/db";
+import { getServerSideProps } from "../session/session";
+import { isValidObjectId } from "@/lib/mongodb";
+import {
+  EMAIL_FEATURE_VALUES,
+  isKnownEmailFeature,
+} from "@/data/emailFeatures";
+import { resolveSmtpHost, smtpConfigError } from "@/lib/smtp";
+
+/**
+ * An SMTP id in whichever form the caller has.
+ *
+ * The detail URL carries the id encrypted (lib/algo), while the edit form has
+ * the plain `_id` off the record it loaded. Half the actions in this file
+ * decrypt and half do not, which is a standing trap: pass the wrong one and the
+ * query matches nothing and reports success. Normalising here means neither
+ * caller has to know.
+ */
+function resolveSmtpId(value) {
+  if (!value) return null;
+  if (isValidObjectId(value)) return String(value);
+  try {
+    const decrypted = decrypt(value);
+    return decrypted && isValidObjectId(decrypted) ? decrypted : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function addSMTPAdvance(data, smtpId) {
   return withTransaction(async (sesssion) => {
@@ -27,12 +54,41 @@ export async function addSMTPAdvance(data, smtpId) {
       throw new Error("All fields are required");
     }
 
+    // "Custom SMTP" with no hostname typed saves an account that looks
+    // configured and can never connect — the form makes that one click away.
+    const hostProblem = smtpConfigError(data);
+    if (hostProblem) throw new Error(hostProblem);
+
+    const chosenFeature = feature || "All";
+    if (!isKnownEmailFeature(chosenFeature)) {
+      throw new Error(
+        `"${chosenFeature}" is not a feature this app sends with. ` +
+          `Choose one of: ${EMAIL_FEATURE_VALUES.join(", ")}.`
+      );
+    }
+
     await connect();
+
+    // One sender per feature. resolveAccount() picks by feature, so a second
+    // account for the same one is never reached — it just sits there looking
+    // configured. `isDeleted` is excluded so a feature freed by deleting an
+    // account can be used again.
+    const featureTaken = await EmailAccountModel.findOne({
+      feature: chosenFeature,
+      isDeleted: false,
+    }).session(sesssion);
+    if (featureTaken) {
+      throw new Error(
+        `This company already has an email account for "${chosenFeature}". ` +
+          `Edit that one, or remove it first.`
+      );
+    }
 
     // Check if SMTP already exists
     const existingSMTP = await EmailAccountModel.findOne({
       host,
       userName,
+      isDeleted: false,
     }).session(sesssion);
     if (existingSMTP) {
       throw new Error("SMTP already exists");
@@ -44,7 +100,7 @@ export async function addSMTPAdvance(data, smtpId) {
       otherHost: host === "other" ? data.otherHost : "", // Only set if host is 'other'
       userName,
       password,
-      feature: feature || "All", // Default to empty string if not provided
+      feature: chosenFeature,
       fromName: fromName, // Default fromName to userName if not provided
       port: port || 587, // Default SMTP port
       secure: secure || false, // Default to false if not provided
@@ -98,13 +154,34 @@ export async function setPrimarySMTPAdvance(smtpId, feature) {
     return { success: false, message: "Error setting primary SMTP" };
   }
 }
+/**
+ * The company's configured SMTP senders.
+ *
+ * Super admin only. These records are the company's outgoing mail identity, and
+ * changing or reading them affects every message the app sends — the same
+ * reason /admin/email is a super-admin menu entry. The check lives here as well
+ * as in the route guard because a server action can be called directly.
+ *
+ * It used to take an `includePassword` flag that decrypted and returned the
+ * stored SMTP password. No caller ever set it (checked across app/ and
+ * server/), so it was pure liability: any signed-in user in the tenant could
+ * invoke the action by hand and read the company's mail credentials in plain
+ * text. Removed rather than gated — there is no feature to preserve.
+ */
 export async function getAllSMTPsAdvance({
   page = 1,
   limit = 20,
-  includePassword = false,
   search, // new search string param
 } = {}) {
+  const empty = {
+    success: true,
+    data: JSON.stringify([]),
+    pagination: { page, limit, total: 0, totalPages: 0 },
+  };
   try {
+    const { props } = await getServerSideProps();
+    if (props?.session?.user?.role !== "superAdmin") return empty;
+
     // Build initial match filter
     await connect();
     const matchStage = { isDeleted: false };
@@ -112,10 +189,11 @@ export async function getAllSMTPsAdvance({
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), "i"); // case-insensitive
 
-      // Add $or to match host or username
+      // `userName`, not `username` — the schema has no `username`, so
+      // searching by user matched nothing.
       matchStage.$or = [
         { host: { $regex: searchRegex } },
-        { username: { $regex: searchRegex } },
+        { userName: { $regex: searchRegex } },
       ];
     }
 
@@ -126,16 +204,22 @@ export async function getAllSMTPsAdvance({
       { $sort: { createdAt: -1 } },
       { $skip: skip },
       { $limit: limit },
+      // The table only needs to know whether a password is set, to show a
+      // "Configured" badge. Sending the stored ciphertext to the browser to
+      // answer a yes/no question puts it in the page payload and the client
+      // cache for no reason, so the boolean is computed here and the field
+      // dropped.
+      {
+        $addFields: {
+          hasPassword: {
+            $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0],
+          },
+        },
+      },
+      { $unset: "password" },
     ];
 
     const smtps = await EmailAccountModel.aggregate(pipeline);
-
-    if (includePassword) {
-      smtps.forEach((smtp) => {
-        smtp.passwordDecrypted =
-          smtp.passwordDecrypted || decrypt(smtp.password);
-      });
-    }
 
     // Count total matching documents (without pagination)
     const total = await EmailAccountModel.countDocuments(matchStage);
@@ -155,6 +239,31 @@ export async function getAllSMTPsAdvance({
     return { success: false, message: "Error fetching SMTPs" };
   }
 }
+/**
+ * Which features already have an account, so the form can offer only the ones
+ * still free. Prevents the user reaching a duplicate error they could not have
+ * predicted from the form.
+ */
+export async function getUsedEmailFeatures() {
+  try {
+    const { props } = await getServerSideProps();
+    if (props?.session?.user?.role !== "superAdmin") {
+      return { success: true, data: JSON.stringify([]) };
+    }
+    await connect();
+    const rows = await EmailAccountModel.find({ isDeleted: false })
+      .select("feature")
+      .lean();
+    return {
+      success: true,
+      data: JSON.stringify([...new Set(rows.map((r) => r.feature || "All"))]),
+    };
+  } catch (error) {
+    console.log("Error fetching used email features:", error);
+    return { success: true, data: JSON.stringify([]) };
+  }
+}
+
 export async function updateSMTPStatusAdvance(smtpId, updateFields) {
   try {
     if (!smtpId) {
@@ -212,11 +321,49 @@ export async function updateSMTPAdvance(smtpId, data) {
       return { success: false, message: "Host and username are required" };
     }
 
+    const hostProblem = smtpConfigError(data);
+    if (hostProblem) return { success: false, message: hostProblem };
+
+    const chosenFeature = feature || "All";
+    if (!isKnownEmailFeature(chosenFeature)) {
+      return {
+        success: false,
+        message:
+          `"${chosenFeature}" is not a feature this app sends with. ` +
+          `Choose one of: ${EMAIL_FEATURE_VALUES.join(", ")}.`,
+      };
+    }
+
+    await connect();
+
+    // The id arrives raw from the edit form but encrypted from anywhere holding
+    // a URL. Accept both, so a caller cannot pick the wrong one — the previous
+    // version only worked with the raw form and would silently update nothing.
+    const targetId = resolveSmtpId(smtpId);
+    if (!targetId) return { success: false, message: "Id is not valid" };
+
+    // One sender per feature, matching addSMTPAdvance — otherwise editing is a
+    // way around the rule that creating enforces.
+    const featureTaken = await EmailAccountModel.findOne({
+      _id: { $ne: targetId },
+      feature: chosenFeature,
+      isDeleted: false,
+    });
+    if (featureTaken) {
+      return {
+        success: false,
+        message:
+          `This company already has an email account for "${chosenFeature}". ` +
+          `Edit that one, or remove it first.`,
+      };
+    }
+
     const existingSMTP = await EmailAccountModel.findOne({
-      _id: { $ne: smtpId },
+      _id: { $ne: targetId },
       host,
-      username: userName, // be sure this matches your schema
-      feature: feature || "All", // Default to 'All' if not provided
+      // Was `username`, which is not a field on this schema — so the query
+      // matched nothing and this duplicate check never once fired.
+      userName,
       isDeleted: false,
     });
 
@@ -227,12 +374,23 @@ export async function updateSMTPAdvance(smtpId, data) {
       };
     }
 
+    // An allow-list rather than a spread of `data`. The payload comes from a
+    // client form, and spreading it let a caller set `password` (bypassing the
+    // password tab, which encrypts), `isDeleted`, or `tenantId`.
     const smtpData = {
-      ...data,
+      host,
+      otherHost: host === "other" ? data.otherHost || "" : "",
+      userName,
+      feature: chosenFeature,
+      fromName: data.fromName || "",
+      toEmail: data.toEmail || userName,
+      port: data.port || 587,
+      secure: !!data.secure,
+      isTest: !!data.isTest,
     };
 
     const updatedSMTP = await EmailAccountModel.findByIdAndUpdate(
-      smtpId,
+      targetId,
       smtpData,
       {
         new: true,
@@ -331,7 +489,7 @@ export async function testSMTPEmailAdvance(smtpId) {
     // Decrypt password before use
     const decryptedPassword = decrypt(smtp.password);
     const data = {
-      host: smtp.host,
+      host: resolveSmtpHost(smtp),
       port: smtp.port || 587,
       secure: smtp.secure, // true for 465, false for other ports
       userName: smtp.userName,
@@ -388,15 +546,43 @@ export async function getSMTPForFeature(feature) {
     data: JSON.stringify(smtp),
   };
 }
+/**
+ * One SMTP account, by its encrypted id.
+ *
+ * Super admin only, for the same reason as getAllSMTPsAdvance: this is the
+ * company's outgoing mail identity, and a server action is callable directly
+ * whatever the sidebar shows.
+ *
+ * The stored password is never returned. It was, and the detail screen rendered
+ * the whole document — so the encrypted credential was sitting in the page
+ * payload of a screen that only ever needed to say whether one is set.
+ */
 export async function getOneSMTPEmail(smtpId) {
   try {
     if (!smtpId) return { success: false, message: "Id is required!" };
+
+    const { props } = await getServerSideProps();
+    if (props?.session?.user?.role !== "superAdmin") {
+      return { success: false, message: "Not authorized" };
+    }
+
     const decryptedId = decrypt(smtpId);
     if (!decryptedId) return { success: false, message: "Id is not valid" };
     await connect();
-    const smtp = await EmailAccountModel.findById(decryptedId);
+    const smtp = await EmailAccountModel.findById(decryptedId)
+      .select("-password")
+      .lean();
     if (!smtp) return { success: false, message: "Data is not found" };
-    return { success: true, data: JSON.stringify(smtp) };
+
+    // Presence only, so the screen can show "configured" without the value.
+    const stored = await EmailAccountModel.findById(decryptedId)
+      .select("password")
+      .lean();
+
+    return {
+      success: true,
+      data: JSON.stringify({ ...smtp, hasPassword: !!stored?.password }),
+    };
   } catch (error) {
     console.log("Error on emailSMTP file under getOneSMTPEmail", error);
     return { success: false, message: "Something want wrong" };
@@ -405,7 +591,7 @@ export async function getOneSMTPEmail(smtpId) {
 export async function testSMTPConnection(smtp) {
   try {
     const data = {
-      host: smtp.host,
+      host: resolveSmtpHost(smtp),
       port: smtp.port || 587,
       secure: smtp.secure || false, // true for 465, false for other ports
       userName: smtp.userName,
@@ -600,7 +786,7 @@ export async function testSMTPEmil(smtpId) {
     }
 
     const data = {
-      host: smtp.host,
+      host: resolveSmtpHost(smtp),
       port: smtp.port || 587,
       secure: smtp.secure, // true for 465, false for other ports
       userName: smtp.userName,
@@ -650,7 +836,7 @@ export async function testSMTPEmil(smtpId) {
 export async function userRegisterEmail(smtp) {
   try {
     const data = {
-      host: smtp.host,
+      host: resolveSmtpHost(smtp),
       port: smtp.port || 587,
       secure: smtp.secure || false, // true for 465, false for other ports
       userName: smtp.userName,

@@ -27,8 +27,12 @@ export const MENU = [
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "Stamp",
   },
+  // The two staff lists are different populations in different collections —
+  // office employees sign into /admin, site employees into /employee. Naming
+  // one "Office Management" and the other just "Employees" gave no hint that
+  // they were a pair, or which one held whom.
   {
-    name: "Office Management",
+    name: "Office Staff",
     path: "/admin/officeEmployee",
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "Briefcase",
@@ -52,13 +56,13 @@ export const MENU = [
     icon: "CalendarDays",
   },
   {
-    name: "Employees",
+    name: "Site Employees",
     path: "/admin/employee",
     role: ["superAdmin"],
     icon: "ClipboardIcon",
   },
   {
-    name: "Site Project",
+    name: "Project Sites",
     path: "/admin/siteProject",
     role: ["superAdmin"],
     icon: "NewspaperIcon",
@@ -76,8 +80,12 @@ export const MENU = [
     role: ["superAdmin", "admin", "user"],
     icon: "Filter",
   },
+  // Assigns an office employee to run a site. Named for what it manages rather
+  // than the verb, so it cannot be confused with "Site Assignments" below —
+  // "Assign Site Manager" and "Assign Site" sat next to each other and read as
+  // the same thing.
   {
-    name: "Assign Site Manager ",
+    name: "Site Managers",
     path: "/admin/siteAssign",
     role: ["superAdmin", "admin", "user"],
     icon: "RadioIcon",
@@ -89,16 +97,24 @@ export const MENU = [
   //   role: ["superAdmin"],
   //   icon: <ChartPieIcon className="w-5 h-5" />,
   // },
+  // Puts site employees on a site for a given day. The submenu that used to be
+  // here pointed at /shiftview/viewshifts and /addEmpToShift, neither of which
+  // is a route in this app — and the sidebar never rendered submenus anyway.
   {
-    name: "Assign Site",
-    // path: "/admin/assignSite",
+    name: "Site Assignments",
     path: "/admin/siteAssignEmployee",
     role: ["superAdmin"],
-    submenu: [
-      { name: "View Shifts", path: "/shiftview/viewshifts" },
-      { name: "Add Employee to Shift", path: "/addEmpToShift" },
-    ],
     icon: "Network",
+  },
+  // The page, the server actions and the models have existed for a while, but
+  // nothing ever linked to it — so only a super admin typing the URL could
+  // reach it (proxy.js redirects everyone else when a path has no MENU entry).
+  // Gated by the `expenses` plan flag, which lib/tenantPlan.js already mapped.
+  {
+    name: "Expenses",
+    path: "/admin/expense",
+    role: ["superAdmin", "admin"],
+    icon: "Receipt",
   },
 
   // {
@@ -114,7 +130,7 @@ export const MENU = [
   //   icon: <FolderOpen className="h-5 w-5" />,
   // },
   {
-    name: "Department",
+    name: "Departments",
     path: "/admin/roleType",
     role: ["superAdmin"],
     icon: "Captions",
@@ -147,6 +163,12 @@ export const MENU = [
   //   icon: "FileText",
   // },
   {
+    name: "Announcements",
+    path: "/admin/announcements",
+    role: ["superAdmin", "admin"],
+    icon: "Megaphone",
+  },
+  {
     name: "Audit Logs",
     path: "/admin/auditLogs",
     role: ["superAdmin"],
@@ -166,6 +188,16 @@ export const MENU = [
     role: ["superAdmin"],
     icon: "Settings",
   },
+  // The company's outgoing mail senders. Built but never linked, so it was
+  // reachable only by a super admin typing the URL. Super admin only for the
+  // same reason as Company Settings: it decides the identity every message the
+  // app sends goes out under — password resets, visa reminders, announcements.
+  {
+    name: "Email Settings",
+    path: "/admin/email",
+    role: ["superAdmin"],
+    icon: "Mail",
+  },
   // Kept at the bottom: former/inactive staff listings. Access is derived from
   // the matching active page (see DERIVED_ACCESS) so admins who can see the
   // active list automatically get the "previous" list without a separate grant.
@@ -176,7 +208,7 @@ export const MENU = [
     icon: "Archive",
   },
   {
-    name: "Previous Employees",
+    name: "Previous Site Employees",
     path: "/admin/previousEmployee",
     role: ["superAdmin", "admin"],
     icon: "UserX",
@@ -220,12 +252,13 @@ export const COMMONMENUITEMS = [
   //   role: ["superAdmin", "admin"], // admin, manager, user
   //   icon: "Stamp",
   // },
-  {
-    name: "Assign Site ",
-    path: "/admin/siteAssign",
-    role: ["superAdmin", "admin", "user"],
-    icon: "RadioIcon",
-  },
+  // "/admin/siteAssign" used to sit here as "Assign Site ", which had two
+  // consequences, both wrong. COMMONMENUITEMS entries are shown to every role by
+  // the sidebar and waved past the permission check by proxy.js — so every
+  // signed-in user saw a "Site Managers" link and could open the page whether or
+  // not the permission had been granted. It also duplicated the MENU entry for
+  // the same path under a second, different name, which is why the sidebar
+  // appeared to have two "Assign Site" items. It now lives in MENU only.
   {
     name: "My Attendance",
     path: "/admin/my-attendance",
@@ -244,35 +277,22 @@ export const COMMONMENUITEMS = [
     role: ["user"],
     icon: "Stamp",
   },
-];
-
-export const MENUOLD = [
+  // Reading what was sent to you is not a privilege. Being in COMMONMENUITEMS
+  // means the sidebar shows it to every role and proxy.js lets everyone past —
+  // which is the point: an announcement nobody can open is not an announcement.
   {
-    name: "Attendance",
-    path: "/admin/attendance",
-    permissionKey: "MANAGE_ATTENDANCE",
-    icon: "CalendarClock",
-  },
-  {
-    name: "Leave Management",
-    path: "/admin/leaveManagement",
-    permissionKey: "MANAGE_LEAVES",
-    icon: "Stamp",
+    name: "My Announcements",
+    path: "/admin/my-announcements",
+    role: ["superAdmin", "admin", "user"],
+    icon: "Megaphone",
   },
 ];
 
-export const PERSONAL_MENU = [
-  {
-    name: "My Attendance",
-    path: "/admin/my-attendance",
-    icon: "CalendarClock",
-  },
-  {
-    name: "My Leaves",
-    path: "/admin/my-leaves",
-    icon: "Stamp",
-  },
-];
+// MENUOLD and PERSONAL_MENU were removed here. Both were exported but reachable
+// only from commented-out code, and both restated live entries under different
+// names and a different permission scheme (`permissionKey` — nothing reads it) —
+// so anyone reading this file to work out what the sidebar shows had three
+// competing answers to choose from.
 
 export const REPORT = [
   {

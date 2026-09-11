@@ -15,7 +15,7 @@ export default async function IdPage({ params, searchParams }) {
       <div className="px-4 pt-4">
         <BackButton
           fallbackHref="/admin/officeEmployee"
-          label="Back to Office Management"
+          label="Back to Office Staff"
         />
       </div>
       <Navbar

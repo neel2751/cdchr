@@ -12,12 +12,16 @@ import { decrypt } from "@/lib/algo";
 import { fetchLiveOfficeClock } from "../timeOffServer/timeOffServer";
 import ClockRecordModel from "@/models/clockInModel";
 import { withAudit, recordAudit } from "@/lib/audit";
+import { featureRefusal } from "@/lib/requireFeature";
 
 // Assign or update today's site assignment
 export const assignEmployeesToSite = withAudit(
   "SiteAssignment.assign",
   async (data) => {
   try {
+    const refusal = await featureRefusal("siteProjects");
+    if (refusal) return refusal;
+
     const { props } = await getServerSideProps();
     const { _id: adminId } = props?.session?.user;
 
@@ -211,6 +215,10 @@ export const assignEmployeesToSite = withAudit(
 );
 
 export const getTodayAssignedEmployeesBySite = async (siteId) => {
+  // Returns a bare array, not the usual { success } envelope, so a refusal
+  // object would be read as one assigned employee. Empty list is the refusal.
+  if (await featureRefusal("siteProjects")) return [];
+
   const today = new Date().setHours(0, 0, 0, 0);
   const assignment = await SiteAssignmentModel.findOne({
     siteId,
@@ -221,6 +229,9 @@ export const getTodayAssignedEmployeesBySite = async (siteId) => {
 };
 
 export const getTodayAssignedEmployees = async () => {
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
+
   const today = new Date().toISOString().split("T")[0];
   const date = new Date(`${today}T00:00:00.000Z`);
 

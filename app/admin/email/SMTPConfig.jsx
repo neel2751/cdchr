@@ -9,16 +9,18 @@ import {
 import {
   addSMTPAdvance,
   getAllSMTPsAdvance,
+  getUsedEmailFeatures,
   testSMTPConnection,
   updateSMTPAdvance,
 } from "@/server/email/emailSMTP";
+import { EMAIL_FEATURES } from "@/data/emailFeatures";
 import { toast } from "sonner";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import EmailForm from "./emailForm";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import EmailTable from "./emailTable";
-import { useFetchQuery } from "@/hooks/use-query";
+import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
 
 const SMTPConfig = ({ queryKey }) => {
   const [showDialog, setShowDialog] = useState(false);
@@ -57,6 +59,17 @@ const SMTPConfig = ({ queryKey }) => {
   });
   const { newData } = data || {};
 
+  const { data: usedFeatures = [] } = useFetchSelectQuery({
+    queryKey: ["usedEmailFeatures"],
+    fetchFn: getUsedEmailFeatures,
+  });
+
+  // When editing, the account's own feature stays selectable — otherwise the
+  // form could not be saved without changing it.
+  const featureOptions = EMAIL_FEATURES.filter(
+    (f) => !usedFeatures.includes(f.value) || f.value === initialValues?.feature
+  ).map((f) => ({ value: f.value, label: f.label }));
+
   const password = initialValues
     ? {}
     : {
@@ -85,10 +98,18 @@ const SMTPConfig = ({ queryKey }) => {
       name: "otherHost",
       labelText: "Custom SMTP Host",
       type: "text",
-      placeholder: "Enter your custom SMTP host",
+      placeholder: "e.g. mail.yourcompany.com",
       showIf: {
         field: "host",
         value: "other",
+      },
+      validationOptions: {
+        // Conditional rather than `required`, which would also fire while the
+        // field is hidden and block every non-custom host from saving.
+        validate: (value, formValues) =>
+          formValues?.host !== "other" ||
+          !!String(value || "").trim() ||
+          "Enter your custom SMTP host",
       },
     },
     {
@@ -106,11 +127,22 @@ const SMTPConfig = ({ queryKey }) => {
       type: "text",
       placeholder: "Enter your name or company name",
     },
+    // A fixed list, not free text. `feature` is the key resolveAccount() looks
+    // up when choosing a sender, so a typed value the app never asks for
+    // produces an account that silently never sends. The old placeholder
+    // suggested "Invoice, HR Bot" — neither of which exists.
+    // Already-configured features are filtered out, because only one account
+    // per feature is allowed and offering a taken one only leads to an error.
     {
       name: "feature",
-      labelText: "Feature",
-      type: "text",
-      placeholder: "e.g., Invoice, HR Bot",
+      labelText: "Used for",
+      type: "select",
+      options: featureOptions,
+      placeholder:
+        featureOptions.length === 0
+          ? "Every feature already has a sender"
+          : "Choose what this sender is used for",
+      validationOptions: { required: "Choose what this sender is used for" },
     },
     {
       name: "userName",

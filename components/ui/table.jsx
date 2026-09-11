@@ -4,12 +4,23 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * @param {object} props
+ * @param {string} [props.className]           classes for the <table>
+ * @param {string} [props.containerClassName]  classes for the scroll container
+ *   around it. The container is what scrolls, so a max-height here (with a
+ *   sticky header) turns a long table into its own viewport instead of making
+ *   the whole page scroll.
+ */
 function Table({
   className,
+  containerClassName,
   ...props
 }) {
   return (
-    (<div data-slot="table-container" className="relative w-full overflow-x-auto">
+    (<div
+      data-slot="table-container"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}>
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}

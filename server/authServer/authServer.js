@@ -200,6 +200,110 @@ export const LoginDataNew = async (email, password) => {
   };
 };
 
+/**
+ * What to do when one email matches several accounts.
+ *
+ *   warn  (default) — pick deterministically and record it. Nobody is locked
+ *                     out, which matters on a live HR system: a consistent
+ *                     company is strictly better than today's arbitrary one,
+ *                     and support gets the list to clean up.
+ *   block           — refuse the login. Switch to this once the duplicates
+ *                     reported by scripts/find-duplicate-emails.mjs are gone,
+ *                     so a new one cannot quietly reappear.
+ *
+ * Deliberately the same shape as TENANT_ENFORCEMENT's shadow → enforce rollout.
+ */
+const DUPLICATE_LOGIN_POLICY =
+  process.env.DUPLICATE_LOGIN_POLICY === "block" ? "block" : "warn";
+
+// Which collection wins when an email exists in more than one. Preserves the
+// original order: office, then site, then reception, then platform.
+const ACCOUNT_SOURCES = [
+  { userType: "office", model: () => OfficeEmployeeModel, lower: false },
+  { userType: "site", model: () => EmployeModel, lower: false },
+  { userType: "reception", model: () => OfficeUserModel, lower: false },
+  // Provider-side staff who administer the platform itself. Checked last, so
+  // this is only reached for an email that belongs to no tenant — a deployment
+  // with no platform users behaves exactly as it did before.
+  { userType: "platform", model: () => PlatformUserModel, lower: true },
+];
+
+/**
+ * Every account answering to an email, best candidate first.
+ *
+ * All four collections are searched rather than stopping at the first hit: the
+ * point is to notice that a second account exists, which a short-circuit cannot
+ * do. Within a collection the sort is oldest-first on `_id`, which is stable
+ * across calls — the previous `findOne` had no sort at all, so its answer came
+ * back in whatever order the storage engine felt like.
+ */
+async function findAccountsByEmail(email) {
+  const found = [];
+
+  for (const source of ACCOUNT_SOURCES) {
+    const rows = await source
+      .model()
+      .find({
+        email: source.lower ? email.toLowerCase() : email,
+        delete: { $ne: true },
+      })
+      .sort({ _id: 1 })
+      .lean();
+
+    for (const user of rows) {
+      found.push({ user, userType: source.userType });
+    }
+  }
+
+  return found;
+}
+
+/** Log a duplicate and record it, without ever failing the login for it. */
+async function reportDuplicateLogin(email, matches) {
+  const describe = matches
+    .map(
+      (m) => `${m.userType}:${m.user._id}${m.user.tenantId ? `@${m.user.tenantId}` : ""}`
+    )
+    .join(", ");
+
+  console.warn(
+    `[login-duplicate] "${email}" matches ${matches.length} accounts (${describe}); ` +
+      `signing in as ${matches[0].userType}:${matches[0].user._id}`
+  );
+
+  try {
+    // Imported lazily on purpose. lib/audit pulls in the session helper, which
+    // pulls in @/auth, which imports this file — a cycle through the login
+    // path. It would probably survive ESM hoisting; "probably" is not a good
+    // enough guarantee for the one code path that lets anyone in.
+    const { logAuditDirect } = await import("@/lib/audit");
+    await logAuditDirect({
+      action: "Auth.duplicateEmail",
+      module: "Auth",
+      // The tenant the chosen record belongs to, so the entry is visible to the
+      // company the person actually landed in.
+      tenantId: matches[0].user.tenantId,
+      actor: { system: true },
+      status: "failure",
+      description:
+        `"${email}" matches ${matches.length} accounts (${describe}). ` +
+        `Signed in as the first. Each person should exist once.`,
+      metadata: {
+        email,
+        policy: DUPLICATE_LOGIN_POLICY,
+        matches: matches.map((m) => ({
+          userType: m.userType,
+          id: String(m.user._id),
+          tenantId: m.user.tenantId ? String(m.user.tenantId) : null,
+        })),
+      },
+    });
+  } catch (error) {
+    // Never let the audit write decide whether someone can sign in.
+    console.log("[login-duplicate] audit write failed:", error?.message);
+  }
+}
+
 export const LoginData = async (email, password, deviceId) => {
   if (!email || !password)
     return { status: false, message: "Please provide all details" };
@@ -213,40 +317,40 @@ export const LoginData = async (email, password, deviceId) => {
   // no tenant — working out which one the account belongs to is the whole
   // purpose of this lookup. Which tenant they may then reach is enforced
   // afterwards, from the signed session.
-  const { user, userType } = await escapeTenant("login: find account by email", async () => {
-    // Try OfficeEmployeeModel first
-    let found = await OfficeEmployeeModel.findOne({
-      email,
-      delete: { $ne: true },
-    }).lean();
-    if (found) return { user: found, userType: "office" };
-
-    // Then try SiteEmployeeModel
-    found = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
-    if (found) return { user: found, userType: "site" };
-
-    found = await OfficeUserModel.findOne({
-      email,
-      delete: { $ne: true },
-    }).lean();
-    if (found) return { user: found, userType: "reception" };
-
-    // Provider-side staff who administer the platform itself. Checked last, so
-    // this branch is only reached for an email that belongs to no tenant — a
-    // deployment with no platform users behaves exactly as it did before.
-    found = await PlatformUserModel.findOne({
-      email: email.toLowerCase(),
-      delete: { $ne: true },
-    }).lean();
-    if (found) return { user: found, userType: "platform" };
-
-    return { user: null, userType: null };
-  });
+  const matches = await escapeTenant("login: find account by email", () =>
+    findAccountsByEmail(email)
+  );
 
   // No user found
-  if (!user) {
+  if (!matches.length) {
     return { status: false, message: "Email not found" };
   }
+
+  /**
+   * More than one account answers to this email.
+   *
+   * This happens when the same person has been created in two companies — the
+   * workaround for the app having no concept of a branch. It matters because
+   * the old lookup took whichever record Mongo returned first, with no sort:
+   * the same worker could land in a different company between logins and clock
+   * in against the wrong one's payroll.
+   *
+   * `matches` is ordered deterministically (see findAccountsByEmail), so the
+   * pick below is at least stable. The duplicate is reported either way.
+   */
+  if (matches.length > 1) {
+    await reportDuplicateLogin(email, matches);
+    if (DUPLICATE_LOGIN_POLICY === "block") {
+      return {
+        status: false,
+        message:
+          "This email is registered to more than one company. " +
+          "Please contact your administrator.",
+      };
+    }
+  }
+
+  const { user, userType } = matches[0];
 
   // Check active status
   if (!user.isActive) {

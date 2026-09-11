@@ -6,11 +6,30 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { resolveBranding } from "@/lib/tenant";
 import { normalizeHost } from "@/lib/tenantHost";
-import { runWithTenant } from "@/lib/tenantContext";
+import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { invalidateTenantCache } from "./tenantServer";
 import { tenantStorageUsage } from "../aws/branding";
+// Imported for the module-usage counts below. Explicit imports rather than
+// walking mongoose.models, which only lists models something has already
+// imported — a count that silently goes missing is worse than no count.
+import EmployeModel from "@/models/employeModel";
+import ProjectSiteModel from "@/models/siteProjectModel";
+import ExpenseModel from "@/models/expense/expenseModel";
+import MediaModel from "@/models/document/mediaModel";
+import AnnouncementModel from "@/models/announcementModel";
+import DeviceModel from "@/models/deviceModel";
+import VisitorModel from "@/models/visitorModel";
+import LeadModel from "@/models/leadModel";
+import LeaveRequestModel from "@/models/leaveRequestModel";
+import WeeklyRotaModel from "@/models/weeklyRotaModel";
+import BookingModel from "@/models/bookingModel";
+import { FEATURE_BY_KEY, FEATURE_KEYS } from "@/data/features";
+import {
+  isFeatureEnabled,
+  resolveFeatureDependencies,
+} from "@/lib/tenantPlan";
 import {
   addDomain,
   applyBranding,
@@ -231,6 +250,68 @@ export async function setTenantStatus(tenantId, status) {
   );
 }
 
+/**
+ * How much a company would lose sight of if a module were switched off.
+ *
+ * Switching a module off hides its records; it never deletes them (see
+ * FEATURE_TOGGLES_PLAN.md, D4). But "hidden" is small comfort if nobody knew
+ * there were 200 of them, so the console shows the count before saving and says
+ * plainly that nothing is deleted.
+ *
+ * Modules with no records of their own — attendance reports, AI — are absent
+ * from the map rather than reported as zero. Zero reads as "nothing there",
+ * which is a different statement from "this module does not store anything".
+ *
+ * Counts explicitly by tenantId inside escapeTenant, the same way
+ * previewTenantDeletion does: the caller is a platform admin with no tenant of
+ * their own, so a scoped read would return nothing — and the explicit filter is
+ * correct whether or not TENANT_ENFORCEMENT is on.
+ */
+const USAGE_MODELS = {
+  siteEmployees: EmployeModel,
+  siteProjects: ProjectSiteModel,
+  expenses: ExpenseModel,
+  documents: MediaModel,
+  announcements: AnnouncementModel,
+  devices: DeviceModel,
+  visitors: VisitorModel,
+  crm: LeadModel,
+  leave: LeaveRequestModel,
+  weeklyRota: WeeklyRotaModel,
+  reception: BookingModel,
+};
+
+export async function getTenantModuleUsage(tenantId) {
+  const auth = await requirePlatformAdmin();
+  if (auth.error) return { success: false, message: auth.error };
+  if (!tenantId || !isValidObjectId(tenantId)) {
+    return { success: false, message: "Invalid company" };
+  }
+
+  try {
+    await connect();
+    const oid = createObjectId(tenantId);
+    const counts = {};
+
+    await escapeTenant("platform: module usage counts", async () => {
+      for (const [key, model] of Object.entries(USAGE_MODELS)) {
+        try {
+          counts[key] = await model.countDocuments({ tenantId: oid });
+        } catch {
+          // One uncountable collection must not cost the operator every other
+          // number. Absent means "no count available", which the console
+          // renders as a softer warning than a figure it cannot stand behind.
+        }
+      }
+    });
+
+    return { success: true, data: JSON.stringify(counts) };
+  } catch (error) {
+    console.log("getTenantModuleUsage error:", error?.message);
+    return { success: false, message: "Could not read usage" };
+  }
+}
+
 /** Plan, seats and feature flags. */
 export async function updateTenantPlan(tenantId, { plan, seats, features, limits } = {}) {
   return asPlatformAdmin(
@@ -246,9 +327,34 @@ export async function updateTenantPlan(tenantId, { plan, seats, features, limits
         const n = parseInt(seats, 10);
         set["billing.seats"] = Number.isFinite(n) && n > 0 ? n : null;
       }
+      // Cascaded off by a dependency rather than asked for, reported back so the
+      // console can say which modules went with the one that was switched off.
+      const cascaded = [];
+
       if (features && typeof features === "object") {
+        // Only keys the registry knows. An unrecognised one is either a typo or
+        // a module that has been removed; writing it would put a flag in the
+        // document that nothing will ever read or clean up.
+        const incoming = {};
         for (const [key, value] of Object.entries(features)) {
-          set[`features.${key}`] = !!value;
+          if (FEATURE_KEYS.includes(key)) incoming[key] = !!value;
+        }
+
+        // Resolved against what the company already has, not against `incoming`
+        // alone: a partial update that switches one module off must still be
+        // judged together with the flags it is not mentioning.
+        const merged = { ...(before.features || {}), ...incoming };
+        const resolved = resolveFeatureDependencies(merged);
+
+        for (const key of FEATURE_KEYS) {
+          const asked = key in incoming;
+          const forced =
+            isFeatureEnabled(merged, key) && !isFeatureEnabled(resolved, key);
+          // Untouched flags stay untouched, so a save never rewrites a module
+          // nobody mentioned.
+          if (!asked && !forced) continue;
+          set[`features.${key}`] = resolved[key] !== false;
+          if (forced && incoming[key] !== false) cascaded.push(key);
         }
       }
       if (limits && typeof limits === "object") {
@@ -264,9 +370,15 @@ export async function updateTenantPlan(tenantId, { plan, seats, features, limits
       await CompanyModel.updateOne({ _id: createObjectId(id) }, { $set: set });
       await invalidateTenantCache();
 
+      const alsoOff = cascaded
+        .map((key) => FEATURE_BY_KEY[key]?.label || key)
+        .join(", ");
+
       return {
         success: true,
-        message: "Plan saved",
+        message: alsoOff
+          ? `Plan saved. ${alsoOff} switched off too — it depends on a module you turned off.`
+          : "Plan saved",
         before: { billing: before.billing, features: before.features },
         after: set,
       };

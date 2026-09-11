@@ -9,6 +9,8 @@ import { primaryDomain, resolveBranding } from "@/lib/tenant";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { originForHost } from "@/lib/tenantHost";
 import { renderBrandedEmail } from "@/lib/emailTemplate";
+import { resolveSmtpHost } from "@/lib/smtp";
+import { DEFAULT_EMAIL_FEATURE } from "@/data/emailFeatures";
 import { sendMail as transportSend } from "../nodeMailerServer/nodemailerServer";
 
 /**
@@ -21,17 +23,22 @@ import { sendMail as transportSend } from "../nodeMailerServer/nodemailerServer"
  * The sender is chosen in this order:
  *   1. the company's primary account for the feature
  *   2. any active account the company has for the feature
- *   3. a platform-level account for the feature (no tenantId) — the shared
+ *   3. the company's default ("All") account — so configuring one sender is
+ *      enough, and adding a narrower feature key never silently moves mail off
+ *      the company's own identity
+ *   4. a platform-level account for the feature (no tenantId) — the shared
  *      fallback, so a company that has configured nothing can still receive
  *      password resets
- *   4. the EMAIL_* environment variables, which is what the app used before
+ *   5. the EMAIL_* environment variables, which is what the app used before
  *      any of this existed
+ *
+ * Which feature each kind of message asks for is listed in data/emailFeatures.js.
  */
 
 /** Decrypt an account's password and shape it for the transport. */
 function toTransportConfig(smtp) {
   return {
-    host: smtp.host === "other" ? smtp.otherHost : smtp.host,
+    host: resolveSmtpHost(smtp),
     port: smtp.port || 587,
     secure: !!smtp.secure,
     userName: smtp.userName,
@@ -47,8 +54,8 @@ function toTransportConfig(smtp) {
 async function resolveAccount(tenantId, feature) {
   await connect();
 
-  const forTenant = async () => {
-    const base = { feature, isDeleted: false, isActive: true };
+  const forTenant = async (wanted) => {
+    const base = { feature: wanted, isDeleted: false, isActive: true };
     // Primary first, then any active account for the feature — an account can
     // be configured for "HR" without anyone having marked it primary.
     return (
@@ -60,8 +67,22 @@ async function resolveAccount(tenantId, feature) {
   };
 
   if (tenantId && isValidObjectId(tenantId)) {
-    const own = await runWithTenant(String(tenantId), forTenant);
+    const own = await runWithTenant(String(tenantId), () => forTenant(feature));
     if (own) return own;
+
+    // The company's default sender, before giving up on the company entirely.
+    //
+    // This step was missing, and it is what makes granular senders safe to
+    // introduce: asking for "Accounts" at a company that has only configured a
+    // default used to skip straight past them to the platform's credentials, so
+    // the message went out under the wrong identity. Now a company can
+    // configure exactly as much as it cares about.
+    if (feature !== DEFAULT_EMAIL_FEATURE) {
+      const fallback = await runWithTenant(String(tenantId), () =>
+        forTenant(DEFAULT_EMAIL_FEATURE)
+      );
+      if (fallback) return fallback;
+    }
   }
 
   // Platform-level fallback: no tenantId, so it is invisible to a scoped query

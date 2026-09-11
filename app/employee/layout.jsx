@@ -1,72 +1,26 @@
-"use client";
-import { Button } from "@/components/ui/button";
-import { Bell } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
 import React from "react";
-import Logout from "./logout";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SessionProvider } from "next-auth/react";
+import { redirect } from "next/navigation";
 
-export default function Layout({ children }) {
-  const menu = [
-    { title: "Dashboard", href: "/employee" },
-    { title: "Password", href: "/employee/changePassword" },
-  ];
-  const queryClient = new QueryClient();
-  return (
-    <SessionProvider>
-      <QueryClientProvider client={queryClient}>
-        <div className="flex min-h-screen flex-col px-2 sm:py-0 py-2">
-          <header className="sticky top-0 z-50 w-full border-b bg-white">
-            <div className="container flex h-16 items-center justify-between mx-auto">
-              <div className="flex items-center gap-6">
-                <Link
-                  href="/"
-                  className="font-bold text-lg flex items-center gap-2 text-neutral-800"
-                >
-                  <Image
-                    src={
-                      // "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                      "/images/interiorlogo.svg"
-                    }
-                    alt="CDC HR"
-                    width={100}
-                    height={100}
-                    className="h-10 w-auto"
-                  />
-                  CDC HR
-                </Link>
-                <nav className="hidden md:flex gap-6">
-                  {menu &&
-                    menu?.map((item) => (
-                      <Link
-                        key={item?.title}
-                        href={item?.href}
-                        className="text-sm font-medium hover:text-indigo-600 transition-colors font-grotesk"
-                      >
-                        {item?.title}
-                      </Link>
-                    ))}
-                </nav>
-              </div>
-              <div className="flex items-center gap-4">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="hidden md:flex"
-                >
-                  <Bell />
-                </Button>
-                <Logout />
-              </div>
-            </div>
-          </header>
-          <main className="flex-1">
-            <div className="container py-10 mx-auto">{children}</div>
-          </main>
-        </div>
-      </QueryClientProvider>
-    </SessionProvider>
-  );
+import EmployeeShell from "./employeeShell";
+import { hasPlanFeature } from "@/server/tenantServer/featureServer";
+
+/**
+ * The site-employee portal, closed when the company's plan excludes it.
+ *
+ * proxy.js already gates `/employee` through the `siteEmployees` flag, but only
+ * when the request arrives on a hostname that resolves to the same tenant as the
+ * session — on a single-domain deployment that condition never holds and the
+ * check falls through. This is the backstop that does not depend on the
+ * hostname, and it is why the gate lives in the layout rather than each page:
+ * every route under /employee passes through here.
+ *
+ * Authentication is still proxy.js's job. This only answers "does this company
+ * have the module", and fails open if it cannot tell.
+ */
+export const dynamic = "force-dynamic";
+
+export default async function Layout({ children }) {
+  if (!(await hasPlanFeature("siteEmployees"))) redirect("/unauthorized");
+
+  return <EmployeeShell>{children}</EmployeeShell>;
 }

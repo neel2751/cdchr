@@ -3,8 +3,16 @@ import { connect } from "@/db/db";
 import DeviceModel from "@/models/deviceModel";
 import { checkip, sendGlobalMail } from "../email/email";
 import { getServerSideProps } from "../session/session";
+import { featureRefusal } from "@/lib/requireFeature";
+
+// Every export below is a server action, and therefore a POST endpoint that can
+// be called without going near /admin/device. So the plan check is repeated in
+// each rather than left to proxy.js — including the analytics readers, which
+// are this module's product and not merely helpers.
 
 export async function StoreDevice(data) {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
@@ -42,6 +50,8 @@ export async function StoreDevice(data) {
 }
 
 export async function getDevice() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
@@ -267,6 +277,8 @@ text-align: center;
 
 // 1. Get OS Distribution Analytics
 export async function getOSDistributionAnalytics() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -328,6 +340,8 @@ export async function getOSDistributionAnalytics() {
 
 // 2. Get Windows Activation Status Analytics
 export async function getWindowsActivationAnalytics() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -395,6 +409,8 @@ export async function getWindowsActivationAnalytics() {
 
 // 3. Get Devices Requiring Action
 export async function getDevicesRequiringAction() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -583,6 +599,8 @@ export async function getDevicesRequiringAction() {
 
 // 4. Get Common Applications Analytics
 export async function getCommonApplicationsAnalytics() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -670,6 +688,8 @@ export async function getCommonApplicationsAnalytics() {
 
 // 5. Get Department-wise Device Analytics
 export async function getDepartmentAnalytics() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -757,6 +777,8 @@ export async function getDepartmentAnalytics() {
 
 // 6. Get Overall Dashboard Summary
 export async function getDashboardSummary() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -854,6 +876,8 @@ export async function getDashboardSummary() {
 
 // 1. Employee Submission Progress
 export async function getEmployeeSubmissionProgress() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -905,6 +929,8 @@ export async function getEmployeeSubmissionProgress() {
 }
 
 export async function getDeviceComplianceOverview() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -1003,6 +1029,8 @@ export async function getDeviceComplianceOverview() {
 
 // 2. Security Hygiene Summary
 export async function getSecurityHygieneSummary() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -1134,6 +1162,8 @@ export async function getSecurityHygieneSummary() {
 
 // 4. Network & Connectivity Monitoring
 export async function getNetworkConnectivityMonitoring() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -1229,6 +1259,8 @@ export async function getNetworkConnectivityMonitoring() {
 
 // Export functionality
 export async function exportDashboardData(reportType, filters = {}) {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
 
@@ -1338,6 +1370,8 @@ export async function exportDashboardData(reportType, filters = {}) {
 
 // work application total user and total install usage
 export async function workApplications() {
+  const refusal = await featureRefusal("devices");
+  if (refusal) return refusal;
   try {
     await connect();
     const result = await DeviceModel.aggregate([

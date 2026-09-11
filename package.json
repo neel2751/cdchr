@@ -18,7 +18,9 @@
     "e2e:ui": "playwright test --ui",
     "e2e:seed": "MONGO_DB_URL=\"mongodb://127.0.0.1:27017/cdchr_dev?replicaSet=rs0\" node --import ./scripts/lib/alias-loader.mjs scripts/seed-dev-fixtures.mjs",
     "audit:duplicate-emails": "node scripts/find-duplicate-emails.mjs",
-    "audit:smtp": "node scripts/audit-smtp-accounts.mjs"
+    "audit:smtp": "node scripts/audit-smtp-accounts.mjs",
+    "audit:feature-guards": "node scripts/audit-feature-guards.mjs",
+    "audit:features": "node --import ./scripts/lib/alias-loader.mjs scripts/audit-features.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

@@ -1,14 +1,24 @@
 "use client";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import React, { useEffect } from "react";
-import { signIn, useSession } from "next-auth/react";
+
+import React, { Suspense, useEffect } from "react";
+import { signIn, useSession, SessionProvider } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import Image from "next/image";
+import { AlertTriangle, LifeBuoy, Loader2, ShieldCheck } from "lucide-react";
+
 import { GlobalForm } from "@/components/form/form";
 import { CopyCode } from "@/components/clipboard";
 import { describeLoginError } from "@/lib/authErrors";
 import { toSafeRelativePath } from "@/lib/roleHome";
+
+// Platform fallbacks, used when the host resolves to no tenant. They mirror
+// resolveBranding() in lib/tenant.js so the page looks the same either way.
+const DEFAULT_BRANDING = {
+  appName: "HR Management",
+  logoUrl: "/images/Interiorlogo.svg",
+  loginBackgroundUrl: "",
+  supportEmail: "",
+};
 
 export const LOGINFIELD = [
   {
@@ -43,10 +53,42 @@ export const LOGINFIELD = [
   },
 ];
 
-export const LoginUi = () => {
+/**
+ * Client shell for the sign-in page.
+ *
+ * The Suspense boundary has to sit outside LoginUi because that component reads
+ * useSearchParams(), which suspends during prerender.
+ */
+export default function LoginScreen(props) {
+  return (
+    <SessionProvider>
+      <Suspense fallback={<LoginSkeleton />}>
+        <LoginUi {...props} />
+      </Suspense>
+    </SessionProvider>
+  );
+}
+
+function LoginSkeleton() {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <Loader2 className="text-muted-foreground size-6 animate-spin" />
+    </div>
+  );
+}
+
+export const LoginUi = ({
+  branding,
+  companyName = "",
+  unusable = false,
+  showSignup = true,
+  rootDomain = "",
+}) => {
+  const brand = { ...DEFAULT_BRANDING, ...(branding || {}) };
+
   const searchParams = useSearchParams();
   const callback = searchParams.get("callbackUrl");
-  const { status, data: session } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
   const [isLoading, setIsLoading] = React.useState(false);
   const [unauthorizedId, setUnauthorizedId] = React.useState(""); // State to store the ID
@@ -65,14 +107,6 @@ export const LoginUi = () => {
     }
   }, [session]);
 
-  // useEffect(() => {
-  //   if (status === "authenticated") {
-  //     if (window.location.href !== callBackcheck) {
-  //       window.location.href = callBackcheck;
-  //     }
-  //   }
-  // }, [status, callBackcheck]);
-
   const handleSubmit = async (data) => {
     if (typeof window !== "undefined") {
       const fingerprintjs = await import("@fingerprintjs/fingerprintjs");
@@ -80,8 +114,6 @@ export const LoginUi = () => {
       const { visitorId: deviceId } = await fp.get();
 
       setIsLoading(true);
-      // add the artifical  delay to simulate the server response
-      // await new Promise((resolve) => setTimeout(resolve, 2000));
 
       try {
         const res = await signIn("credentials", {
@@ -114,73 +146,177 @@ export const LoginUi = () => {
   };
 
   return (
-    // <section className="sm:bg-[url('/images/login.png')] w-full h-screen bg-center bg-cover bg-white">
-    <div className="max-w-md mx-auto px-4 top-1/2 translate-y-1/2">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <Image
-              height={20}
-              width={20}
-              className="h-10 w-10"
-              // src="/images/cdc.svg"
-              // src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-              src="/images/Interiorlogo.svg"
-              alt="CDC"
+    <div className="min-h-screen lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+      <BrandPanel brand={brand} companyName={companyName} />
+
+      <main className="flex items-center justify-center px-4 py-10 sm:px-8">
+        <div className="w-full max-w-sm">
+          {/* The brand panel is desktop-only, so phones get the mark here. */}
+          <div className="mb-8 flex items-center gap-3 lg:hidden">
+            {/* A plain <img>, not next/image: a tenant's logo URL is arbitrary,
+                and next/image only accepts hosts listed in next.config.mjs,
+                which is fixed at build time. Same call as the sidebar. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={brand.logoUrl}
+              alt=""
+              className="h-9 w-9 rounded-md object-contain"
             />
-            <span className="text-gray-800 font-semibold text-lg whitespace-nowrap">
-              {/* Creative Design & Construction */}
-              Hr Management
-            </span>
+            <span className="text-lg font-semibold">{brand.appName}</span>
           </div>
-          <div className=" flex items-center text-xs text-gray-400 uppercase before:flex-[1_1_0%] before:border-t before:border-gray-200 before:me-6 after:flex-[1_1_0%] after:border-t after:border-gray-200 after:ms-6">
-            Login
-          </div>
-        </CardHeader>
-        <CardContent>
+
+          <header className="mb-8">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Welcome back
+            </h1>
+            <p className="text-muted-foreground mt-2 text-sm">
+              {companyName ? (
+                <>
+                  Sign in to{" "}
+                  <span className="text-foreground font-medium">
+                    {companyName}
+                  </span>
+                  .
+                </>
+              ) : (
+                "Sign in to continue to your workspace."
+              )}
+            </p>
+          </header>
+
+          {unusable && (
+            <div className="mb-6 flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <p className="text-amber-900">
+                <span className="font-medium">
+                  This workspace is not active.
+                </span>{" "}
+                You may not be able to reach it after signing in. Please contact
+                your administrator
+                {brand.supportEmail ? " or support" : ""}.
+              </p>
+            </div>
+          )}
+
           <GlobalForm
             fields={LOGINFIELD}
             onSubmit={handleSubmit}
             isLoading={isLoading}
-            btnName={"Login"}
+            btnName={"Sign in"}
           />
 
-          <div className="mt-3 text-right text-sm">
+          <div className="mt-4 text-right text-sm">
             <a
               href="/forgot-password"
-              className="text-indigo-600 hover:underline"
+              className="text-primary hover:underline"
             >
               Forgot password?
             </a>
           </div>
 
           {unauthorizedId && (
-            <div className="mt-6 p-4 bg-yellow-50 border border-yellow-400 rounded-md">
-              <p className="text-yellow-800 font-bold">UNAUTHORIZED DEVICE</p>
+            <div className="mt-6 rounded-md border border-yellow-400 bg-yellow-50 p-4">
+              <p className="font-bold text-yellow-800">UNAUTHORIZED DEVICE</p>
               <p className="text-sm text-yellow-700">Your Hardware ID is:</p>
 
-              {/* <div className="flex items-center gap-2 mt-2 bg-white p-2 border rounded font-mono text-blue-600"> */}
-              {/* <span className="flex-1 select-all">{unauthorizedId}</span> */}
-              {/* <Button
-                  variant={"icon"}
-                  onClick={() => navigator.clipboard.writeText(unauthorizedId)}
-                  className="bg-gray-200 px-2 py-1 text-xs rounded"
-                >
-                  Copy ID
-                </Button> */}
-
               <CopyCode code={unauthorizedId} />
-              {/* </div> */}
 
-              <p className="text-xs mt-3 text-gray-500 italic">
+              <p className="mt-3 text-xs text-gray-500 italic">
                 * Copy the ID and send it to the Super Admin via WhatsApp or
                 Email.
               </p>
             </div>
           )}
-        </CardContent>
-      </Card>
+
+          {showSignup && (
+            <div className="text-muted-foreground mt-6 border-t pt-6 text-center text-sm">
+              Don&apos;t have a company account?{" "}
+              <a href="/signup" className="text-primary hover:underline">
+                Create a workspace
+              </a>
+            </div>
+          )}
+
+          {brand.supportEmail && (
+            <p className="text-muted-foreground mt-6 flex items-center justify-center gap-1.5 text-xs">
+              <LifeBuoy className="size-3.5" />
+              Need help?{" "}
+              <a
+                href={`mailto:${brand.supportEmail}`}
+                className="text-primary hover:underline"
+              >
+                {brand.supportEmail}
+              </a>
+            </p>
+          )}
+        </div>
+      </main>
     </div>
-    // </section>
   );
 };
+
+/**
+ * The company's side of the page: its logo, its name, and its own background
+ * image when it has set one. Decorative and tall, so phones skip it entirely.
+ */
+function BrandPanel({ brand, companyName }) {
+  const hasImage = !!brand.loginBackgroundUrl;
+
+  return (
+    <aside className="relative hidden overflow-hidden bg-slate-900 p-12 text-slate-100 lg:flex lg:flex-col lg:justify-between">
+      {hasImage ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={brand.loginBackgroundUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          {/* Whatever the company uploads, the text on top has to stay
+              readable — hence a fixed scrim rather than trusting the image. */}
+          <div
+            aria-hidden
+            className="absolute inset-0 bg-slate-950/70"
+          />
+        </>
+      ) : (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-32 -left-24 h-96 w-96 rounded-full bg-indigo-500/25 blur-3xl"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-24 -bottom-32 h-96 w-96 rounded-full bg-sky-500/20 blur-3xl"
+          />
+        </>
+      )}
+
+      <div className="relative flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={brand.logoUrl}
+          alt=""
+          className="h-10 w-10 rounded-md bg-white/10 object-contain p-1"
+        />
+        <span className="text-lg font-semibold">{brand.appName}</span>
+      </div>
+
+      <div className="relative max-w-md">
+        <h2 className="text-4xl leading-tight font-semibold tracking-tight">
+          {companyName ? `${companyName}` : "Your team, all in one place."}
+        </h2>
+        <p className="mt-4 text-slate-300">
+          {companyName
+            ? "Attendance, leave, rotas and documents — all in one place."
+            : "Sign in to manage attendance, leave, rotas and documents."}
+        </p>
+      </div>
+
+      <p className="relative flex items-center gap-2 text-sm text-slate-400">
+        <ShieldCheck className="size-4" />
+        Your company&apos;s data is kept separate and private.
+      </p>
+    </aside>
+  );
+}

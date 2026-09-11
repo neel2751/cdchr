@@ -53,8 +53,18 @@ const EmployeTabel = () => {
 
   return (
     <>
-      <Table>
-        <TableHeader>
+      {/* The table gets its own scroll viewport rather than pushing the page
+          wide: eleven columns do not fit a laptop screen, and scrolling the
+          whole page moved the filters and the header off-screen to read a
+          column. Vertical scrolling is capped too, so the pagination controls
+          stay reachable without scrolling past every row. */}
+      <Table containerClassName="max-h-[calc(100vh-22rem)] min-h-[12rem] overflow-auto rounded-md border">
+        {/* z-[1] deliberately, NOT z-10: the sidebar is `fixed inset-y-0 z-10`
+            (components/ui/sidebar.jsx) and the main content paints after it, so
+            anything here at z-10 wins the tie and covers the sidebar. This only
+            ever needs to stack above the table's own rows, which set no z-index
+            at all. */}
+        <TableHeader className="sticky top-0 z-[1] bg-background shadow-[inset_0_-1px_0_var(--color-border)]">
           <TableRow>
             {[
               "name",
@@ -69,7 +79,10 @@ const EmployeTabel = () => {
               "visa",
               "Actions",
             ].map((item, index) => (
-              <TableHead className="uppercase text-xs" key={index}>
+              <TableHead
+                className="uppercase text-xs whitespace-nowrap"
+                key={index}
+              >
                 {item}
               </TableHead>
             ))}

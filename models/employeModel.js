@@ -171,6 +171,11 @@ const employeSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Web Push endpoint for this employee's browser, saved when they allow
+    // notifications. Mirrors the field of the same name on OfficeEmploye — the
+    // two were only ever separate because push was built for the office app
+    // first. Cleared when the endpoint stops being accepted (410/404).
+    pushSubscription: { type: Object, required: false, default: null },
   },
   { timestamps: true }
 );

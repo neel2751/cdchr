@@ -7,15 +7,22 @@ import MediaModel from "@/models/document/mediaModel";
 import DocumentModel from "@/models/document/documentModel";
 import ExpenseModel from "@/models/expense/expenseModel";
 import { getServerSideProps } from "../session/session";
+import { featureRefusal } from "@/lib/requireFeature";
 
 const STATUSES = ["active", "archived", "deleted"];
 const SOURCES = ["media", "document", "expense"];
 
-// Reject anyone who is not a super admin. Returns the user when authorized.
+// Reject anyone who is not a super admin, or whose company's plan excludes the
+// documents module. Returns the user when authorized.
+//
+// The plan is checked first: a super admin passes every role test, so without
+// it they would keep full access to a module their company does not have. Every
+// export in this file goes through here, which is why one edit covers them all.
 async function requireSuperAdmin() {
   const { props } = await getServerSideProps();
   const user = props?.session?.user;
   if (user?.role !== "superAdmin") return null;
+  if (await featureRefusal("documents")) return null;
   return user;
 }
 

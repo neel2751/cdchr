@@ -3,12 +3,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Building2, Check, Globe, Palette } from "lucide-react";
+import { Building2, Check, Globe, Palette, SlidersHorizontal } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BrandingForm from "./brandingForm";
 import DomainsPanel from "./domainsPanel";
+import PlanPanel from "./planPanel";
 
 /**
  * Settings for every company this account owns.
@@ -18,7 +19,12 @@ import DomainsPanel from "./domainsPanel";
  * company: an owner setting up a domain for each of three businesses should not
  * have to switch the whole app three times.
  */
-const SettingsClient = ({ companies, activeTenantId, platformRootDomain }) => {
+const SettingsClient = ({
+  companies,
+  activeTenantId,
+  platformRootDomain,
+  supportEmail,
+}) => {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selectedId, setSelectedId] = useState(
@@ -53,8 +59,8 @@ const SettingsClient = ({ companies, activeTenantId, platformRootDomain }) => {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {multi
-            ? `Branding and web address for each of your ${companies.length} companies. Each one has its own domain.`
-            : `Branding and web address for ${selected.name}.`}
+            ? `Branding, web address and plan for each of your ${companies.length} companies. Each one has its own domain.`
+            : `Branding, web address and plan for ${selected.name}.`}
         </p>
       </div>
 
@@ -121,6 +127,12 @@ const SettingsClient = ({ companies, activeTenantId, platformRootDomain }) => {
                 <Globe className="size-4" />
                 Domains
               </TabsTrigger>
+              {/* The only surface where a module the company does not have is
+                  visible at all. Everywhere operational hides them. */}
+              <TabsTrigger value="plan" className="gap-2">
+                <SlidersHorizontal className="size-4" />
+                Plan
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="branding">
@@ -138,6 +150,11 @@ const SettingsClient = ({ companies, activeTenantId, platformRootDomain }) => {
                 run={run}
                 isPending={isPending}
               />
+            </TabsContent>
+
+            <TabsContent value="plan">
+              {/* No `run` — nothing here writes. */}
+              <PlanPanel tenant={selected} supportEmail={supportEmail} />
             </TabsContent>
           </Tabs>
         </div>

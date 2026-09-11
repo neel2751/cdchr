@@ -20,6 +20,9 @@ import {
   Archive,
   UserX,
   Settings,
+  Megaphone,
+  Receipt,
+  Mail,
 } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Collapsible } from "../ui/collapsible";
@@ -49,6 +52,9 @@ const ICON_MAP = {
   Archive: Archive,
   UserX: UserX,
   Settings: Settings,
+  Megaphone: Megaphone,
+  Receipt: Receipt,
+  Mail: Mail,
 };
 
 export default function SideBarMenuCom({ menuItems, path }) {

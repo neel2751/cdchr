@@ -8,6 +8,7 @@ import EmailTest from "./emailTest";
 import EmailStatus from "./emailStatus";
 import Link from "next/link";
 import { encrypt } from "@/lib/algo";
+import { resolveSmtpHost } from "@/lib/smtp";
 
 export default function EmailTable({ newData, onEdit, queryKey }) {
   const tableHead = [
@@ -29,7 +30,9 @@ export default function EmailTable({ newData, onEdit, queryKey }) {
           {newData?.length > 0 ? (
             newData.map((item, index) => (
               <TableRow key={index}>
-                <TableCell>{item.host}</TableCell>
+                {/* Showed the literal "other" for every custom SMTP account,
+                    hiding the hostname actually in use. */}
+                <TableCell>{resolveSmtpHost(item) || "—"}</TableCell>
                 <TableCell>{item.port}</TableCell>
                 <TableCell>{item.fromName}</TableCell>
                 <TableCell>
@@ -48,7 +51,9 @@ export default function EmailTable({ newData, onEdit, queryKey }) {
                   )}
                 </TableCell>
                 <TableCell>
-                  {item?.password ? (
+                  {/* The password itself is deliberately not sent to the
+                      browser — getAllSMTPsAdvance returns this flag instead. */}
+                  {item?.hasPassword ? (
                     <Badge
                       variant="secondary"
                       className={"bg-green-100 text-green-800"}

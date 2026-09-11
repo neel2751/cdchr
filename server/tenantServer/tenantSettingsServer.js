@@ -106,6 +106,12 @@ function serializeTenant(tenant) {
     branding: resolveBranding(tenant),
     // What is actually stored, so the form can tell "unset" from "default".
     storedBranding: tenant.branding || {},
+    // Read-only here. The Plan tab tells a company which modules they have and
+    // which they do not; only the platform console can change them. Sent raw so
+    // isFeatureEnabled applies its absent-means-enabled rule on the client
+    // exactly as it does everywhere else.
+    features: tenant.features || {},
+    plan: tenant.billing?.plan || "",
     domains: (tenant.domains || []).map((d) => ({
       host: d.host,
       isPrimary: !!d.isPrimary,
@@ -150,6 +156,9 @@ export async function getMyCompanySettings() {
       data: JSON.stringify({
         activeTenantId: user.tenantId || null,
         platformRootDomain: process.env.PLATFORM_ROOT_DOMAIN || "",
+        // Empty when unset, which the Plan tab renders as plain text instead of
+        // a mailto link.
+        supportEmail: process.env.PLATFORM_SUPPORT_EMAIL || "",
         companies: tenants.filter(isTenantUsable).map(serializeTenant),
       }),
     };

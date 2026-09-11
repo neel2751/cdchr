@@ -20,13 +20,15 @@ const EmailForm = ({
     <Dialog open={showDialog} onOpenChange={setShowDialog}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
+          {/* Was "Edit / New Leave Request" — copy-pasted from the leave form
+              and never changed, on the dialog for adding an SMTP sender. */}
           <DialogTitle>
-            {isEdit ? "Edit Leave Request" : "New Leave Request"}
+            {isEdit ? "Edit email account" : "Add email account"}
           </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update the details below to edit the leave request."
-              : "Please fill in the form below to submit a leave request."}
+              ? "Update the SMTP details this company sends email through."
+              : "Add an SMTP sender for this company to send email through."}
           </DialogDescription>
         </DialogHeader>
         <GlobalForm

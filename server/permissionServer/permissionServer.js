@@ -162,13 +162,19 @@ export async function checkPermission(data) {
     const user = await RoleBasedModel.findOne({
       employeeId: employeeId,
     });
+    // A user with no role row simply holds no permissions. This used to read
+    // `user.permissions` unguarded, throwing into the catch below — which
+    // returned the same "denied" answer but logged an error on every call and
+    // made a real failure indistinguishable from an ordinary unprivileged user.
     return {
       success: true,
       message: "Permission fetched successfully",
-      data: user.permissions.includes(permission),
+      data: !!user?.permissions?.includes(permission),
     };
   } catch (error) {
     console.log(" Error in checkPermission function", error);
-    return { success: false, message: "Error fetching permission" };
+    // Denied on failure: this gates data, so an unreadable answer must not read
+    // as a grant.
+    return { success: false, message: "Error fetching permission", data: false };
   }
 }

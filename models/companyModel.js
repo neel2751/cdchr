@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { FEATURE_KEYS } from "@/data/features";
 
 /**
  * A company is the tenant boundary for the platform.
@@ -65,17 +66,14 @@ const brandingSchema = new mongoose.Schema(
 
 // Plan gating. Every flag defaults to true so enabling multi-tenancy never
 // takes a module away from the existing business.
+//
+// Built from data/features.js rather than listed here, so a module added to the
+// registry is storable without a second edit — a key the UI could switch but the
+// schema would silently drop was the failure this replaces.
 const featuresSchema = new mongoose.Schema(
-  {
-    crm: { type: Boolean, default: true },
-    expenses: { type: Boolean, default: true },
-    visitors: { type: Boolean, default: true },
-    siteProjects: { type: Boolean, default: true },
-    documents: { type: Boolean, default: true },
-    devices: { type: Boolean, default: true },
-    ai: { type: Boolean, default: true },
-    announcements: { type: Boolean, default: true },
-  },
+  Object.fromEntries(
+    FEATURE_KEYS.map((key) => [key, { type: Boolean, default: true }])
+  ),
   { _id: false }
 );
 

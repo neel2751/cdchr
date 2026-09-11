@@ -162,7 +162,7 @@ const SiteAssign = ({ searchParams }) => {
         <Card>
           <CardHeader>
             <div className="mb-4">
-              <CardTitle>Site Assign</CardTitle>
+              <CardTitle>Site Managers</CardTitle>
             </div>
             <div className="flex items-center justify-between">
               <SearchDebounce />

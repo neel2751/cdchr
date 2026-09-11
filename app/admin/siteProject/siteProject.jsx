@@ -132,7 +132,7 @@ const SiteProject = ({ searchParams }) => {
           <Card>
             <CardHeader>
               <div className="mb-4">
-                <CardTitle> Site Project</CardTitle>
+                <CardTitle>Project Sites</CardTitle>
               </div>
               <div className="flex items-center justify-between">
                 <SearchDebounce />

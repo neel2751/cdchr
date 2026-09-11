@@ -7,6 +7,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import SidebarWrapper from "@/components/sidebar/sidebarWrapper";
 import SupportBanner from "@/components/supportBanner";
+import AnnouncementBanner from "@/components/announcementBanner";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -29,6 +30,9 @@ const AdminProviders = ({ children, branding }) => {
           <NuqsAdapter>
             {/* Renders only during a support visit, above everything else. */}
             <SupportBanner />
+            {/* Urgent announcements, on every admin page. Below the support
+                banner: which company you are looking at outranks its news. */}
+            <AnnouncementBanner />
             <SidebarWrapper>{children}</SidebarWrapper>
           </NuqsAdapter>
         </BrandingContext.Provider>

@@ -1,9 +1,16 @@
 "use server";
 import { connect } from "@/db/db";
 import ProjectSiteModel from "@/models/siteProjectModel";
+import { featureRefusal } from "@/lib/requireFeature";
+
+// Every export here is a POST endpoint. proxy.js keeps a company without the
+// module off /admin/siteProject, but that is navigation only — these were
+// callable directly regardless of plan, so the check is repeated in each one.
 
 // # THIS IS THE WORKING ON THE NEW VERSION
 export const searchSiteProjectByKeywordNew = async (filterData) => {
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
     // const searchRegex = new RegExp(sanitizedSearch, "i"); // Create a case-ins ensitive regex
@@ -57,6 +64,8 @@ export const searchSiteProjectByKeywordNew = async (filterData) => {
 
 // # UPDATE A SPECIFIC SITE PROJECT INFORMATION BY ID
 export const updateSiteProjectById = async (data, id) => {
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     await connect();
     if (id) {
@@ -83,6 +92,8 @@ export const updateSiteProjectById = async (data, id) => {
 export const getSiteById = async (siteId) => {
   console.log("Site Id", siteId);
   if (!siteId) return { success: false, message: "Site Id is required." };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     // const response = await ProjectSiteModel.findOne({where:{id: siteId}}).populate('users');
     const response = await ProjectSiteModel.findOne({ _id: siteId });
@@ -97,6 +108,8 @@ export const getSiteById = async (siteId) => {
 
 export const siteProjectStatus = async (data) => {
   if (!data) return { success: false, message: "Not found" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const id = data?.id;
     const isActive = !data?.status;
@@ -117,6 +130,8 @@ export const siteProjectStatus = async (data) => {
 
 export const siteProjectDelete = async (data) => {
   if (!data) return { success: false, message: "Not found" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const id = data?.id;
     const isActive = false;

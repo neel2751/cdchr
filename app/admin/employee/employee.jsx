@@ -287,7 +287,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
             <CardHeader>
               <div className="mb-4">
                 <CardTitle>
-                  {isPrevious ? "Previous Employees" : "Employee List"}
+                  {isPrevious ? "Previous Site Employees" : "Site Employees"}
                 </CardTitle>
               </div>
               <div className="flex items-center justify-between">

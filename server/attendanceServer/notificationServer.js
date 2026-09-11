@@ -3,6 +3,7 @@
 import webpush from "web-push";
 import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import EmployeModel from "@/models/employeModel";
 
 webpush.setVapidDetails(
   "mailto:neel@cdc.construction",
@@ -10,13 +11,26 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
+/**
+ * Store a browser's push endpoint against whoever subscribed.
+ *
+ * Tries the office collection first and falls back to field staff: the two are
+ * separate collections with independent id spaces, and the caller is a browser
+ * that only knows its own user id. Writing blind to OfficeEmploye — which is
+ * what this did — silently discarded every field employee's subscription.
+ */
 export async function saveSubscription(userId, subscription) {
   try {
     await connect();
-    await OfficeEmployeeModel.findByIdAndUpdate(userId, {
+    const office = await OfficeEmployeeModel.findByIdAndUpdate(userId, {
       pushSubscription: subscription,
     });
-    return true;
+    if (office) return true;
+
+    const field = await EmployeModel.findByIdAndUpdate(userId, {
+      pushSubscription: subscription,
+    });
+    return !!field;
   } catch (error) {
     console.error("Error saving subscription:", error);
     return false;

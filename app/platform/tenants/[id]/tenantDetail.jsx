@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -32,6 +32,15 @@ import {
   Eye,
 } from "lucide-react";
 
+import {
+  FEATURES,
+  FEATURE_BY_KEY,
+  FEATURE_GROUPS,
+  FEATURE_PRESETS,
+  UNLINKED_FEATURE_KEYS,
+  featuresForPreset,
+} from "@/data/features";
+import { resolveFeatureDependencies } from "@/lib/tenantPlan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +69,7 @@ import {
   platformUpdateBranding,
   platformUpdateSlug,
   platformVerifyDomain,
+  getTenantModuleUsage,
   setTenantStatus,
   updateTenantPlan,
 } from "@/server/tenantServer/platformServer";
@@ -69,17 +79,6 @@ const STATUS_VARIANT = {
   trial: "secondary",
   suspended: "destructive",
   cancelled: "outline",
-};
-
-const FEATURE_LABELS = {
-  crm: "CRM",
-  expenses: "Expenses",
-  visitors: "Visitors",
-  siteProjects: "Site projects",
-  documents: "Documents",
-  devices: "Devices",
-  ai: "AI",
-  announcements: "Announcements",
 };
 
 const TenantDetail = ({ tenant }) => {
@@ -412,13 +411,46 @@ const PlanTab = ({ tenant, run, isPending }) => {
       ? Math.round(tenant.limits.maxStorageBytes / (1024 * 1024))
       : ""
   );
+  // Absent means on, matching isFeatureEnabled — a company whose document
+  // predates a flag must show the switch as enabled, not off.
   const [features, setFeatures] = useState(() => {
     const base = {};
-    for (const key of Object.keys(FEATURE_LABELS)) {
+    for (const { key } of FEATURES) {
       base[key] = tenant.features?.[key] !== false;
     }
     return base;
   });
+
+  // How many records each module holds, for the warning shown before a
+  // toggle-off. Loaded once; null until it arrives, which renders no warning
+  // rather than a reassuring "0".
+  const [usage, setUsage] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    getTenantModuleUsage(tenant._id).then((res) => {
+      if (cancelled || !res?.success) return;
+      try {
+        setUsage(JSON.parse(res.data));
+      } catch {
+        // A missing count is not worth breaking the tab over.
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant._id]);
+
+  // Which preset the current switches happen to match, so the buttons show
+  // where you are rather than only where you can go. Derived, never stored —
+  // editing a switch simply stops matching and the highlight clears.
+  const activePreset = useMemo(() => {
+    return (
+      FEATURE_PRESETS.find((preset) => {
+        const target = featuresForPreset(preset.key);
+        return FEATURES.every((f) => features[f.key] === target[f.key]);
+      })?.key || null
+    );
+  }, [features]);
 
   return (
     <Card>
@@ -464,24 +496,117 @@ const PlanTab = ({ tenant, run, isPending }) => {
           </div>
         </div>
 
-        <div>
-          <p className="mb-2 text-sm font-medium">Modules</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {Object.entries(FEATURE_LABELS).map(([key, label]) => (
-              <label
-                key={key}
-                className="flex items-center justify-between rounded-md border p-2.5 text-sm"
+        <div className="space-y-2">
+          <div>
+            <p className="text-sm font-medium">Start from a vertical</p>
+            <p className="text-xs text-muted-foreground">
+              Sets the switches below. Nothing is saved until you press Save
+              plan, and the preset itself is not stored — only the switches are.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {FEATURE_PRESETS.map((preset) => (
+              <Button
+                key={preset.key}
+                type="button"
+                size="sm"
+                variant={activePreset === preset.key ? "default" : "outline"}
+                title={preset.description}
+                onClick={() => setFeatures(featuresForPreset(preset.key))}
               >
-                <span>{label}</span>
-                <Switch
-                  checked={features[key]}
-                  onCheckedChange={(checked) =>
-                    setFeatures((f) => ({ ...f, [key]: checked }))
-                  }
-                />
-              </label>
+                {preset.label}
+              </Button>
             ))}
           </div>
+        </div>
+
+        <div className="space-y-4">
+          <p className="text-sm font-medium">Modules</p>
+          {FEATURE_GROUPS.map((group) => (
+            <div key={group} className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {group}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {FEATURES.filter((f) => f.group === group).map(
+                  ({ key, label, description, requires }) => {
+                    const blockedBy = (requires || []).filter(
+                      (r) => features[r] === false
+                    );
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-start justify-between gap-3 rounded-md border p-2.5 text-sm"
+                      >
+                        <span className="space-y-0.5">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            {label}
+                            {/* Switching this on will not make the module
+                                appear: its pages are gated but have no sidebar
+                                entry. Saying so here beats an operator toggling
+                                it and seeing nothing. */}
+                            {UNLINKED_FEATURE_KEYS.has(key) && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-normal"
+                              >
+                                no menu entry
+                              </Badge>
+                            )}
+                          </span>
+                          {/* What switching it off actually takes away. Without
+                              it the operator is guessing from a two-word label. */}
+                          <span className="block text-xs font-normal text-muted-foreground">
+                            {description}
+                          </span>
+                          {requires?.length > 0 && (
+                            <span className="block text-[11px] font-normal text-muted-foreground">
+                              Needs{" "}
+                              {requires
+                                .map((r) => FEATURE_BY_KEY[r]?.label || r)
+                                .join(", ")}
+                              {blockedBy.length > 0 && " — switched off with it"}
+                            </span>
+                          )}
+                          {/* Counted before the save, not after: "hidden, not
+                              deleted" is only reassuring if the number is
+                              visible while the decision is still reversible. */}
+                          {features[key] === false && usage?.[key] > 0 && (
+                            <span className="block text-[11px] font-normal text-amber-600 dark:text-amber-500">
+                              {usage[key].toLocaleString()} record
+                              {usage[key] === 1 ? "" : "s"} will be hidden, not
+                              deleted
+                            </span>
+                          )}
+                        </span>
+                        <Switch
+                          checked={features[key]}
+                          // A dependent cannot be switched on while its
+                          // prerequisite is off — the server would refuse it
+                          // anyway, and a switch that springs back is worse
+                          // than one that will not move.
+                          disabled={blockedBy.length > 0}
+                          onCheckedChange={(checked) =>
+                            setFeatures((f) =>
+                              resolveFeatureDependencies({
+                                ...f,
+                                [key]: checked,
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                    );
+                  }
+                )}
+              </div>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            Attendance, office staff, departments, permissions, audit logs,
+            company settings and email are always included and cannot be
+            switched off.
+          </p>
         </div>
 
         <Button

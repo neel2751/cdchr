@@ -1,9 +1,23 @@
 "use server";
 import { connect } from "@/db/db";
 import OfficeUserModel from "@/models/officeModel";
+import { featureRefusal } from "@/lib/requireFeature";
 
+/**
+ * Trusted devices for the reception desk.
+ *
+ * Gated by `reception`, NOT by `devices`, despite the filename. These actions
+ * back app/admin/reception/components/deviceManagement.jsx — the list of tablets
+ * allowed to run the front desk. The `devices` module is the separate device
+ * inventory behind /admin/device (server/deviceServer/deviceServer.js).
+ *
+ * Gating these under `devices` would break the reception desk for any company
+ * that has reception but not the inventory module.
+ */
 export async function addDevice(data) {
   const { userId, deviceId, deviceName } = data;
+  const refusal = await featureRefusal("reception");
+  if (refusal) return refusal;
 
   try {
     await connect();
@@ -48,6 +62,8 @@ export async function addDevice(data) {
 
 export async function revokeDevice(data) {
   const { userId, deviceId } = data;
+  const refusal = await featureRefusal("reception");
+  if (refusal) return refusal;
 
   try {
     await connect();
@@ -76,6 +92,8 @@ export async function revokeDevice(data) {
 
 export async function toggleDeviceLock(data) {
   const { userId, isEnabled } = data;
+  const refusal = await featureRefusal("reception");
+  if (refusal) return refusal;
   await connect();
   await OfficeUserModel.findByIdAndUpdate(userId, {
     enforceDeviceLock: isEnabled,
@@ -121,6 +139,11 @@ export async function toggleDeviceLock(data) {
 //   }
 // }
 
+// Deliberately NOT plan-gated. This is the device-trust check itself, called
+// from /api/reception/verify-device while a session may not yet exist —
+// featureRefusal answers "allowed" without one, so a gate here would look like
+// enforcement while doing nothing. The screens that manage the trusted-device
+// list are gated above, which is where the decision actually belongs.
 export async function verifyDevice(data) {
   const { userId, deviceId } = data;
 

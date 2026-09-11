@@ -6,12 +6,16 @@ import { getDashboardDataServer } from "@/utils/dashData";
 import TodayCard from "./components/todayCard";
 import Overview from "./components/overview";
 import RecentData from "./components/recentData";
+import AnnouncementsCard from "./components/announcementsCard";
+import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 
 const Dash = () => {
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardDataServer,
   });
+
+  const { has } = useTenantFeatures();
 
   const mergeData = useMemo(() => {
     if (!data) return [];
@@ -22,20 +26,23 @@ const Dash = () => {
           label: "All Employee Summary",
           value: JSON.parse(data.NumberOfficeEmployeeData?.data ?? "null"),
         },
-        {
+        // Both of these count things a company without the module does not
+        // have. Left in, they read as a real zero — "0 sites" invites someone
+        // to go looking for the sites screen that their plan does not include.
+        has("siteEmployees") && {
           label: "Immigrant Employee Summary",
           value: JSON.parse(data.NumberOfEmployeeData?.data ?? "null"),
         },
-        {
+        has("siteProjects") && {
           label: "Total Site",
           value: JSON.parse(data.NumbertotalFullSiteData?.data ?? "null"),
         },
-      ];
+      ].filter(Boolean);
     } catch (e) {
       console.log("Failed to parse dashboard data:", e);
       return [];
     }
-  }, [data]);
+  }, [data, has]);
 
   const today = useMemo(() => {
     if (!data?.CurrentDayTotalPay) return null;
@@ -53,6 +60,12 @@ const Dash = () => {
     <>
       {/* Office Employee Data */}
       {mergeData && <DashCount memoizedEmployeeData={mergeData} />}
+
+      {/* Renders nothing when there are no announcements, so it costs the
+          dashboard no space until a company starts using the feature. */}
+      <div className="sm:px-8 px-4 pb-4">
+        <AnnouncementsCard />
+      </div>
 
       {/* <div className="sm:px-8 px-4 py-4 lg:flex gap-x-8 w-full">
         <div className="flex flex-col lg:w-1/2 gap-8">

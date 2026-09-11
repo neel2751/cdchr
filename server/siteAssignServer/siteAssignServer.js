@@ -6,10 +6,17 @@ import { connect } from "@/db/db";
 import { getServerSideProps } from "../session/session";
 import { createObjectId } from "@/lib/mongodb";
 import { checkPermission } from "../permissionServer/permissionServer";
+import { featureRefusal } from "@/lib/requireFeature";
+
+// Site managers belong to the site projects module — see data/features.js. The
+// plan check is repeated per action because each is a directly callable POST
+// endpoint, not because proxy.js is unreliable.
 
 export async function getAllSiteAssign(filterData) {
   if (!filterData)
     return { success: false, message: "No filter data provided" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
@@ -33,16 +40,27 @@ export async function getAllSiteAssign(filterData) {
       permission: "/admin/siteAssign",
     });
 
-    // we have to check if the user is admin or superAdmin they can see all the data
-    if (role !== "admin" && role !== "superAdmin" && !permission?.data) {
-      // If the user is not admin or superAdmin, filter by employeeId
-      // This means they can only see their own assigned sites
+    /**
+     * Who may see every site manager assignment, rather than only their own.
+     *
+     * Previously `role === "admin"` alone was enough, which made the
+     * /admin/siteAssign permission decorative for admins: granting it changed
+     * nothing and withholding it prevented nothing. Now it is superAdmin (who
+     * holds everything by definition) or an explicit grant.
+     *
+     * Everyone else is narrowed to the rows naming them, so the page is not
+     * empty for a manager who does have a site — it just is not a directory of
+     * everybody else's.
+     */
+    const canSeeAll = role === "superAdmin" || !!permission?.data;
+
+    if (!canSeeAll) {
       query.roleId = createObjectId(employeeId);
       // query.isActive = true; // Ensure we only get active assignments
     }
 
-    // If the user is admin or superAdmin, they can filter by search query
-    if (role === "admin" || role === "superAdmin" || permission?.data) {
+    // Only a caller seeing the whole list has anything to search through.
+    if (canSeeAll) {
       // If a search query is provided, add it to the query object
       // The search query will match role name, site name, site address, and site type
       if (sanitizedSearch || sanitizedSearch.length < 3)
@@ -145,6 +163,8 @@ export async function getAllSiteAssign(filterData) {
 
 export async function handleSiteAssignManager(data, id) {
   if (!data) return { success: false, message: "No data provided" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     // check if employed id and  site id exists in database with status true and delete false to already assigned error
     const proId = data?.projectSiteID;
@@ -289,6 +309,8 @@ const isSiteandNameisExists = async (id, projectSiteID, roleId) => {
 
 export const handleSiteAssignManagerStatus = async (data) => {
   if (!data) return { success: false, message: "Not found" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const id = data?.id;
     const isActive = !data?.status;
@@ -305,6 +327,8 @@ export const handleSiteAssignManagerStatus = async (data) => {
 
 export const handleSiteAssignManagerDelete = async (data) => {
   if (!data) return { success: false, message: "Not found" };
+  const refusal = await featureRefusal("siteProjects");
+  if (refusal) return refusal;
   try {
     const id = data?.id;
     const isActive = false;

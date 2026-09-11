@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import QRCode from "qrcode";
 import { makeSocketAuth, tenantRoom } from "./lib/socketAuth.js";
+import { registerSocketServer } from "./lib/realtime.js";
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
 const port = 3000;
@@ -67,6 +68,11 @@ app.prepare().then(() => {
 
   // Every connection must carry a valid session cookie and belong to a company.
   io.use(makeSocketAuth(AUTH_SECRET));
+
+  // Hand the server to the app. Next runs in this process but cannot import
+  // from here, so lib/realtime.js reads it back off globalThis — that is what
+  // lets a server action (publishing an announcement, say) push to clients.
+  registerSocketServer(io);
 
   const activeEmployees = new Map(); // employeeId -> { count, interval, socketId }
   const completedEmployees = new Set(); // employeeIds that reached the limit
@@ -294,6 +300,7 @@ app.prepare().then(() => {
     console.log("> Ready on http://localhost:" + port);
     warmDatabaseConnection(port);
     scheduleVisaReminders(port);
+    scheduleAnnouncements(port);
   });
 });
 
@@ -372,4 +379,44 @@ function scheduleVisaReminders(serverPort) {
   console.log(
     `[visa-cron] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
+}
+
+// Publishes scheduled announcements. Same shape as the visa job, but on a short
+// interval rather than a daily slot: "publish at 09:00" has to mean 09:00, and
+// the widest it can be wrong by is one tick.
+function scheduleAnnouncements(serverPort) {
+  const EVERY_MS = 5 * 60 * 1000;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) return; // logged once below, not every tick
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/announcements`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      // Quiet when there was nothing to do — this runs 288 times a day.
+      if (json?.results?.published || json?.results?.failed) {
+        console.log("[announcement-cron] run complete:", JSON.stringify(json));
+      }
+    } catch (err) {
+      console.error("[announcement-cron] run failed:", err?.message);
+    }
+  };
+
+  if (!process.env.CRON_SECRET) {
+    console.log("[announcement-cron] CRON_SECRET not set; scheduled publishing is off");
+    return;
+  }
+
+  // Offset from startup so it does not collide with the warm-up request.
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, EVERY_MS);
+  }, 30 * 1000);
+
+  console.log("[announcement-cron] scheduled; runs every 5 min");
 }
