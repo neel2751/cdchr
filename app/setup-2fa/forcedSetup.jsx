@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Loader2, ShieldCheck, Copy } from "lucide-react";
 import { toast } from "sonner";
+import BackupCodes from "@/components/2FA/BackupCodes";
 
 export default function ForcedTwoFactorSetup() {
   const { update } = useSession();
@@ -21,6 +22,7 @@ export default function ForcedTwoFactorSetup() {
   const [qrCodeUrl, setQrCodeUrl] = useState("");
   const [code, setCode] = useState("");
   const [loadingQr, setLoadingQr] = useState(true);
+  const [backupCodes, setBackupCodes] = useState(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -51,21 +53,54 @@ export default function ForcedTwoFactorSetup() {
       const res = await enable2FA(code, secret);
       if (res?.success) {
         toast.success("Two-factor authentication enabled");
-        // Wait for the updated JWT cookie, then do a full-page navigation so
-        // middleware re-evaluates with mustSetup2FA cleared (a client-side
-        // push can run before the cookie propagates and bounce back here).
-        await update({ twoFactorSetupComplete: true });
-        window.location.assign("/admin/dashboard");
+        // Hand over the recovery codes before letting them through: this is the
+        // only moment the codes exist in plaintext, and they are what rescues
+        // the account if the authenticator app is ever uninstalled.
+        setBackupCodes(res.backupCodes || []);
       } else {
         toast.error(res?.message || "Invalid code, please try again");
       }
     });
   };
 
+  const finishSetup = async () => {
+    // Wait for the updated JWT cookie, then do a full-page navigation so
+    // middleware re-evaluates with mustSetup2FA cleared (a client-side
+    // push can run before the cookie propagates and bounce back here).
+    await update({ twoFactorSetupComplete: true });
+    window.location.assign("/admin/dashboard");
+  };
+
   const copySecret = () => {
     navigator.clipboard.writeText(secret);
     toast.success("Secret key copied");
   };
+
+  if (backupCodes) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              <CardTitle>Save your recovery codes</CardTitle>
+            </div>
+            <CardDescription>
+              Two-factor authentication is on. These codes let you sign in if you
+              ever lose access to your authenticator app.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BackupCodes
+              codes={backupCodes}
+              onDone={finishSetup}
+              doneLabel="Continue to dashboard"
+            />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">

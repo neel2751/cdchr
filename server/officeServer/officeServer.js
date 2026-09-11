@@ -336,6 +336,47 @@ export const getOfficeEmployee = async (filterData) => {
                 as: "visaReminders",
               },
             },
+            // Current 2FA enrolment, so a super admin can see who is protected
+            // and who has recovery codes left before deciding to reset anyone.
+            {
+              $lookup: {
+                from: "twofas",
+                let: { empId: "$_id" },
+                pipeline: [
+                  { $match: { $expr: { $eq: ["$employeeId", "$$empId"] } } },
+                  {
+                    $project: {
+                      _id: 0,
+                      isEnabled: 1,
+                      backupCodesRemaining: {
+                        $size: {
+                          $filter: {
+                            input: { $ifNull: ["$backupCodes", []] },
+                            as: "c",
+                            cond: { $eq: ["$$c.usedAt", null] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+                as: "twoFactor",
+              },
+            },
+            {
+              $addFields: {
+                twoFactorEnabled: {
+                  $ifNull: [{ $arrayElemAt: ["$twoFactor.isEnabled", 0] }, false],
+                },
+                twoFactorBackupCodes: {
+                  $ifNull: [
+                    { $arrayElemAt: ["$twoFactor.backupCodesRemaining", 0] },
+                    0,
+                  ],
+                },
+              },
+            },
+            { $unset: "twoFactor" },
           ],
         },
       },

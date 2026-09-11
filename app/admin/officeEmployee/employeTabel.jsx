@@ -18,6 +18,8 @@ import {
   KeyRound,
   Lock,
   ShieldAlert,
+  ShieldOff,
+  ShieldCheck,
 } from "lucide-react";
 import React from "react";
 import { useSession } from "next-auth/react";
@@ -45,6 +47,7 @@ const EmployeTabel = () => {
     isSendingReminder,
     onResetPassword,
     onLockdown,
+    onReset2FA,
   } = useCommonContext();
 
   const { data: session } = useSession();
@@ -141,6 +144,21 @@ const EmployeTabel = () => {
                       }
                     >
                       <Lock className="h-3 w-3" /> Locked
+                    </Badge>
+                  )}
+                  {item?.twoFactorEnabled && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1"
+                      title={`2FA enabled — ${
+                        item?.twoFactorBackupCodes ?? 0
+                      } unused recovery code(s)`}
+                    >
+                      <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                      2FA
+                      {(item?.twoFactorBackupCodes ?? 0) === 0 && (
+                        <span className="text-rose-600">·0</span>
+                      )}
                     </Badge>
                   )}
                 </div>
@@ -240,6 +258,18 @@ const EmployeTabel = () => {
                       <KeyRound className="text-amber-600" />
                     </Button>
                   )}
+                  {isSuperAdmin &&
+                    item?.twoFactorEnabled &&
+                    String(item?._id) !== String(currentUserId) && (
+                      <Button
+                        onClick={() => onReset2FA?.(item)}
+                        variant="outline"
+                        size="icon"
+                        title="Reset 2FA (user lost their authenticator app and recovery codes)"
+                      >
+                        <ShieldOff className="text-amber-600" />
+                      </Button>
+                    )}
                   {isSuperAdmin &&
                     String(item?._id) !== String(currentUserId) &&
                     item?.isActive && (
