@@ -23,10 +23,22 @@ const UNITED_KINGDOM = "United Kingdom";
  * Bank details are left untouched when the payload has none of those fields —
  * a user without the bank permission never sees them, so an edit from them
  * must not wipe what is stored.
+ *
+ * The right-to-work history is dropped: the edit form is seeded from the list
+ * row, so it round-trips those keys, and only recordRightToWorkCheck() may
+ * append to an append-only log.
  */
 const buildOfficeEmployeePayload = (data) => {
-  const { accountName, bankName, accountNumber, sortCode, country, ...rest } =
-    data;
+  const {
+    accountName,
+    bankName,
+    accountNumber,
+    sortCode,
+    country,
+    rightToWorkChecks,
+    lastRightToWorkCheckDate,
+    ...rest
+  } = data;
   const hasBankFields = accountName || bankName || accountNumber || sortCode;
   return {
     ...rest,

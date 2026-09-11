@@ -17,6 +17,7 @@ import {
   getMilestone,
   formatVisaRemaining,
 } from "@/lib/visaMilestones";
+import { getRightToWorkStatus } from "@/lib/rightToWork";
 import { getVisaReminderCount } from "@/server/visaServer/visaServer";
 
 /**
@@ -24,7 +25,10 @@ import { getVisaReminderCount } from "@/server/visaServer/visaServer";
  * the actual visa expiry date and the current milestone, and lets the admin
  * opt to send a copy to HR for the record.
  *
- * @param {{ target: {employeeId,employeeType,name,visaEndDate}|null,
+ * Also shows when right to work was last checked: the visa expiry is what
+ * prompts HR to run the next check, so the two belong in the same view.
+ *
+ * @param {{ target: {employeeId,employeeType,name,visaEndDate,immigrationType,checks}|null,
  *           onOpenChange: (open:boolean)=>void,
  *           onConfirm: (ccHr:boolean)=>void,
  *           isPending: boolean }} props
@@ -70,6 +74,11 @@ const VisaReminderDialog = ({ target, onOpenChange, onConfirm, isPending }) => {
   const remaining = target?.visaEndDate
     ? formatVisaRemaining(target.visaEndDate)
     : null;
+  const rtw = getRightToWorkStatus({
+    immigrationType: target?.immigrationType,
+    visaEndDate: target?.visaEndDate,
+    checks: target?.checks,
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -94,6 +103,20 @@ const VisaReminderDialog = ({ target, onOpenChange, onConfirm, isPending }) => {
             <span className="text-gray-500">Expires in</span>
             <span className="font-medium text-right">{remaining || "—"}</span>
           </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-gray-500">Right to work last checked</span>
+            <span className="font-medium text-right">
+              {rtw.lastCheckedAt
+                ? format(new Date(rtw.lastCheckedAt), "PPP")
+                : "Never"}
+            </span>
+          </div>
+          {rtw.needsCheck && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs tracking-tight text-amber-900">
+              {rtw.detail} Use the right to work action on the employee row once
+              the visa has been renewed.
+            </p>
+          )}
           {countInfo && (
             <div className="flex justify-between gap-4">
               <span className="text-gray-500">Sent so far</span>

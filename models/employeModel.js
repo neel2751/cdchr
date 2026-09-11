@@ -47,6 +47,27 @@ const addressSchema = new mongoose.Schema({
   },
 });
 
+// One right-to-work verification. Append-only: a check proves the employee's
+// permission as it stood on `checkedAt`, so it is never edited or replaced —
+// when the visa changes, HR records a new entry and the history is kept.
+// `visaEndDate` is the expiry (eVisaExp) that was on file at the time, which is
+// how we later tell whether the newest check still covers the current visa.
+const rightToWorkCheckSchema = new mongoose.Schema(
+  {
+    checkedAt: { type: Date, required: true },
+    visaEndDate: { type: Date, required: false },
+    documentType: { type: String, required: false },
+    shareCode: { type: String, required: false },
+    note: { type: String, required: false },
+    checkedBy: {
+      _id: { type: mongoose.Schema.Types.ObjectId, required: false },
+      name: { type: String, required: false },
+      email: { type: String, required: false },
+    },
+  },
+  { _id: true, timestamps: { createdAt: true, updatedAt: false } }
+);
+
 const employeSchema = new mongoose.Schema(
   {
     firstName: {
@@ -144,6 +165,16 @@ const employeSchema = new mongoose.Schema(
       required: false,
     },
     eVisaExp: {
+      type: Date,
+      required: false,
+    },
+    rightToWorkChecks: {
+      type: [rightToWorkCheckSchema],
+      default: [],
+    },
+    // Denormalised copy of the newest check date so the list can sort and
+    // filter on it without unwinding the history.
+    lastRightToWorkCheckDate: {
       type: Date,
       required: false,
     },

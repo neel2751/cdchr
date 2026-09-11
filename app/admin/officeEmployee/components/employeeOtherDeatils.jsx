@@ -55,6 +55,7 @@ import {
 import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
 import LeaveSheet from "../../leaveManagement/components/leaveEntitlements/leave-sheet";
 import SensitiveDetailsCard from "@/components/sensitiveDetails/sensitiveDetailsCard";
+import RightToWorkCard from "@/components/rightToWork/rightToWorkCard";
 import { formatDisplayDate } from "@/lib/formatDate";
 
 const EmployeeOtherDeatils = () => {
@@ -105,6 +106,11 @@ const EmployeeOtherDeatils = () => {
     <div className="space-y-2">
       <SensitiveDetailsCard slug={slug} employeeType="office" />
       <EmployeeOverview data={updateData} />
+      <RightToWorkCard
+        immigrationType={newData?.immigrationType}
+        visaEndDate={newData?.visaEndDate}
+        checks={newData?.rightToWorkChecks}
+      />
     </div>
   );
 };
