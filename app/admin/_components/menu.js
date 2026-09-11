@@ -83,12 +83,14 @@ export const officeMenu = [
     icon: TimerIcon,
     role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
   },
-  {
-    name: "Attendance",
-    link: "attendance",
-    icon: ScanQrCodeIcon,
-    role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
-  },
+  // Hidden for now. The tab is only taken out of the nav — the route and its
+  // component (officeSlugComponentmap.attendance) are untouched.
+  // {
+  //   name: "Attendance",
+  //   link: "attendance",
+  //   icon: ScanQrCodeIcon,
+  //   role: ["superAdmin", "admin", "siteadmin", "employee", "user"],
+  // },
   // {
   //   name: "Performance",
   //   link: "performance",
