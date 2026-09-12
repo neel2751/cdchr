@@ -39,6 +39,14 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  experimental: {
+    serverActions: {
+      // Attendance sheets (Excel / PDF exports) are posted through a server
+      // action, and the 1 MB default rejects all but the smallest of them.
+      // The action itself caps a single file at 10 MB.
+      bodySizeLimit: "12mb",
+    },
+  },
   // Bake the client-side obfuscation key into the browser bundle at build time.
   // NEXT_PUBLIC_* values are inlined during `next build` (not read at runtime),
   // so this falls back to EMAIL_ENCRYPTION_KEY to guarantee a value is present

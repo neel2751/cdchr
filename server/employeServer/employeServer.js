@@ -18,6 +18,15 @@ import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess
 // The form only asks for a country when the employee is not British.
 const UNITED_KINGDOM = "United Kingdom";
 
+// The employee edit form is seeded from the list row, so it round-trips the
+// right-to-work history. That log is append-only — only
+// recordRightToWorkCheck() may write it — so drop those keys before saving.
+const stripRightToWorkFields = ({
+  rightToWorkChecks,
+  lastRightToWorkCheckDate,
+  ...rest
+}) => rest;
+
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
   // const searchRegex = new RegExp(sanitizedSearch, "i"); // Create a case-ins ensitive regex
@@ -216,7 +225,7 @@ export const handleEmploye = withAudit(
           id,
           {
             $set: {
-              ...data,
+              ...stripRightToWorkFields(data),
               eAddress: eAddress,
               ...(bankDetail ? { bankDetail } : {}),
               employeType,
@@ -266,7 +275,7 @@ export const handleEmploye = withAudit(
         const password = await GenerateHashPassword("Interior@1234");
         if (!isExists.status) return isExists;
         const addEmploye = await EmployeModel.create({
-          ...data,
+          ...stripRightToWorkFields(data),
           eAddress: eAddress,
           ...(bankDetail ? { bankDetail } : {}),
           employeType,

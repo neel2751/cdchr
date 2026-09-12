@@ -39,6 +39,12 @@ export const MENU = [
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "CalendarClock",
   },
+  {
+    name: "Attendance Upload",
+    path: "/admin/attendanceUpload",
+    role: ["superAdmin"],
+    icon: "CalendarCheck",
+  },
   // {
   //   name: "Leave Management",
   //   path: "/admin/leave",

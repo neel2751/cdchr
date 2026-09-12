@@ -2,6 +2,19 @@ import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
 
+const ROLE_HOME = {
+  admin: "/admin/dashboard",
+  user: "/admin/dashboard",
+  superAdmin: "/admin/dashboard",
+  siteEmployee: "/employee",
+  reception: "/hr",
+};
+
+/** Where to send a signed-in user who has no outstanding login step. */
+function homePathFor(role) {
+  return ROLE_HOME[role] || "/admin/dashboard";
+}
+
 async function checkRoleMiddleware(req) {
   const requestedPath = req?.nextUrl?.pathname;
   const token = req?.nextauth?.token;
@@ -27,22 +40,48 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL("/api/auth/signin", req.url));
   }
 
-  // we have to allow all route for /admin/account/*
-  const isAdminAccountRoute = requestedPath.startsWith("/admin/account/");
+  // /verify and /setup-2fa are steps *inside* the login flow, not pages in their
+  // own right. withAuth has already rejected anyone without a token by this
+  // point; here we make sure a signed-in user only lands on the step that is
+  // actually outstanding, so a verified user cannot sit on the code prompt and
+  // an unenrolled one cannot skip past it.
+  if (requestedPath === "/verify") {
+    if (mustSetup2FA) {
+      return NextResponse.redirect(new URL("/setup-2fa", req.url));
+    }
+    if (!requires2FA) {
+      return NextResponse.redirect(new URL(homePathFor(userRole), req.url));
+    }
+    return NextResponse.next();
+  }
 
-  if (requestedPath === "/verify" || isAdminAccountRoute) {
+  if (requestedPath === "/setup-2fa") {
+    if (requires2FA) {
+      return NextResponse.redirect(new URL("/verify", req.url));
+    }
+    if (!mustSetup2FA) {
+      return NextResponse.redirect(new URL(homePathFor(userRole), req.url));
+    }
     return NextResponse.next();
   }
 
   // If 2FA is required, redirect to verification page
-  if (requires2FA && requestedPath !== "/verify") {
+  if (requires2FA) {
     return NextResponse.redirect(new URL("/verify", req.url));
   }
 
   // Privileged users who have not yet enrolled in 2FA are forced to set it up
   // before they can access any protected page.
-  if (mustSetup2FA && requestedPath !== "/setup-2fa") {
+  if (mustSetup2FA) {
     return NextResponse.redirect(new URL("/setup-2fa", req.url));
+  }
+
+  // we have to allow all route for /admin/account/*
+  // Deliberately checked *after* the 2FA gate above: account pages are ordinary
+  // protected pages, so an unverified session must not reach them either.
+  const isAdminAccountRoute = requestedPath.startsWith("/admin/account/");
+  if (isAdminAccountRoute) {
+    return NextResponse.next();
   }
 
   // Terminate live sessions for deactivated / locked-down office accounts.
@@ -197,7 +236,15 @@ export default withAuth(checkRoleMiddleware, {
   },
 });
 
-// Exclude auth routes and public paths from the middleware
+// Exclude auth routes and public paths from the middleware.
+// /verify and /setup-2fa are matched so they require a session: they are login
+// steps, and without this they were publicly reachable.
 export const config = {
-  matcher: ["/admin/:path*", "/employee/:path*", "/hr/:path*"], // Only match admin routes
+  matcher: [
+    "/admin/:path*",
+    "/employee/:path*",
+    "/hr/:path*",
+    "/verify",
+    "/setup-2fa",
+  ],
 };

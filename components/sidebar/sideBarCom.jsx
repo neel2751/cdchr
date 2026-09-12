@@ -80,6 +80,13 @@ const SideBarHeaderCom = () => {
   );
 };
 
+// Links hidden from the sidebar for now. Nothing is removed: the pages, their
+// COMMONMENUITEMS entries and the permission records all stay in place — and
+// COMMONMENUITEMS is also the route allowlist in proxy.js, so editing it there
+// would block the route rather than just hide the link. This filter runs last,
+// so it covers both the merged menu and the personal menu below.
+const HIDDEN_MENU_PATHS = new Set(["/admin/my-attendance"]);
+
 const SideBarMenu = () => {
   const pathName = usePathname();
   const { data: sessionData } = useSession();
@@ -124,14 +131,14 @@ const SideBarMenu = () => {
   }, [currentRole, currentUserId]);
 
   const mergedMenu = useMemo(() => {
-    if (!personalMenu.length) return menu;
-
     const existingPaths = new Set(menu.map((item) => item?.path));
     const uniquePersonalMenu = personalMenu.filter(
       (item) => !existingPaths.has(item.path),
     );
 
-    return [...uniquePersonalMenu, ...menu];
+    return [...uniquePersonalMenu, ...menu].filter(
+      (item) => !HIDDEN_MENU_PATHS.has(item?.path),
+    );
   }, [personalMenu, menu]);
 
   // Determine current menus and reports

@@ -14,12 +14,14 @@ export const siteEmployeeMenu = [
     link: "overview",
     role: ["superAdmin", "admin", "siteadmin", "employee"],
   },
-  {
-    name: "Attendance",
-    icon: GlobeLockIcon,
-    link: "attendance",
-    role: ["superAdmin", "admin", "siteadmin", "employee"],
-  },
+  // Hidden for now. The tab is only taken out of the nav — the route and its
+  // component (siteEmployeeSlugMap.attendance) are untouched.
+  // {
+  //   name: "Attendance",
+  //   icon: GlobeLockIcon,
+  //   link: "attendance",
+  //   role: ["superAdmin", "admin", "siteadmin", "employee"],
+  // },
   // {
   //   name: "Edit",
   //   icon: EditIcon,

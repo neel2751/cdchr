@@ -54,6 +54,7 @@ const statusThemeMap = {
   // Newly added statuses
   Expired: "purple",
   Restored: "lime",
+  "Rolled Back": "orange",
 
   // For Expense Status
   pending: "amber",

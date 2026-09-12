@@ -12,9 +12,10 @@ import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
 import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
 import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
 import { getSelectLeaveRequestForEmployee } from "@/server/selectServer/selectServer";
-import { differenceInDays, isBefore } from "date-fns";
+import { isBefore } from "date-fns";
 import React from "react";
 import { toast } from "sonner";
+import { sickNoteField, useSickNoteUpload } from "./sick-note-field";
 
 const LeaveRequestNew = ({
   showDialog,
@@ -42,7 +43,9 @@ const LeaveRequestNew = ({
     },
   });
 
-  const handleSubmit = (data) => {
+  const { prepareSickNote } = useSickNoteUpload();
+
+  const handleSubmit = async (data) => {
     // ✅ Task1 : Implement the logic to submit the leave request
     // ✅ Task2 : Check the validation like Start Date, End Date
     // ✅ Task3 : Check if End date is before Start date
@@ -50,18 +53,18 @@ const LeaveRequestNew = ({
     // ✅ Task5 : Count the number of days between the start and end dates
     // ✅ Task6 : Check if the employee has enough leave balance
     // ✅ Task7 : Submit the leave request
-    const { leaveStartDate, leaveEndDate, leaveType } = data;
-    const isBeforeEndDate = isBefore(
-      new Date(leaveEndDate),
-      new Date(leaveStartDate)
-    );
-    if (isBeforeEndDate) {
-      toast.warning("End date should be after start date");
-      return;
-    }
-    const totalCount = differenceInDays(leaveEndDate, leaveStartDate);
+    const { leaveType, leaveDates } = data;
 
-    const result = newData?.leaveData.find(
+    // Sick note first: nothing is submitted until a long sick absence has one.
+    const noteResult = await prepareSickNote(data);
+    if (!noteResult.success) {
+      return toast.warning(noteResult.message);
+    }
+
+    const totalCount = leaveDates?.length || 0;
+    const payload = { ...data, sickNote: noteResult.sickNote, totalCount };
+
+    const result = newData?.leaveData?.find(
       (item) => item.leaveType === leaveType
     );
     if (!initialValues?._id) {
@@ -73,9 +76,9 @@ const LeaveRequestNew = ({
         return toast.warning(
           `You have only ${result?.remaining} days left for ${leaveType}`
         );
-      submitLeaveRequest({ ...data, totalCount });
+      submitLeaveRequest(payload);
     } else {
-      submitLeaveRequest({ ...data, totalCount });
+      submitLeaveRequest(payload);
     }
   };
 
@@ -90,45 +93,18 @@ const LeaveRequestNew = ({
         required: "Please select a leave type",
       },
     },
+    // Leave is booked as a list of individual days — the same shape the server
+    // stores and the admin form sends. A start/end pair was dropped on the way
+    // in, so a request made here never reached the balance engine.
     {
-      name: "leaveStartDate",
-      labelText: "Start Date",
-      type: "date",
-      placeholder: "Select Start Date",
+      name: "leaveDates",
+      labelText: "Leave Dates",
+      type: "multidate",
+      placeholder: "Select Dates",
       validationOptions: {
-        required: "Start Date is required",
-        // don't select dates before today
-        validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "Start Date cannot be before today"
-              : true;
-          }
-          return true;
-        },
-      },
-      disabled: (date) => isBefore(date, new Date()),
-    },
-    {
-      name: "leaveEndDate",
-      labelText: "End Date",
-      type: "date",
-      placeholder: "Select End Date",
-      hideIf: {
-        field: "leaveType",
-        value: "Half Day",
-      },
-      validationOptions: {
-        required: "End Date is required",
-        // don't select dates before today
-        validate: (value) => {
-          if (value) {
-            return isBefore(value, new Date())
-              ? "End Date cannot be before today"
-              : true;
-          }
-          return true;
-        },
+        required: "Please select at least one date",
+        validate: (value) =>
+          (value && value.length > 0) || "Please select at least one date",
       },
       disabled: (date) => isBefore(date, new Date()),
     },
@@ -139,24 +115,33 @@ const LeaveRequestNew = ({
       placeholder: "Enter Reason",
       size: true,
     },
+    sickNoteField,
   ];
 
   return (
     <>
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         {/* <DialogTrigger asChild>{children}</DialogTrigger> */}
-        <DialogContent className="max-w-xl h-auto">
-          <DialogHeader>
+        {/* Same column layout as the admin form: the header and its close
+            button stay put, only the fields scroll. */}
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 p-0 sm:max-w-xl">
+          <DialogHeader className="shrink-0 gap-2 border-b p-6 pr-12">
             <DialogTitle>Leave Request</DialogTitle>
             <DialogDescription>
               Please fill in the form below to submit a leave request.
             </DialogDescription>
           </DialogHeader>
-          <GlobalForm
-            fields={fields}
-            onSubmit={handleSubmit}
-            initialValues={initialValues}
-          />
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <GlobalForm
+              fields={fields}
+              onSubmit={handleSubmit}
+              initialValues={initialValues}
+              // Pinned to the bottom like the admin forms. The negative margins
+              // bleed the bar through this container's p-6 so it spans the full
+              // dialog width.
+              footerClassName="sticky bottom-0 z-10 -mx-6 -mb-6 mt-7 border-t bg-background px-6 py-4"
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </>

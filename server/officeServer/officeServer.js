@@ -23,10 +23,22 @@ const UNITED_KINGDOM = "United Kingdom";
  * Bank details are left untouched when the payload has none of those fields —
  * a user without the bank permission never sees them, so an edit from them
  * must not wipe what is stored.
+ *
+ * The right-to-work history is dropped: the edit form is seeded from the list
+ * row, so it round-trips those keys, and only recordRightToWorkCheck() may
+ * append to an append-only log.
  */
 const buildOfficeEmployeePayload = (data) => {
-  const { accountName, bankName, accountNumber, sortCode, country, ...rest } =
-    data;
+  const {
+    accountName,
+    bankName,
+    accountNumber,
+    sortCode,
+    country,
+    rightToWorkChecks,
+    lastRightToWorkCheckDate,
+    ...rest
+  } = data;
   const hasBankFields = accountName || bankName || accountNumber || sortCode;
   return {
     ...rest,
@@ -336,6 +348,47 @@ export const getOfficeEmployee = async (filterData) => {
                 as: "visaReminders",
               },
             },
+            // Current 2FA enrolment, so a super admin can see who is protected
+            // and who has recovery codes left before deciding to reset anyone.
+            {
+              $lookup: {
+                from: "twofas",
+                let: { empId: "$_id" },
+                pipeline: [
+                  { $match: { $expr: { $eq: ["$employeeId", "$$empId"] } } },
+                  {
+                    $project: {
+                      _id: 0,
+                      isEnabled: 1,
+                      backupCodesRemaining: {
+                        $size: {
+                          $filter: {
+                            input: { $ifNull: ["$backupCodes", []] },
+                            as: "c",
+                            cond: { $eq: ["$$c.usedAt", null] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+                as: "twoFactor",
+              },
+            },
+            {
+              $addFields: {
+                twoFactorEnabled: {
+                  $ifNull: [{ $arrayElemAt: ["$twoFactor.isEnabled", 0] }, false],
+                },
+                twoFactorBackupCodes: {
+                  $ifNull: [
+                    { $arrayElemAt: ["$twoFactor.backupCodesRemaining", 0] },
+                    0,
+                  ],
+                },
+              },
+            },
+            { $unset: "twoFactor" },
           ],
         },
       },

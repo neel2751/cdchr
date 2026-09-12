@@ -44,6 +44,8 @@ export default function LeaveTable({ rawData }) {
         rowStyle = "bg-gray-100 text-gray-500 line-through";
       else if (item.leaveStatus === "Expired")
         rowStyle = "bg-gray-200 text-gray-600 italic";
+      else if (item.leaveStatus === "Rolled Back")
+        rowStyle = "bg-orange-50 text-orange-700 line-through";
       else rowStyle = "";
       return {
         key: index + 1,

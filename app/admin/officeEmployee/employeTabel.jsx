@@ -18,6 +18,9 @@ import {
   KeyRound,
   Lock,
   ShieldAlert,
+  ShieldOff,
+  ShieldCheck,
+  BadgeCheck,
 } from "lucide-react";
 import React from "react";
 import { useSession } from "next-auth/react";
@@ -35,6 +38,10 @@ import {
   getVisaUrgencyLevel,
   VISA_URGENCY_TEXT,
 } from "@/lib/visaMilestones";
+import {
+  getRightToWorkStatus,
+  RTW_STATUS_TEXT,
+} from "@/lib/rightToWork";
 
 const EmployeTabel = () => {
   const {
@@ -45,6 +52,8 @@ const EmployeTabel = () => {
     isSendingReminder,
     onResetPassword,
     onLockdown,
+    onReset2FA,
+    onRecordRightToWork,
   } = useCommonContext();
 
   const { data: session } = useSession();
@@ -67,6 +76,7 @@ const EmployeTabel = () => {
               "VisaStart",
               "VisaEnd",
               "visa",
+              "Right to work",
               "Actions",
             ].map((item, index) => (
               <TableHead className="uppercase text-xs" key={index}>
@@ -100,6 +110,11 @@ const EmployeTabel = () => {
               .map((r) => r.milestone);
             const alreadySent =
               milestone && sentMilestones.includes(milestone);
+            const rtw = getRightToWorkStatus({
+              immigrationType: item?.immigrationType,
+              visaEndDate: item?.visaEndDate,
+              checks: item?.rightToWorkChecks,
+            });
             return (
             <TableRow key={index}>
               <TableCell className="cursor-pointer">
@@ -141,6 +156,21 @@ const EmployeTabel = () => {
                       }
                     >
                       <Lock className="h-3 w-3" /> Locked
+                    </Badge>
+                  )}
+                  {item?.twoFactorEnabled && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1"
+                      title={`2FA enabled — ${
+                        item?.twoFactorBackupCodes ?? 0
+                      } unused recovery code(s)`}
+                    >
+                      <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                      2FA
+                      {(item?.twoFactorBackupCodes ?? 0) === 0 && (
+                        <span className="text-rose-600">·0</span>
+                      )}
                     </Badge>
                   )}
                 </div>
@@ -186,7 +216,32 @@ const EmployeTabel = () => {
                     : visaRemaining}
               </TableCell>
               <TableCell>
+                <div className="leading-tight">
+                  <div>
+                    {rtw.lastCheckedAt
+                      ? format(new Date(rtw.lastCheckedAt), "PPP")
+                      : "—"}
+                  </div>
+                  <div className={`text-xs ${RTW_STATUS_TEXT[rtw.level]}`}>
+                    {rtw.label}
+                  </div>
+                </div>
+              </TableCell>
+              <TableCell>
                 <div className="flex gap-2">
+                  <Button
+                    onClick={() => onRecordRightToWork?.(item)}
+                    variant="outline"
+                    size="icon"
+                    title={`Record right to work check — ${rtw.detail}`}
+                    className={rtw.needsCheck ? "border-rose-300" : ""}
+                  >
+                    <BadgeCheck
+                      className={
+                        rtw.needsCheck ? "text-rose-600" : "text-emerald-600"
+                      }
+                    />
+                  </Button>
                   {milestone && (
                     <Button
                       onClick={() => onSendVisaReminder?.(item)}
@@ -240,6 +295,18 @@ const EmployeTabel = () => {
                       <KeyRound className="text-amber-600" />
                     </Button>
                   )}
+                  {isSuperAdmin &&
+                    item?.twoFactorEnabled &&
+                    String(item?._id) !== String(currentUserId) && (
+                      <Button
+                        onClick={() => onReset2FA?.(item)}
+                        variant="outline"
+                        size="icon"
+                        title="Reset 2FA (user lost their authenticator app and recovery codes)"
+                      >
+                        <ShieldOff className="text-amber-600" />
+                      </Button>
+                    )}
                   {isSuperAdmin &&
                     String(item?._id) !== String(currentUserId) &&
                     item?.isActive && (

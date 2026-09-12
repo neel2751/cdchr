@@ -94,6 +94,26 @@ export async function getLeaveRequestData(leaveYear) {
   }
 }
 
+// Maps an array of leave dates to their UTC calendar day ("yyyy-MM-dd").
+// Dates are stored at UTC midnight, but comparing the raw instants would make a
+// single stray timestamp look like a different day, so the day string is the
+// safer key for set operations.
+function utcDayKeys(field) {
+  return {
+    $map: {
+      input: { $ifNull: [field, []] },
+      as: "d",
+      in: {
+        $dateToString: {
+          date: { $toDate: "$$d" },
+          format: "%Y-%m-%d",
+          timezone: "UTC",
+        },
+      },
+    },
+  };
+}
+
 export async function getLeaveRequestDataAdmin(filterData) {
   try {
     const { props } = await getServerSideProps();
@@ -110,8 +130,15 @@ export async function getLeaveRequestDataAdmin(filterData) {
     const isPermission = permissions.includes("/admin/leaveManagement");
 
     await connect();
-    const { leaveYear, page, limit, leaveStatus, fromDate, toDate } =
-      filterData;
+    const {
+      leaveYear,
+      page,
+      limit,
+      leaveStatus,
+      fromDate,
+      toDate,
+      employeeId: filterEmployeeId,
+    } = filterData;
 
     // before apply page and limit we have to convert them to number and set default values
     const validPage =
@@ -123,10 +150,16 @@ export async function getLeaveRequestDataAdmin(filterData) {
         ? parseInt(limit)
         : 10;
     const skip = (validPage - 1) * validLimit;
-    const match =
-      role === "superAdmin" || isPermission
-        ? {}
-        : { employeeId: createObjectId(employeeId) };
+    const canSeeEveryone = role === "superAdmin" || isPermission;
+    const match = canSeeEveryone
+      ? {}
+      : { employeeId: createObjectId(employeeId) };
+
+    // Employee-wise filter. Only meaningful for someone who can see every
+    // request — a normal employee stays pinned to their own rows above.
+    if (canSeeEveryone && filterEmployeeId && filterEmployeeId !== "All") {
+      match.employeeId = createObjectId(filterEmployeeId);
+    }
 
     if (leaveYear) {
       match.leaveYear = leaveYear;
@@ -164,52 +197,51 @@ export async function getLeaveRequestDataAdmin(filterData) {
       foreignField: "_id",
       as: "admin",
     };
-    const pipeline = [
-      {
-        $match: match,
-      },
-      {
-        $sort: {
-          leaveSubmitDate: -1,
-        },
-      },
+    // Everything below the page slice is joined per row, so it is built
+    // separately and run inside the $facet *after* $skip/$limit. Joining first
+    // and paginating afterwards made every request in the leave year pay for
+    // three lookups to render ten rows.
+    const enrichStages = [
       {
         $lookup: lookup,
       },
       {
         $lookup: approveLookup,
       },
+      // Overlaps are matched on the actual booked days, not on the
+      // start/end envelope. Leave is stored as a list of scattered dates
+      // (`leaveDates`), so two requests can share an envelope without sharing a
+      // single day — and a request with gaps used to report days it never
+      // booked. Comparing the UTC calendar day of each date keeps this in step
+      // with the holiday planner, which keys the same dates the same way.
       {
         $lookup: {
           from: "leaverequests", // Self-join on the same collection
           let: {
-            startDate: "$leaveStartDate",
-            endDate: "$leaveEndDate",
-            employeeId: "$employeeId", // ✅ fixed
+            selfId: "$_id",
+            employeeId: "$employeeId",
+            dayKeys: utcDayKeys("$leaveDates"),
           },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
+                    { $ne: ["$_id", "$$selfId"] },
                     { $ne: ["$employeeId", "$$employeeId"] },
-                    {
-                      $lte: [
-                        { $toDate: "$leaveStartDate" }, // ✅ convert to Date
-                        "$$endDate",
-                      ],
-                    },
-                    {
-                      $gte: [
-                        { $toDate: "$leaveEndDate" }, // ✅ convert to Date
-                        "$$startDate",
-                      ],
-                    },
                     { $in: ["$leaveStatus", ["Pending", "Approved"]] }, // ✅ Only active leaves
+                    { $ne: ["$isDeleted", true] },
                     {
-                      $gte: [
-                        { $toDate: "$leaveStartDate" },
-                        new Date(), // Today's date in UTC
+                      $gt: [
+                        {
+                          $size: {
+                            $setIntersection: [
+                              utcDayKeys("$leaveDates"),
+                              "$$dayKeys",
+                            ],
+                          },
+                        },
+                        0,
                       ],
                     },
                   ],
@@ -236,45 +268,25 @@ export async function getLeaveRequestDataAdmin(filterData) {
                 employeeId: 1,
                 leaveStartDate: 1,
                 leaveEndDate: 1,
+                leaveDates: 1,
                 leaveType: 1,
                 leaveStatus: 1,
                 leaveDays: 1,
                 leaveSubmitDate: 1,
                 isHalfDay: 1,
+                halfDayType: 1,
                 employeeName: "$overlapEmployee.name", // Project the employee name
+                overlappingDates: {
+                  $setIntersection: [utcDayKeys("$leaveDates"), "$$dayKeys"],
+                },
                 overLappingDays: {
-                  $max: [
-                    {
-                      $add: [
-                        {
-                          $divide: [
-                            {
-                              $subtract: [
-                                {
-                                  $min: [
-                                    { $toDate: "$leaveEndDate" },
-                                    "$$endDate",
-                                  ],
-                                },
-                                {
-                                  $max: [
-                                    { $toDate: "$leaveStartDate" },
-                                    "$$startDate",
-                                  ],
-                                },
-                              ],
-                            },
-                            1000 * 60 * 60 * 24,
-                          ],
-                        },
-                        1,
-                      ],
-                    },
-                    0, // clamp to zero
-                  ],
+                  $size: {
+                    $setIntersection: [utcDayKeys("$leaveDates"), "$$dayKeys"],
+                  },
                 },
               },
             },
+            { $sort: { leaveStartDate: 1 } },
           ],
           as: "overlappingRequests",
         },
@@ -300,27 +312,40 @@ export async function getLeaveRequestDataAdmin(filterData) {
       {
         $unset: ["employees", "admin"], // Remove the arrays
       },
+    ];
+
+    const pipeline = [
+      {
+        $match: match,
+      },
+      {
+        $sort: {
+          leaveSubmitDate: -1,
+        },
+      },
       {
         $facet: {
           data: [
             { $skip: skip }, // Skip for pagination
             { $limit: validLimit }, // Limit the number of results
-            // { $skip: (page - 1) * limit }, // Skip for pagination
-            // { $limit: limit }, // Limit the number of results
+            ...enrichStages, // Joins only the rows on this page
           ],
           totalCount: [{ $count: "count" }], // Count total documents
         },
       },
       {
-        $unwind: "$totalCount", // Unwind the total count array
+        // An empty result set produces an empty totalCount array. Unwinding it
+        // without this flag threw the whole document away, so a filter that
+        // matched nothing surfaced as an error instead of an empty table.
+        $unwind: { path: "$totalCount", preserveNullAndEmptyArrays: true },
       },
     ];
 
     const leaveData = await LeaveRequestModel.aggregate(pipeline);
     return {
       success: true,
-      data: JSON.stringify(leaveData[0].data),
-      totalCount: leaveData[0].totalCount.count,
+      data: JSON.stringify(leaveData[0]?.data ?? []),
+      totalCount: leaveData[0]?.totalCount?.count ?? 0,
     }; // Return the data as a string
   } catch (error) {
     console.log("Get Leave Request Data for Admin", error);
@@ -427,7 +452,10 @@ export async function rejectPastLeaveRequest(requestId, leaveStatus) {
       leaveRequest?.leaveStatus === "Approved" ||
       leaveRequest?.leaveStatus === "Rejected" ||
       leaveRequest?.leaveStatus === "Cancelled" ||
-      leaveRequest?.leaveStatus === "Expired"
+      leaveRequest?.leaveStatus === "Expired" ||
+      // A rolled back request has already had its days returned; cancelling it
+      // again would credit the same balance twice.
+      leaveRequest?.leaveStatus === "Rolled Back"
     )
       throw new Error("Leave is alreday approved or rejected");
     const { employeeId, leaveYear, leaveType } = leaveRequest;
@@ -464,6 +492,136 @@ export async function rejectPastLeaveRequest(requestId, leaveStatus) {
     return { success: true, message: "Reject Leave Successfully..." };
   });
 }
+
+/**
+ * Undo an approved leave. Reserved for super admins.
+ *
+ * The request is never removed — it keeps its place in the history with a
+ * "Rolled Back" status and a record of who reversed it and why. A reason is
+ * mandatory: without it the action is refused. Days are handed back to the
+ * employee's balance the same way they were taken (unpaid leave only tracks
+ * `used`, so only `used` is unwound for it).
+ */
+export const rollbackLeaveRequest = withAudit(
+  "Leave.rollback",
+  async ({ leaveId, reason } = {}) => {
+    try {
+      const { props } = await getServerSideProps();
+      const user = props?.session?.user;
+
+      if (user?.role !== "superAdmin") {
+        return {
+          success: false,
+          message: "Only a super admin can roll back an approved leave",
+        };
+      }
+
+      const rollbackReason = (reason || "").trim();
+      if (rollbackReason.length < 5) {
+        return {
+          success: false,
+          message: "A reason is required to roll back a leave request",
+        };
+      }
+
+      await connect();
+
+      const before = await LeaveRequestModel.findById(leaveId).lean();
+      if (!before) {
+        return { success: false, message: "Leave request not found" };
+      }
+
+      const result = await withTransaction(async (session) => {
+        const leaveRequest = await LeaveRequestModel.findById(leaveId).session(
+          session
+        );
+        if (!leaveRequest) throw new Error("Leave request not found");
+
+        if (leaveRequest.leaveStatus !== "Approved") {
+          throw new Error(
+            `Only an approved leave can be rolled back. This request is ${leaveRequest.leaveStatus}.`
+          );
+        }
+
+        const { employeeId, leaveYear, leaveType, leaveDays } = leaveRequest;
+
+        const commonLeave = await CommonLeaveModel.findOne({
+          employeeId: createObjectId(employeeId),
+          leaveYear,
+        }).session(session);
+
+        if (!commonLeave) {
+          throw new Error(
+            `No leave balance found for ${leaveYear}. Restore the entitlement before rolling this back.`
+          );
+        }
+
+        const index = commonLeave.leaveData.findIndex(
+          (leave) => leave.leaveType === leaveType
+        );
+        if (index === -1) {
+          throw new Error(
+            `${leaveType} is not configured for ${leaveYear}. Restore the entitlement before rolling this back.`
+          );
+        }
+
+        const entitlement = commonLeave.leaveData[index];
+        // Never let the unwind push `used` below zero — an older record edited
+        // by hand could otherwise leave the balance inconsistent.
+        entitlement.used = Math.max((entitlement.used || 0) - leaveDays, 0);
+        if (leaveType !== "Unpaid Leave") {
+          entitlement.remaining = (entitlement.remaining || 0) + leaveDays;
+        }
+
+        commonLeave.leaveHistory.push({
+          action: "Leave.rollback",
+          leaveType,
+          leaveYear,
+          leaveDays,
+          leaveDates: leaveRequest.leaveDates,
+          leaveRequestId: leaveRequest._id,
+          reason: rollbackReason,
+          updateAt: new Date(),
+          updatedBy: user?._id,
+          updatedByName: user?.name || "System",
+          role: user?.role,
+        });
+
+        commonLeave.markModified("leaveData");
+        await commonLeave.save({ session });
+
+        leaveRequest.rollback = {
+          reason: rollbackReason,
+          previousStatus: leaveRequest.leaveStatus,
+          rolledBackBy: user?._id,
+          rolledBackAt: new Date(),
+          restoredDays: leaveDays,
+          restoredLeaveType: leaveType,
+        };
+        leaveRequest.leaveStatus = "Rolled Back";
+        await leaveRequest.save({ session });
+
+        return {
+          success: true,
+          message: `Leave rolled back. ${leaveDays} day(s) returned to ${leaveType}.`,
+        };
+      });
+
+      recordAudit({
+        entityId: leaveId,
+        before,
+        after: await LeaveRequestModel.findById(leaveId).lean(),
+        description: `Rolled back approved leave ${leaveId}: ${rollbackReason}`,
+      });
+
+      return result;
+    } catch (error) {
+      console.log("Error rolling back leave request", error);
+      return { success: false, message: "Error rolling back leave request" };
+    }
+  },
+  { module: "Leave" }
+);
 
 export async function editCommonLeave(data) {
   try {

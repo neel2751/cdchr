@@ -1,6 +1,7 @@
 import EmployeeOverview from "@/components/tabs/employee-overview";
 import { useSiteEmployee } from "@/components/Avatar/AvatarContext";
 import SensitiveDetailsCard from "@/components/sensitiveDetails/sensitiveDetailsCard";
+import RightToWorkCard from "@/components/rightToWork/rightToWorkCard";
 import { formatDisplayDate } from "@/lib/formatDate";
 
 const SiteEmployeeOtherDeatils = () => {
@@ -52,6 +53,11 @@ const SiteEmployeeOtherDeatils = () => {
     <div className="space-y-2">
       <SensitiveDetailsCard slug={slug} employeeType="site" />
       <EmployeeOverview data={updateData} />
+      <RightToWorkCard
+        immigrationType={newData?.immigrationType}
+        visaEndDate={newData?.eVisaExp}
+        checks={newData?.rightToWorkChecks}
+      />
     </div>
   );
 };

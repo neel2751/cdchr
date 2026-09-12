@@ -17,6 +17,7 @@ import {
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
 import { AddEmploeeLeave } from "../addEmployeeLeave/addEmplyoeeLeave";
+import { sickNoteField, useSickNoteUpload } from "./sick-note-field";
 
 export default function LeaveContainer() {
   const [showDialog, setShowDialog] = useState(false);
@@ -54,7 +55,9 @@ export default function LeaveContainer() {
     fetchFn: getSelectLeaveRequestForEmployee,
   });
 
-  const handleSubmit = (data) => {
+  const { prepareSickNote } = useSickNoteUpload();
+
+  const handleSubmit = async (data) => {
     // ✅ Task1 : Implement the logic to submit the leave request
     // ✅ Task2 : Check the validation like Start Date, End Date
     // ✅ Task3 : Check if End date is before Start date
@@ -63,6 +66,14 @@ export default function LeaveContainer() {
     // ✅ Task6 : Check if the employee has enough leave balance
     // ✅ Task7 : Submit the leave request
     const { leaveType, leaveDates } = data;
+
+    // A long sick leave cannot go in without its note — the upload happens
+    // first so the request carries the stored reference, not the raw file.
+    const noteResult = await prepareSickNote(data);
+    if (!noteResult.success) {
+      return toast.warning(noteResult.message);
+    }
+    data = { ...data, sickNote: noteResult.sickNote };
     // const isBeforeEndDate = isBefore(
     //   new Date(leaveEndDate),
     //   new Date(leaveStartDate)
@@ -169,6 +180,7 @@ export default function LeaveContainer() {
       placeholder: "Enter Reason",
       size: true,
     },
+    sickNoteField,
   ];
 
   return (
@@ -198,6 +210,7 @@ export default function LeaveContainer() {
         initialValues={initialValues}
         handleSubmit={handleSubmit}
         isEdit={isEdit}
+        stickyFooter
       />
     </div>
   );

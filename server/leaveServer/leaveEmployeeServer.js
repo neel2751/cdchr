@@ -13,7 +13,12 @@ export async function adminEmployeeLeaveRequest(data) {
     const adminId = props?.session?.user?._id;
     const { employeeId, leaveType, leaveDates } = data;
     const totalCount = leaveDates.length;
-    const leaveYear = getLeaveYearString(new Date());
+    // Historical records belong to the leave year of the days taken, not the
+    // year the admin happens to be entering them in.
+    const earliestLeaveDate = [...(leaveDates || [])]
+      .map((date) => new Date(date))
+      .sort((a, b) => a - b)[0];
+    const leaveYear = getLeaveYearString(earliestLeaveDate || new Date());
     const commonLeave = await getCommonSpecificLeave({
       employeeId,
       leaveYear,

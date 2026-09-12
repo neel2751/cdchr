@@ -330,10 +330,6 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     const attendanceData = allEmployees.map((employee) => {
       const idStr = employee._id.toString();
 
-      if (existingAttendanceMap.has(idStr)) {
-        return existingAttendanceMap.get(idStr);
-      }
-
       const leaveDays = leaveMap.get(idStr) || [];
       const pendingLeaveDates = leaveDays
         .filter((l) => l.status === "Pending")
@@ -341,6 +337,17 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
       const approvedLeaveDates = leaveDays
         .filter((l) => l.status === "Approved")
         .map((l) => l.date);
+
+      if (existingAttendanceMap.has(idStr)) {
+        // Keep the saved schedule exactly as it was approved, but hand the
+        // current leave alongside it so the badges (and autofill) reflect leave
+        // booked or cancelled after the rota was submitted.
+        return {
+          ...existingAttendanceMap.get(idStr),
+          pendingLeaveDates,
+          approvedLeaveDates,
+        };
+      }
 
       const schedule = weekDates.map((date) => {
         const formattedDate = date.toISOString().split("T")[0];

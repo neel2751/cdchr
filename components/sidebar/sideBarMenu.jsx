@@ -1,6 +1,7 @@
 import {
   Briefcase,
   Building2,
+  CalendarCheck2,
   CalendarClock,
   CalendarDays,
   Captions,
@@ -38,6 +39,7 @@ const ICON_MAP = {
   RadioIcon: RadioIcon,
   Stamp: Stamp,
   CalendarClock: CalendarClock,
+  CalendarCheck: CalendarCheck2,
   Lock: LockIcon,
   FileText: FileText,
   SquareChartGantt: SquareChartGantt,

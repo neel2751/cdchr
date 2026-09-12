@@ -6,6 +6,7 @@ import WeeklyRotaVersionModel from "@/models/weeklyRotaVersionModel";
 import { addDays, isMonday, parseISO, startOfWeek } from "date-fns";
 import { getServerSideProps } from "../session/session";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import LeaveRequestModel from "@/models/leaveRequestModel";
 import { decrypt } from "@/lib/algo";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { withAudit, recordAudit } from "@/lib/audit";
@@ -427,23 +428,60 @@ export async function getWeeklyRotaByWeekStartDate(params) {
   }
 }
 
-// for autofill the we need last week rota so they don't need to fill again and again
+// Autofill needs two things: the shape of the employee's previous week (so the
+// rota doesn't have to be typed out again) AND the leave that actually falls in
+// the week being filled. Without the second part the previous week's "Holiday"
+// days get copied forward and the employee looks like they're off again on days
+// they are working.
 export async function getLastWeekRotaForEmployee(params) {
   try {
     if (!params || !params.employeeId) {
       return { success: false, message: "Employee ID is required" };
     }
-    const { employeeId } = params;
-    let employee;
-    // Connect to MongoDB
+    const { employeeId, date } = params;
+    if (!isValidObjectId(employeeId)) {
+      return { success: false, message: "Employee ID is not valid" };
+    }
+    if (!date) {
+      return { success: false, message: "Week start date is required" };
+    }
+
+    // This hands back another employee's schedule and leave dates, so it stays
+    // behind the same gate as the rota screens that call it.
+    const { props } = await getServerSideProps();
+    const role = props?.session?.user?.role;
+    if (role !== "admin" && role !== "superAdmin") {
+      return { success: false, message: "Not authorized" };
+    }
+
+    // Rota weeks are stored at UTC midnight, so do all of this arithmetic in
+    // UTC — using local time would slide the week by a day for BST dates.
+    const targetWeekStart = toUtcWeekStart(date);
+    if (!targetWeekStart) {
+      return { success: false, message: "Week start date is not valid" };
+    }
+    const targetWeekEnd = new Date(
+      targetWeekStart.getTime() + 6 * 24 * 60 * 60 * 1000
+    );
+
     await connect();
-    // Fetch the last weekly rota for the employee
+
+    // The most recent rota *before* the week we are filling. Sorting the whole
+    // collection (as this used to) could hand back the same week, or a week
+    // further in the future, as the "last" week.
     const pipeline = [
       {
         $match: {
+          weekStartDate: { $lt: targetWeekStart },
           "attendanceData.employeeId": createObjectId(employeeId),
           isDeleted: false,
         },
+      },
+      {
+        $sort: { weekStartDate: -1 },
+      },
+      {
+        $limit: 1,
       },
       {
         $project: {
@@ -459,22 +497,53 @@ export async function getLastWeekRotaForEmployee(params) {
           },
         },
       },
-      {
-        $sort: { weekStartDate: -1 }, // Sort by weekStartDate in descending order
-      },
-      {
-        $limit: 1, // Limit to the most recent document
-      },
     ];
-    const lastWeekRota = await WeeklyRotaModel.aggregate(pipeline).then(
-      (result) => result[0] // Get the first matching document
-    );
-    if (!lastWeekRota) {
-      return { success: false, message: "No weekly rota found" };
-    }
+
+    // Leave that genuinely lands in the target week. Approved leave is a
+    // Holiday on the new rota; Pending leave only raises a warning badge so the
+    // admin can decide.
+    const [[lastWeekRota], leaveRequests] = await Promise.all([
+      WeeklyRotaModel.aggregate(pipeline),
+      LeaveRequestModel.find(
+        {
+          employeeId: createObjectId(employeeId),
+          leaveStatus: { $in: ["Approved", "Pending"] },
+          leaveStartDate: { $lte: targetWeekEnd },
+          leaveEndDate: { $gte: targetWeekStart },
+        },
+        { leaveStatus: 1, leaveDates: 1 }
+      ).lean(),
+    ]);
+
+    const weekStartKey = toDateKey(targetWeekStart);
+    const weekEndKey = toDateKey(targetWeekEnd);
+    const approvedLeaveDates = [];
+    const pendingLeaveDates = [];
+    leaveRequests.forEach((leave) => {
+      (leave?.leaveDates || []).forEach((leaveDate) => {
+        const key = toDateKey(leaveDate);
+        if (!key || key < weekStartKey || key > weekEndKey) return;
+        const bucket =
+          leave.leaveStatus === "Approved"
+            ? approvedLeaveDates
+            : pendingLeaveDates;
+        if (!bucket.includes(key)) bucket.push(key);
+      });
+    });
+
+    // Deliberately still a success when there is no earlier rota — the caller
+    // can fall back to standard office hours and it still needs the leave.
     return {
       success: true,
-      data: JSON.stringify(lastWeekRota),
+      data: JSON.stringify({
+        weekStartDate: weekStartKey,
+        sourceWeekStartDate: lastWeekRota?.weekStartDate
+          ? toDateKey(lastWeekRota.weekStartDate)
+          : null,
+        schedule: lastWeekRota?.attendanceData?.[0]?.schedule || [],
+        approvedLeaveDates,
+        pendingLeaveDates,
+      }),
     };
   } catch (error) {
     console.error("Error in getLastWeekRotaForEmployee:", error);
@@ -483,6 +552,26 @@ export async function getLastWeekRotaForEmployee(params) {
       message: "An error occurred while fetching data.",
     };
   }
+}
+
+// "yyyy-MM-dd" in UTC — the key both the rota and the leave dates are compared on.
+function toDateKey(value) {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().split("T")[0];
+}
+
+// Accepts any date in the week and returns that week's Monday at UTC midnight.
+function toUtcWeekStart(date) {
+  const key = toDateKey(
+    typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? `${date}T00:00:00.000Z`
+      : date
+  );
+  if (!key) return null;
+  const parsed = new Date(`${key}T00:00:00.000Z`);
+  const daysSinceMonday = (parsed.getUTCDay() + 6) % 7;
+  return new Date(parsed.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
 }
 
 // Fetch the immutable version history for a single weekly rota. Restricted to

@@ -34,6 +34,10 @@ import { sendVisaReminderManually } from "@/server/visaServer/visaServer";
 import VisaReminderDialog from "../_components/visaReminderDialog";
 import ResetPasswordDialog from "../_components/resetPasswordDialog";
 import LockdownDialog from "../_components/lockdownDialog";
+import ResetTwoFactorDialog from "../_components/resetTwoFactorDialog";
+import { resetTwoFactorForEmployee } from "@/server/2FAServer/TwoAuthserver";
+import RightToWorkDialog from "../_components/rightToWorkDialog";
+import { recordRightToWorkCheck } from "@/server/visaServer/rightToWorkServer";
 
 const VISA_STATUS_OPTIONS = [
   { label: "All Visa", value: "" },
@@ -245,6 +249,8 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       employeeType: "OfficeEmploye",
       name: item?.name,
       visaEndDate: item?.visaEndDate,
+      immigrationType: item?.immigrationType,
+      checks: item?.rightToWorkChecks,
     });
 
   const confirmVisaReminder = (ccHr) => {
@@ -253,6 +259,42 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       employeeId: reminderTarget.employeeId,
       employeeType: reminderTarget.employeeType,
       ccHr,
+    });
+  };
+
+  // Right-to-work checks are recorded from a row action rather than the
+  // employee form: each check is a dated event kept alongside the previous
+  // ones, and the visa reminder is what prompts HR to record the next one.
+  const [rightToWorkTarget, setRightToWorkTarget] = useState(null);
+
+  const { mutate: recordRightToWork, isPending: isRecordingRightToWork } =
+    useSubmitMutation({
+      mutationFn: async (payload) => recordRightToWorkCheck(payload),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) =>
+        message || "Right-to-work check recorded",
+      onClose: () => setRightToWorkTarget(null),
+    });
+
+  const onRecordRightToWork = (item) =>
+    setRightToWorkTarget({
+      employeeId: item?._id,
+      employeeType: "OfficeEmploye",
+      name: item?.name,
+      email: item?.email,
+      immigrationType: item?.immigrationType,
+      immigrationCategory: item?.immigrationCategory,
+      visaStartDate: item?.visaStartDate,
+      visaEndDate: item?.visaEndDate,
+      checks: item?.rightToWorkChecks,
+    });
+
+  const confirmRightToWork = (payload) => {
+    if (!rightToWorkTarget?.employeeId) return;
+    recordRightToWork({
+      employeeId: rightToWorkTarget.employeeId,
+      employeeType: rightToWorkTarget.employeeType,
+      ...payload,
     });
   };
 
@@ -291,6 +333,23 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
     lockdown({ employeeId: lockdownTarget._id, reason });
   };
 
+  const [reset2FATarget, setReset2FATarget] = useState(null);
+
+  const { mutate: reset2FA, isPending: isResetting2FA } = useSubmitMutation({
+    mutationFn: async ({ employeeId, reason }) =>
+      resetTwoFactorForEmployee({ employeeId, reason }),
+    invalidateKey: queryKey,
+    onSuccessMessage: (message) => message || "2FA reset",
+    onClose: () => setReset2FATarget(null),
+  });
+
+  const onReset2FA = (item) => setReset2FATarget(item);
+
+  const confirmReset2FA = ({ reason }) => {
+    if (!reset2FATarget?._id) return;
+    reset2FA({ employeeId: reset2FATarget._id, reason });
+  };
+
   const immigrationField = field.find((it) => it.name === "immigrationType");
   const options = immigrationField?.options || [];
 
@@ -313,6 +372,8 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
           isSendingReminder,
           onResetPassword,
           onLockdown,
+          onReset2FA,
+          onRecordRightToWork,
         }}
       >
         <div>
@@ -432,6 +493,14 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
             onConfirm={confirmVisaReminder}
             isPending={isSendingReminder}
           />
+          <RightToWorkDialog
+            target={rightToWorkTarget}
+            onOpenChange={(o) => {
+              if (!o) setRightToWorkTarget(null);
+            }}
+            onConfirm={confirmRightToWork}
+            isPending={isRecordingRightToWork}
+          />
           <ResetPasswordDialog
             target={resetTarget}
             onOpenChange={(o) => {
@@ -447,6 +516,14 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
             }}
             onConfirm={confirmLockdown}
             isPending={isLockingDown}
+          />
+          <ResetTwoFactorDialog
+            target={reset2FATarget}
+            onOpenChange={(o) => {
+              if (!o) setReset2FATarget(null);
+            }}
+            onConfirm={confirmReset2FA}
+            isPending={isResetting2FA}
           />
         </div>
       </CommonContext.Provider>
