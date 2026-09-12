@@ -7,7 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { addDays, format, startOfWeek } from "date-fns";
+import { addDays, format, parseISO, startOfWeek } from "date-fns";
 import Shimmer from "../tableStatus/tableLoader";
 import {
   Select,
@@ -40,6 +40,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const OFF_DAY_TIMES = { startTime: "00:00", endTime: "00:00" };
+const OFF_DAY = { category: "OFF", ...OFF_DAY_TIMES };
+const DEFAULT_WORKING_DAY = {
+  category: "OFFICE",
+  startTime: "09:00",
+  endTime: "18:00",
+};
 
 const WeekRotaTable = ({
   currentWeek,
@@ -105,6 +114,7 @@ const WeekRotaTable = ({
             updatedScheduleArray.push({
               [field]: value,
               date,
+              day,
               category: field === "category" ? value : "OFFICE",
               startTime: field === "startTime" ? value : "09:00",
               endTime: field === "endTime" ? value : "17:00",
@@ -122,100 +132,102 @@ const WeekRotaTable = ({
     );
   };
 
+  // Autofill copies the shape of the previous week, but leave is never copied:
+  // a Holiday only survives if the employee actually has approved leave on that
+  // date in *this* week. Otherwise last week's three days off would follow the
+  // employee into every week after it.
   const autoFillSchedule = async (employeeId) => {
-    // we have to call the data from the previous week to get the most common category
+    const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 });
     const response = await getLastWeekRotaForEmployee({
       employeeId,
-      date: format(currentWeek, "yyyy-MM-dd"),
+      date: format(weekStart, "yyyy-MM-dd"),
     });
-    const data = JSON.parse(response?.data || "{}");
 
-    const parsedData = data?.attendanceData?.[0]?.schedule || [];
-    if (parsedData.length) {
-      setSchedules((prevSchedules) =>
-        prevSchedules.map((schedule) => {
-          if (schedule.employeeId === employeeId) {
-            return {
-              ...schedule,
-              schedule: parsedData.map((entry) => ({
-                ...entry,
-                date: format(
-                  addDays(
-                    currentWeek,
-                    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(
-                      entry.day
-                    )
-                  ),
-                  "yyyy-MM-dd"
-                ),
-                // Ensure Sunday is always OFF
-                category: entry.day === "Sun" ? "OFF" : entry.category,
-                startTime: entry.day === "Sun" ? "00:00" : entry.startTime,
-                endTime: entry.day === "Sun" ? "00:00" : entry.endTime,
-              })),
-            };
-          }
-          return schedule;
-        })
-      );
+    if (!response?.success) {
+      toast.error(response?.message || "Could not load the previous week");
       return;
-    } else {
-      setSchedules((prevSchedules) =>
-        prevSchedules.map((schedule) => {
-          if (schedule.employeeId !== employeeId) return schedule;
+    }
 
-          // Convert the schedule array to a map for easier access by day
-          const scheduleMap = new Map(
-            schedule.schedule.map((entry) => [entry.day, entry])
-          );
+    const {
+      schedule: lastWeekSchedule = [],
+      approvedLeaveDates = [],
+      pendingLeaveDates = [],
+      sourceWeekStartDate = null,
+    } = JSON.parse(response?.data || "{}");
 
-          // const mostCommonCategory = findMostCommonCategory(schedule.schedule);
-          const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    // Older entries were saved without a `day`, so fall back to the date.
+    const dayOf = (entry) => {
+      if (entry?.day) return entry.day;
+      return entry?.date ? format(parseISO(entry.date), "EEE") : null;
+    };
+    const lastWeekByDay = new Map(
+      lastWeekSchedule
+        .map((entry) => [dayOf(entry), entry])
+        .filter(([day]) => Boolean(day))
+    );
 
-          const updatedSchedule = days.map((day) => {
-            const existingDay = scheduleMap.get(day);
+    const weekDays = DAYS.map((day, index) => ({
+      day,
+      date: format(addDays(weekStart, index), "yyyy-MM-dd"),
+    }));
 
-            // If it's Sunday, always return OFF
-            if (day === "Sun") {
-              return {
-                day,
-                category: "OFF",
-                startTime: "00:00",
-                endTime: "00:00",
-                date: format(
-                  addDays(currentWeek, days.indexOf(day)),
-                  "yyyy-MM-dd"
-                ),
-              };
-            }
+    // Counted here rather than inside the state updater so the message is
+    // accurate even though the updater runs later (and twice in dev).
+    const holidaysDropped = weekDays.filter(
+      ({ day, date }) =>
+        day !== "Sun" &&
+        lastWeekByDay.get(day)?.category === "Holiday" &&
+        !approvedLeaveDates.includes(date)
+    ).length;
 
-            // If the day already exists and is OFF or HOLIDAY, return as is
-            if (
-              existingDay?.category === "OFF" ||
-              existingDay?.category === "Holiday"
-            ) {
-              return existingDay;
-            }
+    setSchedules((prevSchedules) =>
+      prevSchedules.map((schedule) => {
+        if (schedule.employeeId !== employeeId) return schedule;
 
-            // Otherwise, create a new entry with default values
-            return {
-              ...existingDay,
-              day,
-              date: format(
-                addDays(currentWeek, days.indexOf(day)),
-                "yyyy-MM-dd"
-              ),
-              category: "OFFICE",
-              startTime: "09:00",
-              endTime: "18:00",
-            };
-          });
+        const existingByDate = new Map(
+          (schedule.schedule || []).map((entry) => [entry.date, entry])
+        );
 
-          return {
-            ...schedule,
-            schedule: updatedSchedule,
-          };
-        })
+        const updatedSchedule = weekDays.map(({ day, date }) => {
+          if (day === "Sun") {
+            return { date, day, ...OFF_DAY };
+          }
+
+          // Approved leave in this week always wins over the copied pattern.
+          if (approvedLeaveDates.includes(date)) {
+            return { date, day, category: "Holiday", ...OFF_DAY_TIMES };
+          }
+
+          const source = lastWeekByDay.get(day) ?? existingByDate.get(date);
+
+          // A Holiday with no approved leave behind it is a leftover from the
+          // week we copied — reset it to a standard working day.
+          if (!source?.category || source.category === "Holiday") {
+            return { date, day, ...DEFAULT_WORKING_DAY };
+          }
+
+          return { ...source, date, day };
+        });
+
+        return {
+          ...schedule,
+          schedule: updatedSchedule,
+          // Keep the badges in step with the leave we just checked.
+          approvedLeaveDates,
+          pendingLeaveDates,
+        };
+      })
+    );
+
+    if (!lastWeekSchedule.length) {
+      toast.info("No earlier rota found — filled with standard office hours");
+    } else if (holidaysDropped > 0) {
+      toast.success(
+        `Copied the week of ${
+          sourceWeekStartDate ? format(parseISO(sourceWeekStartDate), "d MMM") : "the last rota"
+        } — ${holidaysDropped} holiday ${
+          holidaysDropped === 1 ? "day was" : "days were"
+        } not repeated (no approved leave this week)`
       );
     }
   };
