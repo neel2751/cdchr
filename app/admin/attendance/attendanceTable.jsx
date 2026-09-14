@@ -12,6 +12,8 @@ import {
   XIcon,
   SaveIcon,
   Bell,
+  Palmtree,
+  CalendarOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +54,7 @@ import { handleTimeActionNew } from "../_components/handleTimeAction";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import { BreaksCell } from "../siteAssignEmployee/test";
 import { sendNotification } from "@/server/attendanceServer/notificationServer";
+import { useBankHoliday } from "@/lib/holiday";
 
 const EmployeeSiteManagement = ({ searchParams }) => {
   const queryClient = useQueryClient();
@@ -71,6 +74,18 @@ const EmployeeSiteManagement = ({ searchParams }) => {
     toDate: dateParam,
     query,
   });
+
+  // The day the table is showing — the date filter when set, otherwise today.
+  const viewedDate = dateParam ? new Date(dateParam) : new Date();
+  const viewedDateKey = format(viewedDate, "yyyy-MM-dd");
+
+  // Bank holidays come from gov.uk. A failed fetch must not take the table
+  // down with it, so an unavailable list simply means nothing is flagged.
+  const { data: bankHolidays = [] } = useBankHoliday();
+  const bankHoliday = bankHolidays?.find(
+    (holiday) => holiday?.date === viewedDateKey,
+  );
+  const isBankHoliday = Boolean(bankHoliday);
 
   const handleManualClockUpdate = async (
     recordId,
@@ -238,23 +253,37 @@ const EmployeeSiteManagement = ({ searchParams }) => {
 
   // State management
 
-  const getStatusBadge = (status) => {
-    const statusConfig = {
-      "checked-in": {
-        color: "bg-green-100 text-green-800",
-        text: "Checked In",
-      },
-      "checked-out": { color: "bg-blue-100 text-blue-800", text: "Completed" },
-      "break-in": { color: "bg-yellow-100 text-yellow-800", text: "On Break" },
-      "break-out": { color: "bg-purple-100 text-purple-800", text: "On Work" },
-    };
+  const STATUS_CONFIG = {
+    "on-leave": { color: "bg-orange-100 text-orange-800", text: "Holiday" },
+    "bank-holiday": {
+      color: "bg-sky-100 text-sky-800",
+      text: "Bank Holiday",
+    },
+    "checked-in": {
+      color: "bg-green-100 text-green-800",
+      text: "Checked In",
+    },
+    "on-break": { color: "bg-yellow-100 text-yellow-800", text: "On Break" },
+    "clocked-out": { color: "bg-blue-100 text-blue-800", text: "Completed" },
+    absent: { color: "bg-gray-100 text-gray-800", text: "Not Clocked In" },
+  };
 
-    return (
-      statusConfig[status] || {
-        color: "bg-gray-100 text-gray-800",
-        text: "Unknown",
-      }
-    );
+  const getStatusBadge = (status) => STATUS_CONFIG[status] || STATUS_CONFIG.absent;
+
+  /**
+   * Why a row looks the way it does. Someone who has not clocked in is not
+   * automatically absent — they may have booked the day off, or it may be a
+   * bank holiday — so leave is checked before falling back to "Not Clocked In".
+   * A clock-in always wins: if they worked, show that they worked.
+   */
+  const resolveStatus = (assignment, { hasOpenBreak, isBankHoliday }) => {
+    if (assignment.clockIn) {
+      if (hasOpenBreak) return "on-break";
+      return assignment.clockOut ? "clocked-out" : "checked-in";
+    }
+    if (assignment.onLeave) return "on-leave";
+    if (isBankHoliday) return "bank-holiday";
+    return "absent";
   };
 
   const canSendNudge = (assignment) => {
@@ -307,47 +336,66 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             <DateFilter name={"date"} />
           </div>
         </CardHeader>
-        <CardContent className={"grid grid-cols-5 gap-5"}>
-          <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
-            <CardHeader>
-              <CardTitle>Total Employees</CardTitle>
-              <span className="text-2xl font-semibold">{total || 0}</span>
-            </CardHeader>
-          </Card>
-          <Card className="bg-green-50 text-green-600 border-none shadow-none">
-            <CardHeader>
-              <CardTitle>Present Today</CardTitle>
-              <span className="text-2xl font-semibold">
-                {summary?.presentToday || 0}
+        <CardContent className="space-y-4">
+          {isBankHoliday && (
+            <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800">
+              <CalendarOff className="h-4 w-4 shrink-0" />
+              <span>
+                <span className="font-medium">{bankHoliday?.title}</span> — this
+                is a bank holiday, so a low turnout is expected.
               </span>
-            </CardHeader>
-          </Card>
-          <Card className="bg-yellow-50 text-yellow-600 border-none shadow-none">
-            <CardHeader>
-              <CardTitle>On Break</CardTitle>
-              <span className="text-2xl font-semibold">
-                {summary?.onBreak || 0}
-              </span>
-            </CardHeader>
-          </Card>
-          <Card className="bg-purple-50 text-purple-600 border-none shadow-none">
-            <CardHeader>
-              <CardTitle>Avarage Hours</CardTitle>
-              <span className="text-2xl font-semibold">
-                {minutesToHHMM(
-                  Math.max(0, Math.round(summary?.averageMinutes || 0)),
-                )}
-              </span>
-            </CardHeader>
-          </Card>
-          <Card className="bg-red-50 text-red-600 border-none shadow-none">
-            <CardHeader>
-              <CardTitle>Clocked Out</CardTitle>
-              <span className="text-2xl font-semibold">
-                {summary?.clockedOut || 0}
-              </span>
-            </CardHeader>
-          </Card>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-3 xl:grid-cols-6">
+            <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>Total Employees</CardTitle>
+                <span className="text-2xl font-semibold">{total || 0}</span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-green-50 text-green-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>Present Today</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {summary?.presentToday || 0}
+                </span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-yellow-50 text-yellow-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>On Break</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {summary?.onBreak || 0}
+                </span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-orange-50 text-orange-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>On Holiday</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {summary?.onLeave || 0}
+                </span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-purple-50 text-purple-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>Avarage Hours</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {minutesToHHMM(
+                    Math.max(0, Math.round(summary?.averageMinutes || 0)),
+                  )}
+                </span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-red-50 text-red-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>Clocked Out</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {summary?.clockedOut || 0}
+                </span>
+              </CardHeader>
+            </Card>
+          </div>
         </CardContent>
       </Card>
 
@@ -356,14 +404,14 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           <div>
             <CardTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
-              Today's Assigned Employees{" "}
+              Active Employees{" "}
               <span className="font-semibold">
                 ({attendanceList?.length || 0})
               </span>
             </CardTitle>
             <CardDescription>
-              View all employees assigned to sites today •{" "}
-              {format(new Date(), "PPP")}
+              Attendance for every active office employee •{" "}
+              {format(viewedDate, "PPP")}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -375,10 +423,10 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             <div className="text-center py-12 text-gray-500">
               <Users className="h-16 w-16 mx-auto mb-4 opacity-30" />
 
-              <p className="text-lg">No assignments found for this date</p>
+              <p className="text-lg">No active employees found</p>
 
               <p className="text-sm">
-                Select employees and a site to create assignments
+                Nobody matches this search, or no office employee is active.
               </p>
             </div>
           ) : (
@@ -387,15 +435,6 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                 <TableHeaderCom tableHead={commonHeaders} />
                 <TableBody>
                   {attendanceList?.map((assignment, index) => {
-                    // compute status
-                    const status = !assignment.clockIn
-                      ? "assigned"
-                      : assignment.clockIn && !assignment.clockOut
-                        ? "checked-in"
-                        : "clocked-out";
-
-                    const statusConfig = getStatusBadge(status);
-
                     // compute last break
                     const breaks = assignment?.breaks || [];
                     const lastBreak = breaks.length
@@ -403,6 +442,19 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                       : null;
                     const hasOpenBreak = Boolean(
                       lastBreak?.breakIn && !lastBreak?.breakOut,
+                    );
+
+                    // compute status
+                    const status = resolveStatus(assignment, {
+                      hasOpenBreak,
+                      isBankHoliday,
+                    });
+                    const statusConfig = getStatusBadge(status);
+
+                    // Booked the day off but clocked in anyway — worth flagging
+                    // next to the working status rather than hiding it.
+                    const workedWhileOnLeave = Boolean(
+                      assignment.onLeave && assignment.clockIn,
                     );
 
                     // calculate total break hours
@@ -429,19 +481,33 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                           <div className="flex flex-col gap-1 items-start">
                             <Badge className={statusConfig?.color}>
                               <div className="flex items-center gap-1">
-                                {status === "checked-in" && (
+                                {(status === "checked-in" ||
+                                  status === "clocked-out") && (
                                   <CheckCircle className="h-3 w-3" />
                                 )}
-                                {status === "clocked-out" && (
-                                  <CheckCircle className="h-3 w-3" />
+                                {status === "on-leave" && (
+                                  <Palmtree className="h-3 w-3" />
                                 )}
-                                {status === "assigned" && (
+                                {status === "bank-holiday" && (
+                                  <CalendarOff className="h-3 w-3" />
+                                )}
+                                {status === "absent" && (
                                   <Clock className="h-3 w-3" />
                                 )}
                                 {statusConfig?.text}
                               </div>
                             </Badge>
-                            {hasOpenBreak && (
+                            {status === "on-leave" && assignment.leaveType && (
+                              <span className="text-xs text-gray-500">
+                                {assignment.leaveType}
+                              </span>
+                            )}
+                            {workedWhileOnLeave && (
+                              <Badge className="bg-orange-100 text-orange-800 border border-orange-300">
+                                Worked on leave
+                              </Badge>
+                            )}
+                            {hasOpenBreak && status !== "on-break" && (
                               <Badge className="bg-yellow-100 text-yellow-800 border border-yellow-300">
                                 Open Break
                               </Badge>

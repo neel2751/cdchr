@@ -15,10 +15,7 @@ import {
 import AddCategory from "./components/addCategory";
 import { SelectDatePicker } from "./components/dateSelect";
 import { useFetchQuery } from "@/hooks/use-query";
-import {
-  getOfficeEmployeeAttendance,
-  getOfficeEmployeeAttendanceWithLeave,
-} from "@/server/officeAttendanceServer/officeAttendance";
+import { getOfficeEmployeeAttendanceWithLeave } from "@/server/officeAttendanceServer/officeAttendance";
 import WeekRotaTable from "@/components/weekRotaTable/weekRotaTable";
 import { Badge } from "@/components/ui/badge";
 

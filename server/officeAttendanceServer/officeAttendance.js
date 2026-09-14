@@ -8,17 +8,16 @@ import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getSelectOfficeEmployee } from "../selectServer/selectServer";
 import { createObjectId } from "@/lib/mongodb";
 import { getUKTime } from "@/utils/time";
+import { currentlyEmployedMatch } from "@/lib/employeeStatus";
 
 export async function getAllOfficeEmployee() {
   try {
-    const allEmployees = await OfficeEmployeeModel.find({
-      isActive: true,
-      delete: false,
-      $or: [
-        { visaEndDate: { $lte: new Date() } },
-        { endDate: { $lte: new Date() } },
-      ],
-    });
+    // Was `$lte: new Date()` on both dates, which selected the people whose
+    // visa or employment had *already ended* — the exact opposite of the
+    // intent recorded in the comments here.
+    const allEmployees = await OfficeEmployeeModel.find(
+      currentlyEmployedMatch()
+    );
     return { success: true, data: allEmployees };
   } catch (error) {
     console.log("Get all office employee function", error);
@@ -35,14 +34,10 @@ export async function getOfficeEmployeeAttendance(weekStartDate) {
     const { props } = await getServerSideProps();
     const loginId = props?.session?.user?._id;
 
-    const allEmployees = await OfficeEmployeeModel.find({
-      delete: false,
-      isActive: true,
-      $or: [
-        { visaEndDate: { $lte: new Date() } },
-        { endDate: { $lte: new Date() } },
-      ],
-    }).lean();
+    // Same inversion as above: this returned ex-staff and expired visas only.
+    const allEmployees = await OfficeEmployeeModel.find(
+      currentlyEmployedMatch()
+    ).lean();
 
     const attendanceRecord = await WeeklyRotaModel.findOne({
       weekStartDate: date,
@@ -276,18 +271,12 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     }).lean();
 
     // 🔹 Fetch all active employees
+    // The visa and end-date checks have to hold together, not merely one of
+    // them: as a flat `$or` a British leaver passed on "no visa date on file"
+    // and their past end date was never examined, so they stayed on the rota.
     const allEmployees = await OfficeEmployeeModel.find({
-      isActive: true,
-      delete: false,
+      ...currentlyEmployedMatch(new Date(now)),
       isShowenInWeeklyTimesheet: true,
-      $or: [
-        { visaEndDate: { $gt: now } },
-        { visaEndDate: { $exists: false } },
-        { visaEndDate: null },
-        { endDate: { $gte: now } },
-        { endDate: { $exists: false } },
-        { endDate: null },
-      ],
     });
 
     // 🔹 Fetch Approved + Pending leave requests in this week
