@@ -18,6 +18,7 @@ import {
   ScanQrCodeIcon,
   SettingsIcon,
   Settings,
+  GalleryVerticalEnd,
 } from "lucide-react";
 import Overview from "../leaveManagement/components/overview/overview";
 import LeaveCategoryNew from "../leaveManagement/components/leaveCategory/leave-category";
@@ -202,12 +203,11 @@ export const leaveMenu = [
   //   icon: ClipboardPlus,
   // },
 
-  // {
-  //   name: "History",
-  //   link: "history",
-  //   //   content: <EmployeeLeaveDetails />,
-  //   icon: GalleryVerticalEnd,
-  // },
+  {
+    name: "History",
+    link: "history",
+    icon: GalleryVerticalEnd,
+  },
   {
     name: "Holiday Calendar",
     link: "holidaycalendar",

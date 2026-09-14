@@ -15,13 +15,7 @@ import {
   getLeaveRequestDataAdmin,
   rejectPastLeaveRequest,
 } from "@/server/leaveServer/getLeaveServer";
-import {
-  differenceInCalendarDays,
-  differenceInDays,
-  format,
-  isPast,
-  isToday,
-} from "date-fns";
+import { differenceInDays, format, isPast, isToday } from "date-fns";
 import {
   ChevronDown,
   ChevronRight,
@@ -56,6 +50,7 @@ import { DateRangeFilter } from "@/components/filters/filterDate/filterDateRange
 import { EmployeeFilter } from "@/components/filters/selectFilter/employeeFilter";
 import { useSession } from "next-auth/react";
 import LeaveDetailsSheet from "./leave-details-sheet";
+import { LeaveStatusCell, NoticeGiven } from "./leave-status-cell";
 import { LeaveRollbackDialog } from "./leave-rollback";
 
 export function LeaveRequestTable({
@@ -304,42 +299,6 @@ export function LeaveRequestTableNew({ onEdit }) {
   );
 }
 
-/**
- * How much warning the employee gave, counted in whole days from the submit
- * date to the first day of leave.
- *
- * A record entered after the leave was taken has no notice to report — it used
- * to show as a negative day count, which read as a data error rather than as
- * what it is: leave logged retrospectively.
- */
-const NoticeGiven = ({ leaveStartDate, leaveSubmitDate }) => {
-  if (!leaveStartDate || !leaveSubmitDate) return "-";
-
-  const days = differenceInCalendarDays(
-    new Date(leaveStartDate),
-    new Date(leaveSubmitDate)
-  );
-
-  if (days < 0) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge className="bg-stone-100 text-stone-700 whitespace-nowrap shadow-none">
-            Backdated
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Logged {Math.abs(days)} day(s) after the leave started</p>
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  if (days === 0) return "Same day";
-
-  return `${days} day${days === 1 ? "" : "s"}`;
-};
-
 const DetailsRow = ({ item, queryKey, onEdit, isSuperAdmin }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const { mutate: handleExpire } = useSubmitMutation({
@@ -386,23 +345,11 @@ const DetailsRow = ({ item, queryKey, onEdit, isSuperAdmin }) => {
           />
         </TableCell>
         <TableCell>
-          {item?.leaveStatus === "Pending" && item?.employee?.name ? (
-            isPast(new Date(item.leaveStartDate)) ? (
-              // Leave is pending, but the start date has passed — auto mark as rejected
-              <Status title="Expired" />
-            ) : (
-              // Today or future — allow approve & reject
-              <LeaveRequestStatus
-                leaveId={item._id}
-                invalidateKey={queryKey}
-                allowAccept={true}
-                allowReject={true}
-              />
-            )
-          ) : (
-            // Not pending — just show actual status
-            <Status title={item?.leaveStatus ?? "Unknown"} />
-          )}
+          <LeaveStatusCell
+            leave={item}
+            queryKey={queryKey}
+            canReview={!!item?.employee?.name}
+          />
         </TableCell>
         <TableCell>{item?.approvedBy?.name || "-"}</TableCell>
         <TableCell>
@@ -506,35 +453,11 @@ const DetailsRow = ({ item, queryKey, onEdit, isSuperAdmin }) => {
                                 {format(lh?.leaveSubmitDate, "PPP")}
                               </TableCell>
                               <TableCell>
-                                {lh?.leaveStatus === "Pending" &&
-                                item?.employee?.name ? (
-                                  isPast(new Date(lh?.leaveStartDate)) ? (
-                                    <LeaveRequestStatus
-                                      invalidateKey={queryKey}
-                                      leaveId={lh?._id}
-                                      allowAccept={true}
-                                      allowReject={true}
-                                    />
-                                  ) : isToday(new Date(lh.leaveStartDate)) ? (
-                                    <LeaveRequestStatus
-                                      leaveId={lh?._id}
-                                      invalidateKey={queryKey}
-                                      allowAccept={false}
-                                      allowReject={true}
-                                    />
-                                  ) : (
-                                    <LeaveRequestStatus
-                                      leaveId={lh?._id}
-                                      invalidateKey={queryKey}
-                                      allowAccept={true}
-                                      allowReject={true}
-                                    />
-                                  )
-                                ) : isPast(lh?.leaveStartDate) ? (
-                                  <Status title={"Rejected"} />
-                                ) : (
-                                  <Status title={lh?.leaveStatus} />
-                                )}
+                                <LeaveStatusCell
+                                  leave={lh}
+                                  queryKey={queryKey}
+                                  canReview={!!item?.employee?.name}
+                                />
                               </TableCell>
 
                               <TableCell>{lh?.leaveDays} days</TableCell>

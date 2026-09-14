@@ -1,8 +1,17 @@
+"use client";
+
+import React from "react";
 import Shimmer from "@/components/tableStatus/tableLoader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
-
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -12,160 +21,241 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useFetchQuery } from "@/hooks/use-query";
+import { useCommonContext } from "@/context/commonContext";
 import { formatDates } from "@/lib/formatDate";
 import { getLeaveRequestDataAdmin } from "@/server/leaveServer/getLeaveServer";
-import { differenceInDays, format, isPast } from "date-fns";
-import { ChevronDown, ChevronRight, EditIcon, Trash2Icon } from "lucide-react";
-import React from "react";
-import LeaveRequestStatus from "../leaveRequest/request-status";
-import { Status } from "@/components/tableStatus/status";
+import { format } from "date-fns";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { PaginationWithLinks } from "@/components/filters/pagination/pagination-client";
+import { SelectFilter } from "@/components/filters/selectFilter/selectFilter";
+import { EmployeeFilter } from "@/components/filters/selectFilter/employeeFilter";
+import { DateRangeFilter } from "@/components/filters/filterDate/filterDateRange";
+import {
+  getLeaveYearString,
+  getPreviousLeaveYearString,
+} from "@/helper/getLeaveYearString";
+import LeaveDetailsSheet from "../leaveRequest/leave-details-sheet";
+import {
+  LeaveStatusCell,
+  NoticeGiven,
+} from "../leaveRequest/leave-status-cell";
 
+const HEADERS = [
+  "Overlap",
+  "Name",
+  "Leave Type",
+  "Submit Date",
+  "Notice",
+  "Status",
+  "Actioned By",
+  "Actioned On",
+  "Note",
+  "Dates",
+  "Leave Days",
+  "Details",
+];
+
+/**
+ * A read-only record of leave that has already been settled.
+ *
+ * Deliberately not a second copy of the request table: approving, editing and
+ * cancelling belong to the Request tab, and a request still awaiting a decision
+ * is not history yet, so the query asks for decided requests only. The status
+ * filter can still narrow that to a single outcome.
+ */
 const LeaveHistory = () => {
-  const queryKey = ["leave-superadmin"];
+  const { searchParams } = useCommonContext();
+  const currentPage = searchParams?.page || 1;
+  const limit = searchParams?.pageSize || 10;
+  const leaveYear = searchParams?.leaveYear || "";
+  const leaveStatus = searchParams?.leaveStatus || "";
+  const fromDate = searchParams?.fromDate || "";
+  const toDate = searchParams?.toDate || "";
+  const employeeId = searchParams?.employeeId || "";
+
+  const queryKey = [
+    "leave-history",
+    currentPage,
+    limit,
+    leaveYear,
+    leaveStatus,
+    fromDate,
+    toDate,
+    employeeId,
+  ];
+
   const { data, isPending } = useFetchQuery({
     params: {
-      leaveYear: new Date().getFullYear(),
+      page: currentPage,
+      limit,
+      leaveYear,
+      leaveStatus,
+      fromDate,
+      toDate,
+      employeeId,
+      decidedOnly: true,
     },
     queryKey,
     fetchFn: getLeaveRequestDataAdmin,
   });
-  const { newData } = data || {};
+
+  const { newData, totalCount } = data || {};
+
+  const leaveYearString = getLeaveYearString(new Date());
+  const leaveYears = [
+    getPreviousLeaveYearString(leaveYearString),
+    leaveYearString,
+  ];
 
   return (
-    <RichTextEditorDemo />
-    // <div>
-    //   <Table>
-    //     <TableHeader>
-    //       <TableRow>
-    //         {[
-    //           newData && newData[0]?.employee?.name && "Overlap",
-    //           newData && newData[0]?.employee?.name && "Name",
-    //           // newData[0]?.employee?.name && "Role Type",
-    //           "Leave Type",
-    //           "Submit Date",
-    //           "Notice",
-    //           "Status",
-    //           "Admin",
-    //           "Approve Date",
-    //           "Note",
-    //           "date requested",
-    //           "LeaveDays",
-    //           "Action",
-    //         ].map((item, index) => (
-    //           <TableHead className="text-xs uppercase" key={index}>
-    //             {item}
-    //           </TableHead>
-    //         ))}
-    //       </TableRow>
-    //     </TableHeader>
-    //     {isPending ? (
-    //       <Shimmer length={7} />
-    //     ) : (
-    //       <TableBody>
-    //         {newData &&
-    //           newData.map((item, index) => (
-    //             <DetailsRow key={index} item={item} queryKey={queryKey} />
-    //           ))}
-    //       </TableBody>
-    //     )}
-    //   </Table>
-    // </div>
+    <div className="mt-4">
+      <Card>
+        <CardHeader>
+          <div className="space-y-1">
+            <CardTitle>Leave History</CardTitle>
+            <CardDescription>
+              Leave that has already been approved, rejected, cancelled, expired
+              or rolled back.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap justify-start items-center gap-4 mb-2">
+            <DateRangeFilter />
+            <div className="flex flex-wrap items-center gap-4">
+              <EmployeeFilter />
+              <SelectFilter
+                name="leaveYear"
+                label={"Leave Year"}
+                options={leaveYears.map((year) => ({
+                  label: year,
+                  value: year,
+                }))}
+              />
+              <SelectFilter
+                name="leaveStatus"
+                label={"Leave Status"}
+                options={[
+                  { label: "All", value: "All" },
+                  { label: "Approved", value: "Approved" },
+                  { label: "Cancelled", value: "Cancelled" },
+                  { label: "Rejected", value: "Rejected" },
+                  { label: "Expired", value: "Expired" },
+                  { label: "Rolled Back", value: "Rolled Back" },
+                ]}
+              />
+            </div>
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {HEADERS.map((head, index) => (
+                  <TableHead className="text-xs uppercase" key={index}>
+                    {head}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            {isPending ? (
+              <Shimmer length={7} />
+            ) : (
+              <TableBody>
+                {newData && newData.length > 0 ? (
+                  newData.map((item, index) => (
+                    <HistoryRow key={index} item={item} queryKey={queryKey} />
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={HEADERS.length}
+                      className="py-8 text-center text-sm text-muted-foreground"
+                    >
+                      No settled leave matches these filters.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            )}
+          </Table>
+
+          {totalCount > 0 && (
+            <div className="flex justify-between items-center mt-4">
+              <PaginationWithLinks totalCount={totalCount || 0} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
 export default LeaveHistory;
 
-const DetailsRow = ({ item, queryKey }) => {
+const HistoryRow = ({ item, queryKey }) => {
   const [isOpen, setIsOpen] = React.useState(false);
+  const overlaps = item?.overlappingRequests || [];
+
   return (
     <>
       <TableRow>
-        {item?.employee?.name && (
-          <>
-            <TableCell>
-              {item?.overlappingRequests.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setIsOpen(!isOpen)}
-                >
-                  {item?.overlappingRequests.length}
-                  {isOpen ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                </Button>
+        <TableCell>
+          {overlaps.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsOpen(!isOpen)}
+            >
+              {overlaps.length}
+              {isOpen ? (
+                <ChevronDown className="h-4 w-4" />
               ) : (
-                <Button variant="ghost" size="icon">
-                  -
-                </Button>
+                <ChevronRight className="h-4 w-4" />
               )}
-            </TableCell>
-            <TableCell>{item?.employee?.name}</TableCell>
-          </>
-        )}
-        {/* <TableCell>{item?.employee?.role}</TableCell> */}
-        <TableCell>{item?.leaveType}</TableCell>
-        <TableCell>
-          {format(item?.leaveSubmitDate || new Date(), "PPP")}
-        </TableCell>
-        <TableCell>
-          {differenceInDays(
-            item?.leaveStartDate || new Date(),
-            item?.leaveSubmitDate || new Date()
-          ) + 1}{" "}
-          days
-        </TableCell>
-        <TableCell>
-          {item?.leaveStatus === "Pending" && item?.employee?.name ? (
-            <LeaveRequestStatus
-              leaveId={item?._id}
-              invalidateKey={queryKey}
-              leaveDate={item?.leaveStartDate}
-            />
+            </Button>
           ) : (
-            <Status title={item?.leaveStatus} />
+            <span className="text-muted-foreground">-</span>
           )}
+        </TableCell>
+        <TableCell>{item?.employee?.name || "-"}</TableCell>
+        <TableCell>{item?.isHalfDay ? "Half Day" : item?.leaveType}</TableCell>
+        <TableCell>
+          {item?.leaveSubmitDate
+            ? format(new Date(item.leaveSubmitDate), "PPP")
+            : "-"}
+        </TableCell>
+        <TableCell>
+          <NoticeGiven
+            leaveStartDate={item?.leaveStartDate}
+            leaveSubmitDate={item?.leaveSubmitDate}
+          />
+        </TableCell>
+        <TableCell>
+          {/* Read-only: history never offers approve or reject. */}
+          <LeaveStatusCell leave={item} queryKey={queryKey} canReview={false} />
         </TableCell>
         <TableCell>{item?.approvedBy?.name || "-"}</TableCell>
         <TableCell>
           {item?.approvedDate
-            ? format(item?.approvedDate || new Date(), "PPP")
+            ? format(new Date(item.approvedDate), "PPP")
             : "-"}
         </TableCell>
-        <TableCell>{item?.adminComment || "-"}</TableCell>
+        <TableCell>
+          <div className="w-10 overflow-ellipsis truncate">
+            {item?.adminComment || "-"}
+          </div>
+        </TableCell>
         <TableCell>
           {formatDates(item?.leaveStartDate, item?.leaveEndDate)}
         </TableCell>
         <TableCell>{item?.leaveDays} days</TableCell>
         <TableCell>
-          {isPast(new Date(item?.leaveStartDate)) ||
-            (item?.leaveStatus === "Pending" && (
-              <div className="flex gap-2 items-center">
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => handleEdit(item)}
-                >
-                  <EditIcon className="text-indigo-600" />
-                </Button>
-                {/* <LeaveForm
-                  fields={fields}
-                  showDialog={showDialog}
-                  setShowDialog={setShowDialog}
-                  initialValues={initialValues}
-                  handleSubmit={handleSubmit}
-                /> */}
-                <Button size="icon" variant="outline">
-                  <Trash2Icon className="text-rose-600" />
-                </Button>
-              </div>
-            ))}
+          <LeaveDetailsSheet item={item} queryKey={queryKey} />
         </TableCell>
       </TableRow>
+
       <TableRow className="border-none">
-        <TableCell colSpan={12} className="py-0">
+        <TableCell colSpan={HEADERS.length} className="py-0">
           <Collapsible open={isOpen} onOpenChange={setIsOpen}>
             <CollapsibleContent className="py-2">
               <Card>
@@ -189,48 +279,36 @@ const DetailsRow = ({ item, queryKey }) => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {item?.overlappingRequests
-                        ? item?.overlappingRequests.map((lh, idx) => (
-                            <TableRow key={idx}>
-                              <TableCell>{lh?.employeeName}</TableCell>
-                              <TableCell>{lh?.leaveType}</TableCell>
-                              <TableCell>
-                                {format(lh?.leaveSubmitDate, "PPP")}
-                              </TableCell>
-                              <TableCell>
-                                {/* Task check with admin status */}
-                                {lh?.leaveStatus === "Pending" &&
-                                item?.employee?.name &&
-                                isPast(lh?.leaveSubmitDate) ? (
-                                  <LeaveRequestStatus
-                                    leaveId={lh?._id}
-                                    invalidateKey={queryKey}
-                                    leaveDate={lh?.leaveStartDate}
-                                  />
-                                ) : isPast(lh?.leaveStartDate) ? (
-                                  <Status title={"Rejected"} />
-                                ) : (
-                                  <Status title={lh?.leaveStatus} />
-                                )}
-                              </TableCell>
-
-                              <TableCell>
-                                {differenceInDays(
-                                  lh?.leaveEndDate,
-                                  lh?.leaveStartDate
-                                )}{" "}
-                                days
-                              </TableCell>
-                              <TableCell>
-                                {formatDates(
-                                  lh.leaveStartDate,
-                                  lh.leaveEndDate
-                                )}
-                              </TableCell>
-                              <TableCell>{lh?.overLappingDays} days</TableCell>
-                            </TableRow>
-                          ))
-                        : null}
+                      {overlaps.map((lh, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell>{lh?.employeeName}</TableCell>
+                          <TableCell>{lh?.leaveType}</TableCell>
+                          <TableCell>
+                            {lh?.leaveSubmitDate
+                              ? format(new Date(lh.leaveSubmitDate), "PPP")
+                              : "-"}
+                          </TableCell>
+                          <TableCell>
+                            <LeaveStatusCell
+                              leave={lh}
+                              queryKey={queryKey}
+                              canReview={false}
+                            />
+                          </TableCell>
+                          {/* leaveDays as stored: counting the gap between the
+                              first and last day overstates leave booked as
+                              scattered dates. */}
+                          <TableCell>{lh?.leaveDays} days</TableCell>
+                          <TableCell>
+                            {formatDates(lh?.leaveStartDate, lh?.leaveEndDate)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={"bg-indigo-600 text-white"}>
+                              {lh?.overLappingDays} days
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </CardContent>

@@ -138,6 +138,7 @@ export async function getLeaveRequestDataAdmin(filterData) {
       fromDate,
       toDate,
       employeeId: filterEmployeeId,
+      decidedOnly,
     } = filterData;
 
     // before apply page and limit we have to convert them to number and set default values
@@ -176,10 +177,13 @@ export async function getLeaveRequestDataAdmin(filterData) {
       };
     }
 
-    console.log("Leave Status Filter:", match);
-
     if (leaveStatus && leaveStatus !== "All") {
       match.leaveStatus = leaveStatus;
+    } else if (decidedOnly) {
+      // The history view is a record of what was settled, so a request still
+      // waiting on a decision does not belong in it. An explicit status filter
+      // above wins, which is what lets history be narrowed to one outcome.
+      match.leaveStatus = { $ne: "Pending" };
     }
     const lookup =
       role === "superAdmin" || isPermission
