@@ -11,6 +11,11 @@ import EmployeModel from "@/models/employeModel";
 import { decrypt } from "@/lib/algo";
 import { fetchLiveOfficeClock } from "../timeOffServer/timeOffServer";
 import ClockRecordModel from "@/models/clockInModel";
+import WorkSettingModel from "@/models/workSettingModel";
+import {
+  DEFAULT_DAYS_PER_WEEK,
+  DEFAULT_FIXED_WEEKLY_HOURS,
+} from "@/lib/workHours";
 import { withAudit, recordAudit } from "@/lib/audit";
 
 // Assign or update today's site assignment
@@ -2564,9 +2569,28 @@ export async function getSiteEmployeeTodayAttendanceData(employeeId) {
 //   }
 // }
 
+/**
+ * Attendance for the filter/export screen, across both workforces.
+ *
+ * Returns one row per employee-day, of three kinds:
+ *   "work"        — a clock record, with its span, breaks and net worked time
+ *   "paidLeave"   — an approved leave day the business pays for
+ *   "unpaidLeave" — an approved leave day it does not
+ *
+ * Leave is unioned in rather than looked up per row, because a leave day has
+ * no clock record at all: without it a fortnight off simply disappears from
+ * the report instead of being visible as leave.
+ *
+ * Every duration is computed in the database so the summary covers the whole
+ * filtered range, not just the page being displayed.
+ *
+ * @param {object} args
+ * @param {"office"|"site"|null} args.employeeType narrow to one workforce
+ */
 export async function fetchFilterClockRecordData({
   siteId = null,
   employeeId = null,
+  employeeType = null,
   fromDate = null,
   toDate = null,
   page = 1,
@@ -2579,30 +2603,72 @@ export async function fetchFilterClockRecordData({
   const today = normalizeDateToUTC(new Date());
   const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
   const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
+  // Leave dates are not guaranteed to sit on UTC midnight, so the upper bound
+  // is exclusive of the next day rather than inclusive of `end`.
+  const endExclusive = new Date(end.getTime() + 24 * 60 * 60 * 1000);
 
-  const filter = {};
-  if (siteId && siteId !== "All") {
-    if (!isValidObjectId(siteId)) {
-      return { success: false, message: "Invalid site ID" };
-    }
-    filter.siteId = createObjectId(siteId);
+  // Company defaults, read once and injected into the pipeline as constants.
+  // Employees on "fixed" weekly hours inherit these, so paid leave re-values
+  // itself when a super admin changes the figure — nothing is copied onto the
+  // employee records.
+  const workSetting = await WorkSettingModel.findOne().lean();
+  const fixedWeeklyHours =
+    Number(workSetting?.fixedWeeklyHours) || DEFAULT_FIXED_WEEKLY_HOURS;
+  const defaultDaysPerWeek =
+    Number(workSetting?.defaultDaysPerWeek) || DEFAULT_DAYS_PER_WEEK;
+
+  const hasSite = Boolean(siteId && siteId !== "All" && siteId !== "");
+  if (hasSite && !isValidObjectId(siteId)) {
+    return { success: false, message: "Invalid site ID" };
+  }
+  if (employeeId && !isValidObjectId(employeeId)) {
+    return { success: false, message: "Invalid employee ID" };
   }
 
-  const pipeline = [
-    // Initial match filter
+  /** "HH:mm" -> minutes since midnight. */
+  const toMin = (field) => ({
+    $let: {
+      vars: { t: { $ifNull: [field, "00:00"] } },
+      in: {
+        $add: [
+          { $multiply: [{ $toInt: { $substrBytes: ["$$t", 0, 2] } }, 60] },
+          { $toInt: { $substrBytes: ["$$t", 3, 2] } },
+        ],
+      },
+    },
+  });
+
+  const breakMinutesExpr = {
+    $sum: {
+      $map: {
+        input: { $ifNull: ["$breaks", []] },
+        as: "b",
+        in: {
+          $cond: [
+            {
+              $and: [
+                { $ne: [{ $ifNull: ["$$b.breakIn", null] }, null] },
+                { $ne: [{ $ifNull: ["$$b.breakOut", null] }, null] },
+              ],
+            },
+            { $subtract: [toMin("$$b.breakOut"), toMin("$$b.breakIn")] },
+            0,
+          ],
+        },
+      },
+    },
+  };
+
+  // --- worked days -------------------------------------------------------
+  const workPipeline = [
     {
       $match: {
         isDeleted: false,
         date: { $gte: start, $lte: end },
-
         ...(employeeId ? { employeeId: createObjectId(employeeId) } : {}),
-
-        ...(siteId && siteId !== "All"
-          ? { siteId: createObjectId(siteId) }
-          : {}),
+        ...(hasSite ? { siteId: createObjectId(siteId) } : {}),
       },
     },
-    // Lookup both site and office employees
     {
       $lookup: {
         from: "employes",
@@ -2619,8 +2685,6 @@ export async function fetchFilterClockRecordData({
         as: "officeEmp",
       },
     },
-
-    // add the site name as well
     {
       $lookup: {
         from: "projectsites",
@@ -2629,11 +2693,10 @@ export async function fetchFilterClockRecordData({
         as: "site",
       },
     },
-
     { $unwind: { path: "$site", preserveNullAndEmptyArrays: true } },
-
     {
       $addFields: {
+        isOffice: { $gt: [{ $size: "$officeEmp" }, 0] },
         employee: {
           $cond: [
             { $gt: [{ $size: "$officeEmp" }, 0] },
@@ -2644,75 +2707,349 @@ export async function fetchFilterClockRecordData({
       },
     },
     { $unset: ["siteEmp", "officeEmp"] },
-    // Search filter
-    ...(query
-      ? [
-          {
-            $match: {
-              $or: [
-                { "employee.firstName": { $regex: query, $options: "i" } },
-                { "employee.lastName": { $regex: query, $options: "i" } },
-                { "employee.name": { $regex: query, $options: "i" } }, // office
+    {
+      $addFields: {
+        spanMinutes: {
+          $cond: [
+            {
+              $and: [
+                { $ne: [{ $ifNull: ["$clockIn", null] }, null] },
+                { $ne: [{ $ifNull: ["$clockOut", null] }, null] },
               ],
             },
-          },
-        ]
-      : []),
-    // Payment type filter
-    ...(paymentType && paymentType !== "All"
-      ? [
-          {
-            $match: {
-              "employee.paymentType": paymentType,
-            },
-          },
-        ]
-      : []),
-    // Pagination facet
-
+            { $subtract: [toMin("$clockOut"), toMin("$clockIn")] },
+            0,
+          ],
+        },
+        breakMinutes: breakMinutesExpr,
+      },
+    },
     {
       $project: {
-        // we don't have to send the entire employee object back
+        kind: { $literal: "work" },
+        employeeId: 1,
+        workforce: { $cond: ["$isOffice", "Office", "Site"] },
         name: {
           $cond: [
             { $ifNull: ["$employee.firstName", false] },
-            {
-              $concat: ["$employee.firstName", " ", "$employee.lastName"],
-            },
+            { $concat: ["$employee.firstName", " ", "$employee.lastName"] },
             "$employee.name",
           ],
         },
         paymentType: "$employee.paymentType",
+        date: 1,
+        siteName: "$site.siteName",
         clockIn: 1,
         clockOut: 1,
-        date: 1,
         breaks: 1,
-        siteName: "$site.siteName",
+        spanMinutes: 1,
+        breakMinutes: 1,
+        netMinutes: { $subtract: ["$spanMinutes", "$breakMinutes"] },
+        leaveType: { $literal: null },
+        isHalfDay: { $literal: false },
+        halfDayType: { $literal: null },
+        dayUnits: { $literal: 0 },
       },
     },
+  ];
+
+  // --- leave days --------------------------------------------------------
+  // A site filter narrows worked time, and leave is not attributable to a
+  // site, so leave is left out entirely whenever one is applied.
+  const leavePipeline = hasSite
+    ? null
+    : [
+        {
+          $match: {
+            leaveStatus: "Approved",
+            ...(employeeId ? { employeeId: createObjectId(employeeId) } : {}),
+          },
+        },
+        { $unwind: "$leaveDates" },
+        { $match: { leaveDates: { $gte: start, $lt: endExclusive } } },
+        {
+          $lookup: {
+            from: "employes",
+            localField: "employeeId",
+            foreignField: "_id",
+            as: "siteEmp",
+          },
+        },
+        {
+          $lookup: {
+            from: "officeemployes",
+            localField: "employeeId",
+            foreignField: "_id",
+            as: "officeEmp",
+          },
+        },
+        {
+          $addFields: {
+            isOffice: { $gt: [{ $size: "$officeEmp" }, 0] },
+            employee: {
+              $cond: [
+                { $gt: [{ $size: "$officeEmp" }, 0] },
+                { $arrayElemAt: ["$officeEmp", 0] },
+                { $arrayElemAt: ["$siteEmp", 0] },
+              ],
+            },
+          },
+        },
+        {
+          $addFields: {
+            // What one leave day is worth for this employee:
+            //   weekly hours / days per week, halved for a half day.
+            // Payroll's own figure wins when a request carries one, since that
+            // is what was actually paid; the contract is the fallback.
+            perDayMinutes: {
+              $let: {
+                vars: {
+                  weekly: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $eq: ["$employee.weeklyHourType", "custom"] },
+                          { $gt: [{ $ifNull: ["$employee.weeklyHours", 0] }, 0] },
+                        ],
+                      },
+                      "$employee.weeklyHours",
+                      fixedWeeklyHours,
+                    ],
+                  },
+                  days: {
+                    $cond: [
+                      { $gt: [{ $ifNull: ["$employee.dayPerWeek", 0] }, 0] },
+                      "$employee.dayPerWeek",
+                      defaultDaysPerWeek,
+                    ],
+                  },
+                },
+                in: {
+                  $let: {
+                    vars: {
+                      contractMinutes: {
+                        $round: [
+                          {
+                            $divide: [
+                              { $multiply: ["$$weekly", 60] },
+                              "$$days",
+                            ],
+                          },
+                          0,
+                        ],
+                      },
+                      payrollMinutes: {
+                        $cond: [
+                          {
+                            $and: [
+                              { $gt: [{ $ifNull: ["$leaveTotalHours", 0] }, 0] },
+                              { $gt: [{ $ifNull: ["$leaveDays", 0] }, 0] },
+                            ],
+                          },
+                          {
+                            $round: [
+                              {
+                                $divide: [
+                                  { $multiply: ["$leaveTotalHours", 60] },
+                                  "$leaveDays",
+                                ],
+                              },
+                              0,
+                            ],
+                          },
+                          0,
+                        ],
+                      },
+                    },
+                    in: {
+                      $let: {
+                        vars: {
+                          base: {
+                            $cond: [
+                              { $gt: ["$$payrollMinutes", 0] },
+                              "$$payrollMinutes",
+                              "$$contractMinutes",
+                            ],
+                          },
+                        },
+                        in: {
+                          $cond: [
+                            { $eq: ["$isHalfDay", true] },
+                            { $round: [{ $divide: ["$$base", 2] }, 0] },
+                            "$$base",
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { $unset: ["siteEmp", "officeEmp"] },
+        {
+          $project: {
+            kind: {
+              $cond: [
+                { $eq: ["$isPaid", false] },
+                { $literal: "unpaidLeave" },
+                { $literal: "paidLeave" },
+              ],
+            },
+            employeeId: 1,
+            workforce: { $cond: ["$isOffice", "Office", "Site"] },
+            name: {
+              $cond: [
+                { $ifNull: ["$employee.firstName", false] },
+                { $concat: ["$employee.firstName", " ", "$employee.lastName"] },
+                "$employee.name",
+              ],
+            },
+            paymentType: "$employee.paymentType",
+            date: "$leaveDates",
+            siteName: { $literal: null },
+            clockIn: { $literal: null },
+            clockOut: { $literal: null },
+            breaks: { $literal: [] },
+            spanMinutes: { $literal: 0 },
+            breakMinutes: { $literal: 0 },
+            netMinutes: { $literal: 0 },
+            leaveMinutes: "$perDayMinutes",
+            leaveType: 1,
+            isHalfDay: { $ifNull: ["$isHalfDay", false] },
+            halfDayType: { $ifNull: ["$halfDayType", null] },
+            isPaid: { $ne: ["$isPaid", false] },
+            // A half day counts as half a day against the totals, so a
+            // fortnight of half days does not read as ten full days off.
+            dayUnits: {
+              $cond: [{ $eq: ["$isHalfDay", true] }, 0.5, 1],
+            },
+          },
+        },
+      ];
+
+  const pipeline = [
+    ...workPipeline,
+    ...(leavePipeline
+      ? [{ $unionWith: { coll: "leaverequests", pipeline: leavePipeline } }]
+      : []),
+
+    // Workforce filter runs after the union so it applies to leave rows too.
+    ...(employeeType === "office" || employeeType === "site"
+      ? [{ $match: { workforce: employeeType === "office" ? "Office" : "Site" } }]
+      : []),
+
+    ...(query
+      ? [{ $match: { name: { $regex: query, $options: "i" } } }]
+      : []),
+    ...(paymentType && paymentType !== "All"
+      ? [{ $match: { paymentType } }]
+      : []),
+
+    { $sort: { date: -1, name: 1 } },
 
     {
       $facet: {
         data: [{ $skip: (page - 1) * pageSize }, { $limit: pageSize }],
         totalCount: [{ $count: "count" }],
+        summary: [
+          {
+            $group: {
+              _id: null,
+              workDays: {
+                $sum: { $cond: [{ $eq: ["$kind", "work"] }, 1, 0] },
+              },
+              totalSpanMinutes: { $sum: "$spanMinutes" },
+              totalBreakMinutes: { $sum: "$breakMinutes" },
+              totalNetMinutes: { $sum: "$netMinutes" },
+              paidLeaveDays: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$kind", "paidLeave"] },
+                    { $ifNull: ["$dayUnits", 1] },
+                    0,
+                  ],
+                },
+              },
+              paidLeaveMinutes: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$kind", "paidLeave"] },
+                    { $ifNull: ["$leaveMinutes", 0] },
+                    0,
+                  ],
+                },
+              },
+              unpaidLeaveDays: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$kind", "unpaidLeave"] },
+                    { $ifNull: ["$dayUnits", 1] },
+                    0,
+                  ],
+                },
+              },
+              unpaidLeaveMinutes: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$kind", "unpaidLeave"] },
+                    { $ifNull: ["$leaveMinutes", 0] },
+                    0,
+                  ],
+                },
+              },
+              employees: { $addToSet: "$employeeId" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              workDays: 1,
+              totalSpanMinutes: 1,
+              totalBreakMinutes: 1,
+              totalNetMinutes: 1,
+              paidLeaveDays: 1,
+              paidLeaveMinutes: 1,
+              unpaidLeaveDays: 1,
+              unpaidLeaveMinutes: 1,
+              employeeCount: { $size: "$employees" },
+            },
+          },
+        ],
       },
     },
     {
       $addFields: {
         total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
+        summary: {
+          $ifNull: [
+            { $arrayElemAt: ["$summary", 0] },
+            {
+              workDays: 0,
+              totalSpanMinutes: 0,
+              totalBreakMinutes: 0,
+              totalNetMinutes: 0,
+              paidLeaveDays: 0,
+              paidLeaveMinutes: 0,
+              unpaidLeaveDays: 0,
+              unpaidLeaveMinutes: 0,
+              employeeCount: 0,
+            },
+          ],
+        },
       },
     },
-    {
-      $project: {
-        data: 1,
-        total: 1,
-      },
-    },
+    { $project: { data: 1, total: 1, summary: 1 } },
   ];
+
   const [result] = await ClockRecordModel.aggregate(pipeline);
   return {
     success: true,
     data: JSON.stringify(result?.data || []),
     totalCount: result?.total || 0,
+    summary: result?.summary || null,
+    leaveExcluded: hasSite,
+    workSetting: { fixedWeeklyHours, defaultDaysPerWeek },
   };
 }

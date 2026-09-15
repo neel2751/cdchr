@@ -213,6 +213,33 @@ export const getSelectOfficeEmployee = async () => {
   }
 };
 
+/**
+ * Site employees only. `getSelectEmployee` merges both workforces into one
+ * list, which is no use to a filter that has already been narrowed to site
+ * staff — picking an office employee there would always return nothing.
+ */
+export const getSelectSiteEmployee = async () => {
+  try {
+    await connect();
+    const employees = await EmployeModel.aggregate([
+      { $match: { delete: false, isActive: true } },
+      {
+        $project: {
+          _id: 0,
+          value: "$_id",
+          label: { $concat: ["$firstName", " ", "$lastName"] },
+        },
+      },
+      { $sort: { label: 1 } },
+    ]).exec();
+
+    return { success: true, data: JSON.stringify(employees || []) };
+  } catch (error) {
+    console.log("Error in getSelectSiteEmployee", error);
+    return { success: false, data: JSON.stringify([]) };
+  }
+};
+
 export const getSelectEmployee = async () => {
   try {
     // await connect();
