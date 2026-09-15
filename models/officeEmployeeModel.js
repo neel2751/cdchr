@@ -57,7 +57,16 @@ const officeEmployeSchema = new mongoose.Schema(
     immigrationCategory: { type: String, required: false },
     employeType: { type: String, required: true },
     dayPerWeek: { type: Number, required: false }, // 1-7
-    // hoursPerWeek: { type: Number, required: false },
+    // How many hours a week this employee is contracted for. "fixed" follows
+    // the company-wide figure in WorkSetting, so raising that one number moves
+    // everyone on it; "custom" pins this employee to `weeklyHours` instead.
+    // Paid leave is valued from this: weekly hours / dayPerWeek = a day's worth.
+    weeklyHourType: {
+      type: String,
+      enum: ["fixed", "custom"],
+      default: "fixed",
+    },
+    weeklyHours: { type: Number, required: false }, // only when "custom"
     // weeksPerYear: { type: Number, required: false },
     isActive: { type: Boolean, default: true },
     isAdmin: { type: Boolean, default: false },
