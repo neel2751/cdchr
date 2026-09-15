@@ -950,8 +950,26 @@ export async function fetchLiveOfficeClock({
                     ],
                   },
                 },
+                // Split by whether the leave is paid: unpaid leave is an
+                // absence the business is not paying for, so it does not
+                // belong in the same figure as booked holiday.
                 onLeave: {
-                  $sum: { $cond: [{ $eq: ["$onLeave", true] }, 1, 0] },
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $ne: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                onUnpaidLeave: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $eq: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
                 },
                 totalWorkedMinutes: {
                   $sum: {
@@ -1030,6 +1048,7 @@ export async function fetchLiveOfficeClock({
                 onBreak: 1,
                 clockedOut: 1,
                 onLeave: 1,
+                onUnpaidLeave: 1,
                 averageMinutes: {
                   $cond: [
                     { $gt: ["$clockedOut", 0] },
@@ -1054,6 +1073,7 @@ export async function fetchLiveOfficeClock({
                 onBreak: 0,
                 clockedOut: 0,
                 onLeave: 0,
+                onUnpaidLeave: 0,
                 averageMinutes: 0,
               },
             ],
@@ -1076,6 +1096,7 @@ export async function fetchLiveOfficeClock({
         onBreak: 0,
         clockedOut: 0,
         onLeave: 0,
+        onUnpaidLeave: 0,
         averageMinutes: 0,
       },
     };

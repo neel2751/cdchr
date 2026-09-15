@@ -14,6 +14,7 @@ import {
   Bell,
   Palmtree,
   CalendarOff,
+  WalletMinimal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -254,7 +255,13 @@ const EmployeeSiteManagement = ({ searchParams }) => {
   // State management
 
   const STATUS_CONFIG = {
-    "on-leave": { color: "bg-orange-100 text-orange-800", text: "Holiday" },
+    "on-leave": { color: "bg-orange-100 text-orange-800", text: "Paid Holiday" },
+    // Unpaid leave is an authorised absence the business is not paying for, so
+    // it reads differently from booked holiday rather than sharing its badge.
+    "unpaid-leave": {
+      color: "bg-rose-100 text-rose-800 border border-rose-300 border-dashed",
+      text: "Unpaid Leave",
+    },
     "bank-holiday": {
       color: "bg-sky-100 text-sky-800",
       text: "Bank Holiday",
@@ -281,7 +288,8 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       if (hasOpenBreak) return "on-break";
       return assignment.clockOut ? "clocked-out" : "checked-in";
     }
-    if (assignment.onLeave) return "on-leave";
+    if (assignment.onLeave)
+      return assignment.leaveIsPaid === false ? "unpaid-leave" : "on-leave";
     if (isBankHoliday) return "bank-holiday";
     return "absent";
   };
@@ -327,9 +335,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
       <Card>
         <CardHeader className="flex justify-between">
           <div>
-            <CardTitle>Time Tracking Dashboard</CardTitle>
+            <CardTitle>Office Attendance</CardTitle>
             <CardDescription>
-              View and manage employee attendance and time tracking records
+              Daily clock-in, breaks and leave for office staff
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -346,7 +354,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
               </span>
             </div>
           )}
-          <div className="grid grid-cols-2 gap-5 md:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-4 xl:grid-cols-7">
             <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
               <CardHeader>
                 <CardTitle>Total Employees</CardTitle>
@@ -371,9 +379,17 @@ const EmployeeSiteManagement = ({ searchParams }) => {
             </Card>
             <Card className="bg-orange-50 text-orange-600 border-none shadow-none">
               <CardHeader>
-                <CardTitle>On Holiday</CardTitle>
+                <CardTitle>Paid Holiday</CardTitle>
                 <span className="text-2xl font-semibold">
                   {summary?.onLeave || 0}
+                </span>
+              </CardHeader>
+            </Card>
+            <Card className="bg-rose-50 text-rose-600 border-none shadow-none">
+              <CardHeader>
+                <CardTitle>Unpaid Leave</CardTitle>
+                <span className="text-2xl font-semibold">
+                  {summary?.onUnpaidLeave || 0}
                 </span>
               </CardHeader>
             </Card>
@@ -404,13 +420,13 @@ const EmployeeSiteManagement = ({ searchParams }) => {
           <div>
             <CardTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
-              Active Employees{" "}
+              Office Employees{" "}
               <span className="font-semibold">
                 ({attendanceList?.length || 0})
               </span>
             </CardTitle>
             <CardDescription>
-              Attendance for every active office employee •{" "}
+              Every active office employee on this date •{" "}
               {format(viewedDate, "PPP")}
             </CardDescription>
           </div>
@@ -488,6 +504,9 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                 {status === "on-leave" && (
                                   <Palmtree className="h-3 w-3" />
                                 )}
+                                {status === "unpaid-leave" && (
+                                  <WalletMinimal className="h-3 w-3" />
+                                )}
                                 {status === "bank-holiday" && (
                                   <CalendarOff className="h-3 w-3" />
                                 )}
@@ -497,11 +516,13 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                                 {statusConfig?.text}
                               </div>
                             </Badge>
-                            {status === "on-leave" && assignment.leaveType && (
-                              <span className="text-xs text-gray-500">
-                                {assignment.leaveType}
-                              </span>
-                            )}
+                            {(status === "on-leave" ||
+                              status === "unpaid-leave") &&
+                              assignment.leaveType && (
+                                <span className="text-xs text-gray-500">
+                                  {assignment.leaveType}
+                                </span>
+                              )}
                             {workedWhileOnLeave && (
                               <Badge className="bg-orange-100 text-orange-800 border border-orange-300">
                                 Worked on leave
