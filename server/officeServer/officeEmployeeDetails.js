@@ -353,6 +353,27 @@ export async function deleteOfficeEmployee(id) {
   }
 }
 
+/**
+ * Remove files that reached S3 before the upload was rejected, so a refused
+ * upload does not leave objects behind that nothing references.
+ *
+ * Awaited as a batch: the callers previously used `forEach(async ...)`, which
+ * fires each delete without awaiting any of them and returns before they
+ * settle. A rejected delete is logged rather than thrown — failing to tidy up
+ * must not change the message the caller gets back.
+ */
+async function discardUploadedFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) return;
+  const results = await Promise.allSettled(
+    files.filter((file) => file?.key).map((file) => deleteFileFromS3(file.key))
+  );
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.log("Failed to remove orphaned upload:", result.reason?.message);
+    }
+  }
+}
+
 export async function uploadDocument(data) {
   if (!data) return { success: false, message: "No Data Provided" };
   const { props } = await getServerSideProps();
@@ -361,26 +382,37 @@ export async function uploadDocument(data) {
   try {
     await connect();
 
+    // Checked up front for both paths. This used to live inside the "no
+    // existing record" branch only, so an upload onto an employee who already
+    // had documents skipped validation and could store a file with no title.
+    if (!title || !docType || !documentsFiles || documentsFiles.length === 0) {
+      await discardUploadedFiles(documentsFiles);
+      return {
+        success: false,
+        message: "Title, DocType and Files are required",
+      };
+    }
+
+    // The employee's document record, whatever state its files are in. This
+    // deliberately does NOT require a live file via `$elemMatch`: once every
+    // file had been deleted the record stopped matching, and the upload below
+    // created a second record for the same employee.
     const docuemntData = await DocumentModel.findOne({
       employeeId: createObjectId(employeeId),
       isDeleted: false,
-      // we have to check only document is not deleted
-      documentsFiles: {
-        $elemMatch: { isDeleted: false }, // Check if a document with the same title and type already exists and is not deleted
-      },
-      // documentsFiles: { $elemMatch: { fileName: title, docType } },
     });
-    // Check if the document already exists for the employee
-    if (
-      docuemntData &&
-      docuemntData.documentsFiles.some(
-        (file) => file.title === title && file.docType === docType
-      )
-    ) {
-      documentsFiles.forEach(async (file) => {
-        console.log("Deleting file from S3:", file.key);
-        await deleteFileFromS3(file.key);
-      });
+
+    // Only a file that is still there can clash. Deleting a document is a soft
+    // delete — the entry stays in `documentsFiles` with `isDeleted: true` — so
+    // without this check a deleted title could never be reused, even though it
+    // is gone from the employee's file list. Archived files keep
+    // `isDeleted: false` and stay visible, so they still block a reused title.
+    const hasLiveDuplicate = docuemntData?.documentsFiles?.some(
+      (file) => !file.isDeleted && file.title === title && file.docType === docType
+    );
+
+    if (hasLiveDuplicate) {
+      await discardUploadedFiles(documentsFiles);
       return {
         success: false,
         message: "Document with this title and type already exists",
@@ -409,21 +441,6 @@ export async function uploadDocument(data) {
       return { success: true, data: JSON.stringify(updatedDocument) };
     } else {
       // If document does not exist, create a new one
-      if (
-        !title ||
-        !docType ||
-        !documentsFiles ||
-        documentsFiles.length === 0
-      ) {
-        documentsFiles.forEach(async (file) => {
-          console.log("Deleting file from S3:", file.key);
-          await deleteFileFromS3(file.key);
-        });
-        return {
-          success: false,
-          message: "Title, DocType and Files are required",
-        };
-      }
       const newDocument = new DocumentModel({
         employeeId: createObjectId(employeeId),
         documentsFiles: documentsFiles.map((file) => ({

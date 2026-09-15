@@ -27,6 +27,7 @@ import { useSubmitMutation } from "@/hooks/use-mutate";
 import { CommonContext } from "@/context/commonContext";
 import { BANKFIELD, OFFICEFIELD } from "@/data/fields/fields";
 import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
+import { getWorkSettings } from "@/server/settingsServer/workSettings";
 import Alert from "@/components/alert/alert";
 import OfficeEmployeeForm from "./components/officeEmployeeForm";
 import CompanyWiseCountCard from "./components/companyWiseCountCard";
@@ -143,6 +144,11 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
     fetchFn: canViewSensitiveDetails,
     queryKey: ["canViewSensitiveDetails"],
   });
+
+  const { data: workSetting } = useFetchSelectQuery({
+    fetchFn: getWorkSettings,
+    queryKey: ["workSettings"],
+  });
   const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
 
   const field = OFFICEFIELD.filter(
@@ -161,6 +167,20 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       return {
         ...item,
         options: selectCompany,
+      };
+    }
+    // Name the actual company figure in the option, so whoever is filling the
+    // form can see what "fixed" means without opening Settings.
+    if (item.name === "weeklyHourType") {
+      return {
+        ...item,
+        options: [
+          {
+            value: "fixed",
+            label: `Fixed hours (${workSetting?.fixedWeeklyHours ?? 40}h/week)`,
+          },
+          { value: "custom", label: "Custom hours" },
+        ],
       };
     }
     return item;

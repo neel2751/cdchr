@@ -11,6 +11,7 @@ import { addDays, startOfWeek } from "date-fns";
 import { formatDate, getUKTime } from "@/utils/time";
 import EmployeModel from "@/models/employeModel";
 import ClockRecordModel from "@/models/clockInModel";
+import { currentlyEmployedMatch } from "@/lib/employeeStatus";
 
 export default async function fetchEmployeeWithHoliday() {
   try {
@@ -23,17 +24,10 @@ export default async function fetchEmployeeWithHoliday() {
 
     await connect();
     // start to fetch only isActive, isDeleted =false, visaEndDate & End Date is valid
+    // The `$or` here used `$lte`, which matched staff whose visa or employment
+    // had already lapsed — the opposite of what the comment above describes.
     const pipeline = [
-      {
-        $match: {
-          isActive: true,
-          delete: false,
-          $or: [
-            { visaEndDate: { $lte: new Date() } },
-            { endDate: { $lte: new Date() } },
-          ],
-        },
-      },
+      { $match: currentlyEmployedMatch(now) },
       {
         $lookup: {
           from: "leaverequests",
@@ -57,9 +51,12 @@ export default async function fetchEmployeeWithHoliday() {
                       ],
                     },
                     { $in: ["$leaveStatus", ["Approved"]] }, // ✅ Only active leaves
-                    {
-                      leaveYear: new Date().getFullYear(),
-                    },
+                    // A `{ leaveYear: <number> }` clause sat here. Inside
+                    // `$expr` a plain document is a literal, not a comparison,
+                    // so it was always truthy and filtered nothing — and
+                    // `leaveYear` holds a string like "2026-27", never a
+                    // number, so it could not have matched regardless. The
+                    // date bounds above already scope this to today.
                   ],
                 },
               },
@@ -659,6 +656,60 @@ export async function fetchLiveOfficeClock({
     const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
     const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
 
+    // Exclusive upper bound for matching leave. `leaveDates` entries are not
+    // guaranteed to sit exactly on UTC midnight, so an inclusive `$lte: end`
+    // would miss a leave day stored with a time on it. Stepped in pure UTC
+    // milliseconds — `end` is already UTC midnight and a local-time day step
+    // would drift across a BST change.
+    const endExclusive = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+    // Approved leave covering any day in the requested range. Without this the
+    // table cannot tell "did not come in" apart from "booked the day off", and
+    // everyone on holiday reads as absent.
+    const leaveLookup = [
+      {
+        $lookup: {
+          from: "leaverequests",
+          let: { eid: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$eid"] },
+                    { $eq: ["$leaveStatus", "Approved"] },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ["$leaveDates", []] },
+                              as: "d",
+                              cond: {
+                                $and: [
+                                  { $gte: ["$$d", start] },
+                                  { $lt: ["$$d", endExclusive] },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 0, leaveType: 1, isPaid: 1 } },
+            { $limit: 1 },
+          ],
+          as: "leave",
+        },
+      },
+      { $unwind: { path: "$leave", preserveNullAndEmptyArrays: true } },
+    ];
+
     // -----------------------------------------------
     // 1) SINGLE EMPLOYEE VIEW
     // -----------------------------------------------
@@ -692,6 +743,8 @@ export async function fetchLiveOfficeClock({
 
         { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
 
+        ...leaveLookup,
+
         {
           $project: {
             _id: 0,
@@ -707,6 +760,10 @@ export async function fetchLiveOfficeClock({
             breaks: { $ifNull: ["$clockRecord.breaks", []] },
 
             date: "$clockRecord.date",
+
+            onLeave: { $cond: [{ $ifNull: ["$leave", false] }, true, false] },
+            leaveType: { $ifNull: ["$leave.leaveType", null] },
+            leaveIsPaid: { $ifNull: ["$leave.isPaid", null] },
           },
         },
       ]);
@@ -721,7 +778,12 @@ export async function fetchLiveOfficeClock({
     // -----------------------------------------------
     // 2) ALL EMPLOYEES VIEW (PAGINATED)
     // -----------------------------------------------
-    const queryObj = {};
+    // Only current staff belong on the attendance board. Without this the
+    // aggregation matched every office employee ever created, so deactivated
+    // and soft-deleted people were listed as absent every day and were counted
+    // in the summary cards. "Active" here means the same thing it does on the
+    // office employee page: the account is switched on and not soft-deleted.
+    const queryObj = { isActive: true, delete: { $ne: true } };
     if (query) {
       queryObj.$or = [
         { name: { $regex: query, $options: "i" } },
@@ -760,6 +822,8 @@ export async function fetchLiveOfficeClock({
 
       { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
 
+      ...leaveLookup,
+
       {
         $project: {
           employeeId: "$_id",
@@ -774,6 +838,10 @@ export async function fetchLiveOfficeClock({
           breaks: { $ifNull: ["$clockRecord.breaks", []] },
 
           date: "$clockRecord.date",
+
+          onLeave: { $cond: [{ $ifNull: ["$leave", false] }, true, false] },
+          leaveType: { $ifNull: ["$leave.leaveType", null] },
+          leaveIsPaid: { $ifNull: ["$leave.isPaid", null] },
         },
       },
     ];
@@ -882,6 +950,27 @@ export async function fetchLiveOfficeClock({
                     ],
                   },
                 },
+                // Split by whether the leave is paid: unpaid leave is an
+                // absence the business is not paying for, so it does not
+                // belong in the same figure as booked holiday.
+                onLeave: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $ne: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                onUnpaidLeave: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $eq: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
                 totalWorkedMinutes: {
                   $sum: {
                     $cond: [
@@ -958,6 +1047,8 @@ export async function fetchLiveOfficeClock({
                 presentToday: 1,
                 onBreak: 1,
                 clockedOut: 1,
+                onLeave: 1,
+                onUnpaidLeave: 1,
                 averageMinutes: {
                   $cond: [
                     { $gt: ["$clockedOut", 0] },
@@ -981,6 +1072,8 @@ export async function fetchLiveOfficeClock({
                 presentToday: 0,
                 onBreak: 0,
                 clockedOut: 0,
+                onLeave: 0,
+                onUnpaidLeave: 0,
                 averageMinutes: 0,
               },
             ],
@@ -1002,6 +1095,8 @@ export async function fetchLiveOfficeClock({
         presentToday: 0,
         onBreak: 0,
         clockedOut: 0,
+        onLeave: 0,
+        onUnpaidLeave: 0,
         averageMinutes: 0,
       },
     };

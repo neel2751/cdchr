@@ -97,12 +97,15 @@ export const ADDRESSFIELD = [
     },
   },
   {
+    // Stored as `city` — the column name is left alone so existing records and
+    // every query keep working. Only what people read says "Town", which is
+    // the UK term for this part of an address.
     name: "city",
-    labelText: "City",
+    labelText: "Town",
     type: "text",
-    placeholder: "City",
+    placeholder: "Town",
     validationOptions: {
-      required: "City is required",
+      required: "Town is required",
       minLength: {
         value: 3,
         message: "Minimum 3 characters required",
@@ -904,6 +907,41 @@ export const OFFICEFIELD = [
         // value: /^[1-7]$/,
         value: /^(?:[1-6](?:\.5)?|7)$/,
         message: "Days should be between 1 and 7",
+      },
+    },
+  },
+  {
+    // How this employee's contracted week is decided. "fixed" follows the
+    // company figure a super admin maintains in Settings, so it moves for
+    // everyone at once; "custom" pins them to their own number below.
+    name: "weeklyHourType",
+    labelText: "Weekly Hours",
+    type: "select",
+    placeholder: "Select how hours are set",
+    // `options` is replaced at render time so the fixed figure shown here is
+    // the one actually configured, rather than a number baked into this file.
+    options: [
+      { value: "fixed", label: "Fixed hours (company default)" },
+      { value: "custom", label: "Custom hours" },
+    ],
+    validationOptions: {
+      required: "Please choose how weekly hours are set",
+    },
+  },
+  {
+    name: "weeklyHours",
+    labelText: "Hours Per Week",
+    showIf: {
+      field: "weeklyHourType",
+      value: "custom",
+    },
+    type: "number",
+    placeholder: "Enter Hours Per Week",
+    validationOptions: {
+      required: "Hours Per Week is required",
+      pattern: {
+        value: /^(?!0$)\d{1,2}(?:\.\d)?$/,
+        message: "Enter hours between 1 and 80",
       },
     },
   },

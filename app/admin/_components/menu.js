@@ -51,7 +51,7 @@ import SiteExpense from "../siteAssign/features/siteExpense";
 import { SiteEmployeeOtherDeatils } from "../employee/components/employeeOtherDeatils";
 import EmployeDocument from "../employee/components/employeDocument";
 import OfficeEmployeeAttendance from "@/components/tabs/employee-attendance";
-import CarryForwardSettings from "../leaveManagement/components/leaveSettings/carryForwardSettings";
+import SettingsTab from "../leaveManagement/components/leaveSettings/settingsTab";
 import LeaveReports from "../report/leaveReport/leaveReport";
 import AttendanceReport from "../report/attendanceReport/attendanceReport";
 
@@ -335,7 +335,7 @@ export const slugComponentmap = {
   holidaycalendar: HolidayPlannerCalendar,
   bankholiday: BankHoliday,
   report: LeaveReport,
-  settings: CarryForwardSettings,
+  settings: SettingsTab,
 };
 
 export const siteSlugComponentmap = {
