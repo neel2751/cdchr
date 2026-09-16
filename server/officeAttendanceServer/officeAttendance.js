@@ -274,10 +274,41 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
     // The visa and end-date checks have to hold together, not merely one of
     // them: as a flat `$or` a British leaver passed on "no visa date on file"
     // and their past end date was never examined, so they stayed on the rota.
+    const asOf = new Date(now);
     const allEmployees = await OfficeEmployeeModel.find({
-      ...currentlyEmployedMatch(new Date(now)),
+      ...currentlyEmployedMatch(asOf),
       isShowenInWeeklyTimesheet: true,
     });
+
+    // Anyone on the timesheet the rules above removed. Dropping someone
+    // silently is the dangerous part: a manager plans the week, a person is
+    // simply absent from it, and nothing says why. Reporting them lets the
+    // rota show what was withheld and what needs fixing — a lapsed visa to
+    // re-record, or a leaver who was never deactivated.
+    const withheld = (
+      await OfficeEmployeeModel.find({
+        isActive: true,
+        delete: { $ne: true },
+        isShowenInWeeklyTimesheet: true,
+        $or: [
+          { visaEndDate: { $lt: asOf } },
+          { endDate: { $lt: asOf } },
+        ],
+      })
+        .select({ name: 1, visaEndDate: 1, endDate: 1 })
+        .lean()
+    ).map((e) => ({
+      _id: e._id.toString(),
+      name: e.name,
+      reason:
+        e.visaEndDate && new Date(e.visaEndDate) < asOf
+          ? "Right to work expired"
+          : "Employment ended",
+      date:
+        e.visaEndDate && new Date(e.visaEndDate) < asOf
+          ? e.visaEndDate
+          : e.endDate,
+    }));
 
     // 🔹 Fetch Approved + Pending leave requests in this week
     const leaveRequests = await LeaveRequestModel.find({
@@ -392,6 +423,7 @@ export async function getOfficeEmployeeAttendanceWithLeave(weekStartDate) {
           ? "You"
           : approvedById?.name || null,
       rejectReason: existingRota?.rejectedReason || null,
+      withheld,
     };
 
     return {

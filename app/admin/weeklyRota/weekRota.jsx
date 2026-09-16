@@ -106,6 +106,29 @@ export function WeeklyRota() {
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
+          {memoizedSchedules?.withheld?.length > 0 && (
+            <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">
+                {memoizedSchedules.withheld.length} employee
+                {memoizedSchedules.withheld.length === 1 ? " is" : "s are"} not
+                on this rota
+              </p>
+              <ul className="mt-1 space-y-0.5 text-amber-800">
+                {memoizedSchedules.withheld.map((w) => (
+                  <li key={w._id}>
+                    {w.name} — {w.reason}
+                    {w.date
+                      ? ` ${format(new Date(w.date), "d MMM yyyy")}`
+                      : ""}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-amber-700">
+                They stay off the rota until the date is updated in Office
+                Management, or the account is deactivated if they have left.
+              </p>
+            </div>
+          )}
           <WeekRotaTable
             currentWeek={currentWeek}
             schedules={schedules}
