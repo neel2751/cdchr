@@ -643,3 +643,55 @@ export const verifyPassword = async (password) => {
 //     req.headers["x-forwarded-for"] || req.connection.remoteAddress || "";
 //   return `${userAgent}-${ip}`; // Simple fingerprint example
 // }
+
+/**
+ * End every signed-in session for the caller's own account.
+ *
+ * Sessions are JWTs, so there is nothing to delete: each token carries the
+ * moment it was issued, and moving this stamp forward makes proxy.js refuse
+ * anything older. The admin reset dialog already did this to somebody else's
+ * account; this is the same lever, for your own.
+ *
+ * It ends **this** device too, and cannot do otherwise — the mechanism is a
+ * timestamp, not a session list, so there is no token it could spare. The
+ * screen says so and signs the person out rather than leaving them clicking
+ * around a page whose next request will bounce them.
+ *
+ * Office employees only: site staff sign in at /employee, which has no
+ * equivalent screen.
+ */
+export async function signOutAllDevices() {
+  try {
+    const { props } = await getServerSideProps();
+    const employeeId = props?.session?.user?._id;
+    if (!employeeId) return { success: false, message: "Not signed in" };
+
+    await connect();
+    const employee = await OfficeEmployeeModel.findById(employeeId);
+    if (!employee) return { success: false, message: "Record not found" };
+
+    employee.sessionsValidFrom = new Date();
+    await employee.save();
+
+    // Read back rather than assume. Mongoose drops unknown paths silently, and
+    // a server still holding a schema from before this field existed would
+    // report success having saved nothing — the same trap the admin reset
+    // dialog documents.
+    const saved = await OfficeEmployeeModel.findById(employeeId)
+      .select("sessionsValidFrom")
+      .lean();
+    if (!saved?.sessionsValidFrom) {
+      return {
+        success: false,
+        message:
+          "Could not end the other sessions — the server is running an older " +
+          "version of the employee record. Restart the app and try again.",
+      };
+    }
+
+    return { success: true, message: "Signed out everywhere" };
+  } catch (error) {
+    console.log("signOutAllDevices error:", error?.message);
+    return { success: false, message: "Could not sign out the other devices" };
+  }
+}

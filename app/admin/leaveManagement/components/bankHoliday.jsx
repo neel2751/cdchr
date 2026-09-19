@@ -1,10 +1,21 @@
+"use client";
+
+// This component has always been a client component — it runs useBankHoliday(),
+// useBankHolidayRule() and useState. It got away without the directive because
+// its only importer was _components/menu.js, which is "use client", so it
+// inherited the boundary. Imported directly by a server page it was treated as
+// a server module and threw "Attempted to call useQuery() from the server".
+// Stating it here makes the component correct wherever it is used, rather than
+// correct only when reached through one particular file.
 import {
   CardTitle,
   Card,
   CardHeader,
   CardDescription,
 } from "@/components/ui/card";
-import { useBankHoliday } from "@/lib/holiday";
+import { useBankHoliday, useBankHolidayRule } from "@/lib/holiday";
+import { BANK_HOLIDAY_REGIONS } from "@/data/bankHolidayRegions";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { format, getYear, isPast } from "date-fns";
 import { StarIcon } from "lucide-react";
@@ -12,7 +23,21 @@ import Image from "next/image";
 import React from "react";
 
 export const BankHoliday = ({ className }) => {
-  const { isLoading, isError, error, data } = useBankHoliday();
+  // Which list is being *looked at*. Purely a view control: it starts on the
+  // company's configured nation so the tab shows the days that actually apply,
+  // and switching it browses another nation's without saving anything. The
+  // setting that decides whether the office closes — and which list the leave
+  // engine charges against — lives in Settings and is untouched by this.
+  const { observes, region: configuredRegion } = useBankHolidayRule();
+  const [viewRegion, setViewRegion] = React.useState(null);
+  const region = viewRegion ?? configuredRegion;
+  // Viewing a nation that is not this company's. The cards are tinted for it so
+  // a screenshot or a glance cannot be mistaken for the company's own days off —
+  // the caption above says so, but a caption is easy to scroll past.
+  const isOtherNation = region !== configuredRegion;
+  const regionLabel = BANK_HOLIDAY_REGIONS.find((r) => r.value === region)?.label;
+
+  const { isLoading, isError, error, data } = useBankHoliday(region);
 
   // find the next bank holiday
   const nextBankHoliday = data?.find((holiday) => {
@@ -29,33 +54,68 @@ export const BankHoliday = ({ className }) => {
     return acc;
   }, {});
 
+
+  // Rendered on every branch below — including the loading, error and empty
+  // states. A switcher that disappears when a list fails to load would strand
+  // whoever used it to get there.
+  const regionSwitcher = (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <Tabs value={region} onValueChange={setViewRegion}>
+        <TabsList>
+          {BANK_HOLIDAY_REGIONS.map((r) => (
+            <TabsTrigger key={r.value} value={r.value} className="text-xs">
+              {r.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <p className="text-xs text-muted-foreground">
+        {region === configuredRegion
+          ? observes
+            ? "The days your company is closed."
+            : "For reference — your company works bank holidays, so these are ordinary working days."
+          : "Viewing another nation's dates. This does not change your settings."}
+      </p>
+    </div>
+  );
+
   if (isLoading) {
     return (
-      <p className="mt-4 text-sm text-muted-foreground">
-        Loading bank holidays...
-      </p>
+      <div className="mt-4 space-y-2">
+        {regionSwitcher}
+        <p className="text-sm text-muted-foreground">
+          Loading bank holidays...
+        </p>
+      </div>
     );
   }
 
   if (isError) {
     return (
-      <p className="mt-4 text-sm text-red-600">
-        {error?.message || "Could not load bank holidays."} Please try again
-        later.
-      </p>
+      <div className="mt-4 space-y-2">
+        {regionSwitcher}
+        <p className="text-sm text-red-600">
+          {error?.message || "Could not load bank holidays."} Please try again
+          later.
+        </p>
+      </div>
     );
   }
 
   if (!data?.length) {
     return (
-      <p className="mt-4 text-sm text-muted-foreground">
-        No bank holidays found.
-      </p>
+      <div className="mt-4 space-y-2">
+        {regionSwitcher}
+        <p className="text-sm text-muted-foreground">
+          No bank holidays found.
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="mt-4 space-y-2">
+      {regionSwitcher}
       {/* <p>Bank Holidays: {data?.length}</p> */}
       {/* Show list of bank holidays */}
       {yearWiseDate &&
@@ -68,7 +128,11 @@ export const BankHoliday = ({ className }) => {
                   : "text-neutral-600 my-2 text-sm"
               }`}
             >
+              {/* Names the nation when it is not the company's own, so a
+                  screenshot of this list carries its own context rather than
+                  relying on the caption above still being on screen. */}
               Bank Holidays in {year}
+              {isOtherNation ? ` — ${regionLabel}` : ""}
             </CardTitle>
             <ul
               className={cn(
@@ -80,7 +144,13 @@ export const BankHoliday = ({ className }) => {
                 dateList?.map((holiday, index) => (
                   // make header as year
                   <li key={index}>
-                    <Card className="group cursor-pointer">
+                    <Card
+                      className={cn(
+                        "group cursor-pointer",
+                        isOtherNation &&
+                          "border-dashed border-amber-300 bg-amber-50/60"
+                      )}
+                    >
                       <CardHeader
                         className={`sm:ps-24 rounded-md relative ${
                           isPast(new Date(holiday?.date))

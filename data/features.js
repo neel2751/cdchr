@@ -102,7 +102,7 @@ export const FEATURES = [
     description:
       "Shift planning and the personal shift view. Salaried offices that do " +
       "not roster have no use for it.",
-    paths: ["/admin/weeklyRota", "/admin/my-weekly-shifts"],
+    paths: ["/admin/weeklyRota", "/admin/me/shifts", "/admin/my-weekly-shifts"],
     requires: [],
     core: false,
   },
@@ -113,7 +113,7 @@ export const FEATURES = [
     description:
       "Leave requests, approval and the personal leave view. Off for " +
       "companies that run leave in a separate HR system.",
-    paths: ["/admin/leaveManagement", "/admin/my-leaves"],
+    paths: ["/admin/leaveManagement", "/admin/me/leave", "/admin/my-leaves"],
     requires: [],
     core: false,
   },
@@ -268,6 +268,8 @@ export function featuresForPreset(presetKey) {
 export const CORE_PATHS = {
   "/admin/dashboard": "Landing page for every admin.",
   "/admin/officeEmployee": "The primary staff list. Every company has one.",
+  "/admin/profileRequests":
+    "Corrections staff ask for on their own records. Follows the staff list.",
   "/admin/previousOfficeEmployee": "Follows the active office staff list.",
   "/admin/attendance": "Recording attendance is the product's core job.",
   "/admin/my-attendance": "A person's own record of their own attendance.",
@@ -278,7 +280,12 @@ export const CORE_PATHS = {
   "/admin/settings": "Branding and domains.",
   "/admin/email": "Outgoing mail identity; password resets depend on it.",
   "/admin/auditLogs": "The record of who did what. Never optional.",
-  "/admin/account": "A person's own account.",
+  // Matched by prefix, longest first — so this covers /admin/me/profile,
+  // /admin/me/documents, /admin/me/security and /admin/me/attendance, while
+  // /admin/me/shifts and /admin/me/leave are longer entries above and stay
+  // gated by their own module.
+  "/admin/me": "A person's own profile, documents and security.",
+  "/admin/account": "Redirects to /admin/me; must survive to do so.",
   "/admin/reportIssue": "Support route; must survive any plan.",
 };
 

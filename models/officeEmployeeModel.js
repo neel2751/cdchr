@@ -13,6 +13,27 @@ const bankDetailSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One right-to-work verification. Append-only: a check proves the employee's
+// permission as it stood on `checkedAt`, so it is never edited or replaced —
+// when the visa changes, HR records a new entry and the history is kept.
+// `visaEndDate` is the expiry that was on file at the time, which is how we
+// later tell whether the newest check still covers the current visa.
+const rightToWorkCheckSchema = new mongoose.Schema(
+  {
+    checkedAt: { type: Date, required: true },
+    visaEndDate: { type: Date, required: false },
+    documentType: { type: String, required: false },
+    shareCode: { type: String, required: false },
+    note: { type: String, required: false },
+    checkedBy: {
+      _id: { type: mongoose.Types.ObjectId, required: false },
+      name: { type: String, required: false },
+      email: { type: String, required: false },
+    },
+  },
+  { _id: true, timestamps: { createdAt: true, updatedAt: false } }
+);
+
 const officeEmployeSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -37,7 +58,16 @@ const officeEmployeSchema = new mongoose.Schema(
     immigrationCategory: { type: String, required: false },
     employeType: { type: String, required: true },
     dayPerWeek: { type: Number, required: false }, // 1-7
-    // hoursPerWeek: { type: Number, required: false },
+    // How many hours a week this employee is contracted for. "fixed" follows
+    // the company-wide figure in WorkSetting, so raising that one number moves
+    // everyone on it; "custom" pins this employee to `weeklyHours` instead.
+    // Paid leave is valued from this: weekly hours / dayPerWeek = a day's worth.
+    weeklyHourType: {
+      type: String,
+      enum: ["fixed", "custom"],
+      default: "fixed",
+    },
+    weeklyHours: { type: Number, required: false }, // only when "custom"
     // weeksPerYear: { type: Number, required: false },
     isActive: { type: Boolean, default: true },
     isAdmin: { type: Boolean, default: false },
@@ -55,12 +85,35 @@ const officeEmployeSchema = new mongoose.Schema(
     bankDetail: { type: bankDetailSchema, required: false },
     visaStartDate: { type: Date, required: false },
     visaEndDate: { type: Date, required: false },
+    rightToWorkChecks: { type: [rightToWorkCheckSchema], default: [] },
+    // Denormalised copy of the newest check date so the list can sort and
+    // filter on it without unwinding the history.
+    lastRightToWorkCheckDate: { type: Date, required: false },
     joinDate: { type: Date, required: true },
     endDate: { type: Date, required: false },
     emergencyName: { type: String, required: false },
     emergencyPhoneNumber: { type: Number, required: false },
     emergencyRelation: { type: String, required: false },
     emergencyAddress: { type: String, required: false },
+    // Set when an admin resets the password with "require a password change"
+    // on. Cleared the moment the person sets their own — auth.js routes them to
+    // the change-password screen and nowhere else until they do.
+    mustChangePassword: { type: Boolean, default: false },
+    // Sessions issued before this instant are refused. Sessions are JWTs, so
+    // there is nothing server-side to delete — the token carries its issue time
+    // and auth.js compares the two. Moving this forward is what "sign out of
+    // all devices" actually does.
+    sessionsValidFrom: { type: Date },
+    // The employee's own photo. Two fields, because they answer different
+    // questions: `key` is where the bytes are, and is what the page renders
+    // through /api/asset; `mediaId` is the row in Media that makes the file
+    // visible in Media Management and countable against the company's storage.
+    // Absent on every existing record, which reads as "no photo" — the initials
+    // fallback that has always been there.
+    profileImage: {
+      key: { type: String, required: false },
+      mediaId: { type: mongoose.Types.ObjectId, ref: "Media", required: false },
+    },
     statusDate: { type: Date, required: false },
     pushSubscription: { type: Object, required: false, default: null },
     delete: { type: Boolean, default: false },

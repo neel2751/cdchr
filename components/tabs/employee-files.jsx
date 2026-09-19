@@ -59,7 +59,19 @@ import {
 } from "@/components/ui/alert-dialog";
 import Image from "next/image";
 
-export default function EmployeDocument() {
+/**
+ * @param {object} props
+ * @param {{ manage?: boolean }} [props.can] what this viewer may do here.
+ *
+ * Defaults to full access so every existing caller — the HR employee detail
+ * tabs — behaves exactly as before without being changed. Only the self-service
+ * shell passes anything, and it passes what the server decided, never a value
+ * chosen on the client. The buttons hidden here are refused by
+ * uploadDocument() and deleteEmployeeDocument() regardless; this is so an
+ * employee is not offered an action that would fail.
+ */
+export default function EmployeDocument({ can = { manage: true } }) {
+  const canManage = can?.manage !== false;
   const [showForm, setShowForm] = useState(false);
   const [filteredDocType, setFilteredDocType] = useState("all");
   const [open, setOpen] = useState(false);
@@ -285,19 +297,21 @@ export default function EmployeDocument() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <CardTitle>Employee Document</CardTitle>
-        <Button
-          size="icon"
-          variant="secondary"
-          onClick={() => setShowForm(!showForm)}
-        >
-          <PlusIcon
-            className={`transition-all duration-500 ${
-              showForm ? "rotate-[45deg]" : ""
-            } `}
-          />
-        </Button>
+        {canManage && (
+          <Button
+            size="icon"
+            variant="secondary"
+            onClick={() => setShowForm(!showForm)}
+          >
+            <PlusIcon
+              className={`transition-all duration-500 ${
+                showForm ? "rotate-[45deg]" : ""
+              } `}
+            />
+          </Button>
+        )}
       </div>
-      {showForm && (
+      {canManage && showForm && (
         <>
           <Card>
             <CardHeader>
@@ -426,44 +440,49 @@ export default function EmployeDocument() {
                             <ChartSplineIcon />
                             <span>Usage Report</span>
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <AlertDialog open={open} onOpenChange={setOpen}>
-                            <AlertDialogTrigger asChild>
-                              <DropdownMenuItem
-                                className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                                onSelect={(e) => e.preventDefault()} // prevent auto-close on select
-                              >
-                                <Trash2Icon className="text-rose-600 mr-2" />
-                                <span>Delete</span>
-                              </DropdownMenuItem>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  Are you sure you want to delete this document?
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This action cannot be undone. Deleting this
-                                  document will remove it permanently from the
-                                  system.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  className="bg-rose-600 text-white hover:bg-rose-700"
-                                  onClick={() =>
-                                    deleteDocumentMutation({
-                                      documentId: item._id,
-                                      fileKey: item.key,
-                                    })
-                                  }
-                                >
-                                  Continue
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          {canManage && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <AlertDialog open={open} onOpenChange={setOpen}>
+                                <AlertDialogTrigger asChild>
+                                  <DropdownMenuItem
+                                    className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                    onSelect={(e) => e.preventDefault()} // prevent auto-close on select
+                                  >
+                                    <Trash2Icon className="text-rose-600 mr-2" />
+                                    <span>Delete</span>
+                                  </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>
+                                      Are you sure you want to delete this
+                                      document?
+                                    </AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This action cannot be undone. Deleting
+                                      this document will remove it permanently
+                                      from the system.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-rose-600 text-white hover:bg-rose-700"
+                                      onClick={() =>
+                                        deleteDocumentMutation({
+                                          documentId: item._id,
+                                          fileKey: item.key,
+                                        })
+                                      }
+                                    >
+                                      Continue
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </>
+                          )}
                         </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -480,7 +499,9 @@ export default function EmployeDocument() {
                   />
                   <CardTitle>No documents found.</CardTitle>
                   <CardDescription>
-                    You can upload documents by clicking the "+" button above.
+                    {canManage
+                      ? "Add a document with the + button above."
+                      : "Nothing is on file yet. HR adds documents to your record — ask them if something should be here."}
                   </CardDescription>
                   {/* <span className="text-gray-500">
                     No documents found for the selected type.

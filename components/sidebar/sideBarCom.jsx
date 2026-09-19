@@ -35,9 +35,9 @@ import { usePathname } from "next/navigation";
 import { Collapsible } from "../ui/collapsible";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import { getEmployeeMenu } from "@/server/selectServer/selectServer";
+import { useMyProfileImage } from "@/components/Avatar/useProfileImage";
 import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
-import { encrypt } from "@/lib/algo";
 import { useBranding } from "@/app/admin/providers";
 import CompanySwitcher from "./companySwitcher";
 import { useMemo } from "react";
@@ -94,8 +94,6 @@ const SideBarHeaderCom = () => {
 const SideBarMenu = () => {
   const pathName = usePathname();
   const { data: sessionData } = useSession();
-  const currentRole = sessionData?.user?.role;
-  const currentUserId = sessionData?.user?._id;
 
   // Memoize the path to avoid recalculation
   const rootPath = useMemo(() => pathName.split("/", 3).join("/"), [pathName]);
@@ -106,44 +104,24 @@ const SideBarMenu = () => {
     queryKey: ["employeeMenu", sessionData?.user?._id],
   });
 
-  // Merge menus and memoize to prevent recalculation on re-render
-  const menu = useMemo(
-    () => mergeAndFilterMenus(COMMONMENUITEMS, menuItems),
+  // Merge menus and memoize to prevent recalculation on re-render.
+  //
+  // `hidden` entries are dropped here: they are in COMMONMENUITEMS so proxy.js
+  // will let an ordinary employee open those paths, not because anybody should
+  // see a link to them. The profile area is reached from the avatar menu below,
+  // and the rest are redirects from where these pages used to live.
+  //
+  // A hardcoded copy of the three personal items used to be spliced in here for
+  // role "user" and then de-duplicated against this list. It was dead weight —
+  // COMMONMENUITEMS already carries them, and the sidebar does not filter that
+  // list by role — and it meant their paths were written down in two files.
+  const mergedMenu = useMemo(
+    () =>
+      mergeAndFilterMenus(COMMONMENUITEMS, menuItems).filter(
+        (item) => !item?.hidden,
+      ),
     [menuItems],
   );
-
-  const personalMenu = useMemo(() => {
-    if (currentRole !== "user" || !currentUserId) return [];
-
-    return [
-      {
-        name: "My Attendance",
-        path: "/admin/my-attendance",
-        icon: "CalendarClock",
-      },
-      {
-        name: "My Weekly Shifts",
-        path: "/admin/my-weekly-shifts",
-        icon: "CalendarDays",
-      },
-      {
-        name: "My Leaves",
-        path: "/admin/my-leaves",
-        icon: "Stamp",
-      },
-    ];
-  }, [currentRole, currentUserId]);
-
-  const mergedMenu = useMemo(() => {
-    if (!personalMenu.length) return menu;
-
-    const existingPaths = new Set(menu.map((item) => item?.path));
-    const uniquePersonalMenu = personalMenu.filter(
-      (item) => !existingPaths.has(item.path),
-    );
-
-    return [...uniquePersonalMenu, ...menu];
-  }, [personalMenu, menu]);
 
   // Determine current menus and reports
   const currentMenu = useMemo(() => getMenu(rootPath), [rootPath]);
@@ -208,6 +186,25 @@ const SideBarFooterCom = () => {
   const branding = useBranding();
   const brandLogo = branding?.logoUrl || "/images/Interiorlogo.svg";
 
+  // Both avatars here used to be the company logo, which made the footer say
+  // "you are signed in as this company" rather than "you are signed in as you"
+  // — and made every account look identical. The person's own photo belongs
+  // here; the logo stays as the fallback, so nothing changes for anyone who has
+  // not set one.
+  //
+  // Read from the browser's own cache, not the database: this renders on every
+  // screen and the answer changes about once a year. See useProfileImage.js —
+  // it refreshes on its own schedule and the moment the photo is changed.
+  const { src: photoSrc } = useMyProfileImage();
+  const avatarSrc = photoSrc || brandLogo;
+  const avatarFallback = (session?.user?.name || "?")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   return (
     <SidebarFooter className="border-t">
       <SidebarMenu>
@@ -218,13 +215,15 @@ const SideBarFooterCom = () => {
                 size="lg"
                 className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <Avatar className="h-8 w-8 rounded-lg border p-1 bg-black">
+                <Avatar className="h-8 w-8 rounded-lg border">
                   <AvatarImage
-                    // src={session?.user?.image || "/images/cdc.svg"}
-                    src={brandLogo}
-                    alt={session?.user?.name || "HR"}
+                    src={avatarSrc}
+                    alt=""
+                    className="object-cover"
                   />
-                  <AvatarFallback className="rounded-lg">N</AvatarFallback>
+                  <AvatarFallback className="rounded-lg">
+                    {avatarFallback}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
@@ -245,13 +244,15 @@ const SideBarFooterCom = () => {
             >
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                  <Avatar className="h-8 w-8 rounded-lg p-1 border">
+                  <Avatar className="h-8 w-8 rounded-lg border">
                     <AvatarImage
-                      // src={session?.user?.image || "/images/cdc.svg"}
-                      src={brandLogo}
-                      alt={session?.user?.name || "HR"}
+                      src={avatarSrc}
+                      alt=""
+                      className="object-cover"
                     />
-                    <AvatarFallback className="rounded-lg">N</AvatarFallback>
+                    <AvatarFallback className="rounded-lg">
+                      {avatarFallback}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">
@@ -278,14 +279,16 @@ const SideBarFooterCom = () => {
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem className="w-full">
+                  {/* No id in the link. This page can only ever show the
+                      signed-in user their own record, so naming that record in
+                      the URL told them nothing and put an identifier in their
+                      address bar and browser history for no reason. */}
                   <Link
                     className="flex items-center gap-2 w-full"
-                    href={`/admin/account/${encrypt(
-                      session?.user?._id,
-                    )}/overview`}
+                    href="/admin/me/profile"
                   >
                     <BadgeCheck />
-                    Account
+                    My Profile
                   </Link>
                 </DropdownMenuItem>
                 {/* <DropdownMenuItem>

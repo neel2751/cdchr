@@ -5,12 +5,12 @@ import EmployeeOverview from "@/components/tabs/employee-overview";
 import { useCommonContext } from "@/context/commonContext";
 import { useFetchQuery } from "@/hooks/use-query";
 import { employeeLeaveDetailsNew } from "@/server/officeServer/officeEmployeeDetails";
-import React, { useId, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import LeaveCount from "../../leaveManagement/components/leaveDashboard/leaveCount";
 import { Button } from "@/components/ui/button";
 import { EditIcon, ListFilterIcon, PlusIcon, XIcon } from "lucide-react";
 import LeaveRequestNew from "../../leaveManagement/components/leaveRequest/leave-request-new";
-import { format, getYear, isPast } from "date-fns";
+import { format, isPast } from "date-fns";
 import {
   Card,
   CardContent,
@@ -55,6 +55,7 @@ import {
 import { getEmployeeLeaveData } from "@/server/leaveServer/leaveServer";
 import LeaveSheet from "../../leaveManagement/components/leaveEntitlements/leave-sheet";
 import SensitiveDetailsCard from "@/components/sensitiveDetails/sensitiveDetailsCard";
+import RightToWorkCard from "@/components/rightToWork/rightToWorkCard";
 import { formatDisplayDate } from "@/lib/formatDate";
 
 const EmployeeOtherDeatils = () => {
@@ -105,24 +106,53 @@ const EmployeeOtherDeatils = () => {
     <div className="space-y-2">
       <SensitiveDetailsCard slug={slug} employeeType="office" />
       <EmployeeOverview data={updateData} />
+      <RightToWorkCard
+        immigrationType={newData?.immigrationType}
+        visaEndDate={newData?.visaEndDate}
+        checks={newData?.rightToWorkChecks}
+      />
     </div>
   );
 };
 
+/** Leave years offered in the filter: three back, the current one, and next. */
+const YEAR_OFFSETS = [-3, -2, -1, 0, 1];
+const STATUSES = ["All", "Approved", "Pending", "Rejected"];
+
 const EmployeeLeaveDeatails = () => {
   const { searchParams } = useCommonContext();
+  // The employee this card is about. Used for the entitlement sheet's heading,
+  // which had no way to know whose leave it was showing.
+  const { newData: employeeRecord } = useAvatar();
   const [showDialog, setShowDialog] = useState(false);
   const [initialValues, setInitialValues] = useState(null);
-  const queryKey = ["leaveDeatils", searchParams];
+
+  // These two used to be `defaultValue` on a pair of Selects with no handler
+  // and no state behind them — the filter opened, the options were all there,
+  // and picking one did nothing at all. The leave year was pinned to today's
+  // and there was no way to look at any other.
+  const [leaveYear, setLeaveYear] = useState(() =>
+    getLeaveYearString(new Date())
+  );
+  const [status, setStatus] = useState("All");
+
+  // leaveYear belongs in the key: without it React Query answers the new year
+  // from the previous year's cache entry.
+  const queryKey = ["leaveDeatils", searchParams, leaveYear];
   const { data } = useFetchQuery({
-    params: { searchParams, leaveYear: getLeaveYearString(new Date()) },
+    params: { searchParams, leaveYear },
     fetchFn: employeeLeaveDetailsNew,
     queryKey,
     enabled: !!searchParams,
   });
 
+  // Was called with no params at all, so it answered for whoever was signed in
+  // and for today's leave year — meaning HR opening someone else's Leave tab
+  // saw their own entitlements under that person's name, and the year filter
+  // above could not move it.
   const { data: commonLeave } = useFetchQuery({
-    queryKey: ["commonLeave", searchParams],
+    queryKey: ["commonLeave", searchParams, leaveYear],
+    params: { slug: searchParams?.[0] ?? null, leaveYear },
     fetchFn: getEmployeeLeaveData,
   });
 
@@ -147,7 +177,16 @@ const EmployeeLeaveDeatails = () => {
   const id = useId();
   const { newData } = data || {};
   const currentLeaveYear = getCurrentLeaveYearStart();
-  const years = [-1, 0, 1].map((offset) => currentLeaveYear + offset);
+  const years = YEAR_OFFSETS.map((offset) => currentLeaveYear + offset);
+
+  // Status is applied here rather than in the query: the server returns one
+  // leave year, which is a handful of rows, and filtering them in the browser
+  // keeps the tiles above honest — they always describe the whole year.
+  const visibleLeave = useMemo(() => {
+    if (!Array.isArray(newData)) return [];
+    if (status === "All") return newData;
+    return newData.filter((item) => item?.leaveStatus === status);
+  }, [newData, status]);
   return (
     <>
       <Card>
@@ -169,12 +208,24 @@ const EmployeeLeaveDeatails = () => {
                 setInitialValues={setInitialValues}
                 newData={employeeCommonLeave}
               />
-              {newData?.length === 0 && (
+              {/* Shown whenever there are entitlements to show.
+                  It used to be `newData?.length === 0` — the sheet appeared
+                  only while the employee had *no* leave requests in the year,
+                  and vanished the moment they booked any. That is backwards:
+                  the allowance is most worth looking at once some of it has
+                  been used. The name was guaranteed blank for the same reason,
+                  being read from `newData[0]` in the one case where `newData`
+                  is empty. */}
+              {employeeCommonLeave?.leaveData?.length > 0 && (
                 <LeaveSheet
                   item={{
-                    name: newData[0]?.employee.name,
                     ...employeeCommonLeave,
+                    name:
+                      employeeRecord?.name ||
+                      newData?.[0]?.employee?.name ||
+                      "this employee",
                   }}
+                  queryKey={["commonLeave", searchParams, leaveYear]}
                 />
               )}
             </div>
@@ -182,11 +233,12 @@ const EmployeeLeaveDeatails = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <LeaveCount />
+            <LeaveCount slug={searchParams?.[0] ?? null} leaveYear={leaveYear} />
             <div className="border rounded-xl">
               <div className="sm:flex items-center justify-between border-b p-4 sm:space-y-0 space-y-2">
                 <CardTitle className="text-indigo-600">
-                  All Leave Request ({newData?.length})
+                  {status === "All" ? "Leave requests" : `${status} leave`}{" "}
+                  {leaveYear} ({visibleLeave.length})
                 </CardTitle>
                 <div>
                   <Popover>
@@ -198,30 +250,26 @@ const EmployeeLeaveDeatails = () => {
                     </PopoverTrigger>
                     <PopoverContent className="w-48 overflow-scroll">
                       <div className="space-y-4">
-                        <Select defaultValue={"All"}>
+                        <Select value={status} onValueChange={setStatus}>
                           <SelectTrigger
-                            id={id}
+                            id={`${id}-status`}
                             className="focus:ring-indigo-600"
                           >
                             <span>
-                              Status:{" "}
-                              <SelectValue placeholder="Select a year" />
+                              Status: <SelectValue placeholder="All" />
                             </span>
                           </SelectTrigger>
                           <SelectContent>
-                            {/* show last 5 years */}
-                            {["All", "Approved", "Pending", "Rejected"].map(
-                              (item) => (
-                                <SelectItem key={item} value={item}>
-                                  {item}
-                                </SelectItem>
-                              ),
-                            )}
+                            {STATUSES.map((item) => (
+                              <SelectItem key={item} value={item}>
+                                {item}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
-                        <Select defaultValue={getYear(new Date()).toString()}>
+                        <Select value={leaveYear} onValueChange={setLeaveYear}>
                           <SelectTrigger
-                            id={id}
+                            id={`${id}-year`}
                             className="focus:ring-indigo-600"
                           >
                             <span>
@@ -231,23 +279,22 @@ const EmployeeLeaveDeatails = () => {
                           </SelectTrigger>
                           <SelectContent className="max-h-60 overflow-y-auto max-w-max">
                             {years.map((year) => {
-                              const leaveYear = getLeaveYearStringFilter(year);
+                              // Named `option` rather than `leaveYear`, which
+                              // is the selected value in scope out here.
+                              const option = getLeaveYearStringFilter(year);
 
-                              const isCurrent = year === getYear(new Date());
-                              if (isCurrent) {
-                                return (
-                                  <SelectItem
-                                    key={leaveYear}
-                                    value={leaveYear}
-                                    className="font-semibold"
-                                  >
-                                    {leaveYear} (Current)
-                                  </SelectItem>
-                                );
-                              }
+                              // Compared against the leave year's starting
+                              // year, not the calendar year. Between January
+                              // and March those differ, and this marked the
+                              // wrong row "(Current)" for a quarter of the year.
+                              const isCurrent = year === currentLeaveYear;
                               return (
-                                <SelectItem key={leaveYear} value={leaveYear}>
-                                  {leaveYear}
+                                <SelectItem
+                                  key={option}
+                                  value={option}
+                                  className={isCurrent ? "font-semibold" : ""}
+                                >
+                                  {isCurrent ? `${option} (Current)` : option}
                                 </SelectItem>
                               );
                             })}
@@ -259,20 +306,30 @@ const EmployeeLeaveDeatails = () => {
                 </div>
               </div>
               <div className="px-4 py-2">
-                <ScrollArea className={`${newData?.length >= 2 ? "h-96" : ""}`}>
+                <ScrollArea
+                  className={`${visibleLeave.length >= 2 ? "h-96" : ""}`}
+                >
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {newData &&
-                      newData.map((data, index) => (
-                        <LeaveRequestCard
-                          key={index}
-                          data={data}
-                          handleEdit={handleEdit}
-                          handleDelete={deleteLeaveRequest}
-                          queryKey={queryKey}
-                        />
-                      ))}
-                    {/* <LeaveRequests /> */}
+                    {visibleLeave.map((data, index) => (
+                      <LeaveRequestCard
+                        key={data?._id || index}
+                        data={data}
+                        handleEdit={handleEdit}
+                        handleDelete={deleteLeaveRequest}
+                        queryKey={queryKey}
+                      />
+                    ))}
                   </div>
+                  {/* An empty grid used to render as blank space, which reads
+                      as a page that failed rather than a year with no leave
+                      in it. */}
+                  {visibleLeave.length === 0 && (
+                    <p className="py-8 text-center text-sm text-muted-foreground">
+                      {status === "All"
+                        ? `No leave booked in ${leaveYear}.`
+                        : `No ${status.toLowerCase()} leave in ${leaveYear}.`}
+                    </p>
+                  )}
                 </ScrollArea>
               </div>
             </div>
@@ -336,7 +393,7 @@ const LeaveRequestCard = ({ data, handleEdit, handleDelete, queryKey }) => {
         </div>
       </CardHeader>
 
-      {["Approved", "Rejected", "Expired", "Cancelled"].includes(
+      {["Approved", "Rejected", "Expired", "Cancelled", "Rolled Back"].includes(
         data?.leaveStatus,
       ) ? (
         <></>

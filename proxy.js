@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { authConfig } from "./auth.config";
 import { MENU, COMMONMENUITEMS, DERIVED_ACCESS } from "./data/menu";
 import { isPathAllowed } from "./lib/tenantPlan";
+import { homePathForRole } from "./lib/roleHome";
 import {
   TENANT_HEADERS,
   isPlatformHost,
@@ -121,6 +122,59 @@ async function checkRoleMiddleware(req) {
   const tenantHeaders = withTenantHeaders(req, resolution);
   const pass = () => NextResponse.next({ request: { headers: tenantHeaders } });
 
+  // --- Login steps ----------------------------------------------------------
+  // /verify and /setup-2fa are steps *inside* the login flow, not pages in their
+  // own right. The check above has already rejected anyone without a session, so
+  // all that is left is making sure a signed-in user lands on the step that is
+  // actually outstanding: a verified user must not sit on a code prompt they
+  // cannot satisfy, and an unenrolled one must not skip past it.
+  //
+  // Deliberately ahead of every host and role rule below. Both paths have to be
+  // reachable by every role, on any hostname — a platform admin sent to /verify
+  // by the block below, on a configured PLATFORM_APEX_HOST, would otherwise be
+  // bounced back to /platform by the platform-host rule and redirect forever.
+  // Both branches below test `requires2FA` FIRST, in the same order as the
+  // fall-through gate near the end of this function. That ordering is what makes
+  // the pair loop-free: were /verify to defer to enrolment while /setup-2fa
+  // defers to verification, a session with both flags set would bounce between
+  // the two forever. The signIn callback in auth.js makes the flags mutually
+  // exclusive today, so that state should not arise — but a redirect loop locks
+  // every user out of the product, which is too expensive to leave resting on an
+  // invariant declared in another file.
+  // /change-password belongs with them: it is another step inside signing in,
+  // and it lives outside /admin. Left to fall through to the role-prefix guard
+  // below, a `user` whose allowed prefix is /admin was redirected here by the
+  // gate and then bounced straight to /unauthorized — a forced password change
+  // that locked the person out instead of letting them fix it.
+  if (requestedPath === "/change-password") {
+    if (requires2FA) return NextResponse.redirect(new URL("/verify", req.url));
+    if (mustSetup2FA) {
+      return NextResponse.redirect(new URL("/setup-2fa", req.url));
+    }
+    // Whether a change is genuinely outstanding is decided by the page itself,
+    // which reads the database — the cookie cannot be trusted in either
+    // direction here (see the note further down).
+    return pass();
+  }
+
+  if (requestedPath === "/verify" || requestedPath === "/setup-2fa") {
+    const home = homePathForRole(userRole);
+
+    if (requestedPath === "/verify") {
+      if (requires2FA) return pass();
+      // Nothing to verify, but never enrolled: send them to enrol.
+      if (mustSetup2FA) {
+        return NextResponse.redirect(new URL("/setup-2fa", req.url));
+      }
+      return NextResponse.redirect(new URL(home, req.url));
+    }
+
+    // /setup-2fa
+    if (requires2FA) return NextResponse.redirect(new URL("/verify", req.url));
+    if (mustSetup2FA) return pass();
+    return NextResponse.redirect(new URL(home, req.url));
+  }
+
   // --- Platform (provider) dashboard ---------------------------------------
   // Served only to platformAdmin, and only on PLATFORM_APEX_HOST when one is
   // configured. With no apex configured the role check alone applies, so
@@ -179,23 +233,32 @@ async function checkRoleMiddleware(req) {
     return NextResponse.redirect(new URL("/api/auth/signin", req.url));
   }
 
-  // we have to allow all route for /admin/account/*
-  const isAdminAccountRoute = requestedPath.startsWith("/admin/account/");
-
-  if (requestedPath === "/verify" || isAdminAccountRoute) {
-    return pass();
-  }
-
-  // If 2FA is required, redirect to verification page
-  if (requires2FA && requestedPath !== "/verify") {
+  // If 2FA is required, redirect to verification page.
+  // The path comparisons that used to sit here are gone: /verify and /setup-2fa
+  // return from the login-step block above and never reach this far.
+  if (requires2FA) {
     return NextResponse.redirect(new URL("/verify", req.url));
   }
 
   // Privileged users who have not yet enrolled in 2FA are forced to set it up
   // before they can access any protected page.
-  if (mustSetup2FA && requestedPath !== "/setup-2fa") {
+  if (mustSetup2FA) {
     return NextResponse.redirect(new URL("/setup-2fa", req.url));
   }
+
+  // NOTE: the forced-password-change gate is NOT here, and not read from the
+  // session either. `mustChangePassword` reaches the cookie when the token is
+  // minted, so a cookie issued before the reset does not carry it — and one
+  // issued before the *change* still carries it afterwards, which would trap
+  // somebody on the change screen having already changed it. The gate lives
+  // with the account-status check below, where the value is read live.
+  // The blanket `pass()` for /admin/account/* was removed here. It sat above
+  // the account-status check below, so the account area was the one place a
+  // deactivated employee — or one whose sessions had been revoked by "sign out
+  // of all devices" — could still reach and still change their password. The
+  // self-service area that replaced it, /admin/me, is an ordinary page: it is
+  // listed in COMMONMENUITEMS so every role may open it, and it goes through
+  // every gate below like everything else.
 
   // Terminate live sessions for deactivated / locked-down office accounts.
   // Runs before the super-admin bypass so even a compromised super admin can
@@ -214,11 +277,41 @@ async function checkRoleMiddleware(req) {
         body: JSON.stringify({ employeeId }),
       });
       if (statusRes.ok) {
-        const { isActive } = await statusRes.json();
+        const { isActive, sessionsValidFrom, mustChangePassword: mustChange } =
+          await statusRes.json();
         if (isActive === false) {
           return NextResponse.redirect(
             new URL("/unauthorized?action=logout", req.url)
           );
+        }
+
+        // "Sign out of all devices". Sessions are JWTs, so there is nothing to
+        // delete — a session is ended by refusing any token minted before the
+        // reset. This has to happen here rather than in the jwt callback:
+        // during ordinary navigation the callback that runs is the edge copy in
+        // auth.config.js, which cannot reach the database, so a cookie issued
+        // before the reset would otherwise keep working indefinitely.
+        const issuedAt = user?.issuedAt;
+        if (
+          sessionsValidFrom &&
+          issuedAt &&
+          issuedAt * 1000 < sessionsValidFrom
+        ) {
+          return NextResponse.redirect(
+            new URL("/unauthorized?action=logout", req.url)
+          );
+        }
+
+        // Read live rather than from the cookie: the token was minted before
+        // the admin set this, so it is the one thing that cannot know about it.
+        //
+        // The exemption for /admin/account/* that used to be on this line is
+        // gone with the bypass above. It existed so somebody could change a
+        // forced password from the account page; /change-password is that
+        // screen now, and it is deliberately not a hop into the account area —
+        // see the note at the top of app/change-password/page.jsx.
+        if (mustChange) {
+          return NextResponse.redirect(new URL("/change-password", req.url));
         }
       }
     } catch (err) {
@@ -377,12 +470,19 @@ const { auth } = NextAuth(authConfig);
 
 export default auth(checkRoleMiddleware);
 
-// Exclude auth routes and public paths from the middleware
+// Exclude auth routes and public paths from the middleware.
+//
+// /verify and /setup-2fa are matched so that they require a session: they are
+// login steps, and while they went unmatched both were reachable by anyone, with
+// no session at all.
 export const config = {
   matcher: [
     "/admin/:path*",
     "/employee/:path*",
     "/hr/:path*",
     "/platform/:path*",
+    "/verify",
+    "/setup-2fa",
+    "/change-password",
   ],
 };

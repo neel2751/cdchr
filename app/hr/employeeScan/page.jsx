@@ -35,11 +35,13 @@ import {
 } from "@/server/siteAssignmentServer/siteAssignmentServer";
 import { Badge } from "@/components/ui/badge";
 
+const RECEPTION_AVATAR =
+  "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg";
+
 export default function EmployeeClockScanner({ siteId }) {
   const [attendanceData, setAttendanceData] = useState({});
   const [selectedAction, setSelectedAction] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [avatar, setAvatar] = useState(null);
   const socketRef = useRef(null);
   const { data: session } = useSession();
   const employeeId = session?.user?._id;
@@ -57,14 +59,6 @@ export default function EmployeeClockScanner({ siteId }) {
     }
   };
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const selectedAvatar =
-        localStorage.getItem("selectedAvatar") ||
-        "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg";
-      setAvatar(selectedAvatar);
-    }
-  }, []);
 
   // Determine the **next allowed action**
   // const getAvailableActions = (status) => {
@@ -144,10 +138,7 @@ export default function EmployeeClockScanner({ siteId }) {
           <CardTitle>
             <div className="flex items-center gap-2">
               <img
-                src={
-                  avatar ||
-                  "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                }
+                src={RECEPTION_AVATAR}
                 alt={session?.user?.name || "User Avatar"}
                 width={40}
                 height={40}

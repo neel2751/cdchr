@@ -504,11 +504,36 @@ export async function storeCommonLeaveNew(joinDate, dayPerWeek, employeeId) {
   } catch (error) {}
 }
 
+/**
+ * One employee's entitlement record for one leave year.
+ *
+ * Used to return `undefined` when no record existed — the `if (data)` had no
+ * `else`, so the function fell off the end. Every caller then had to treat
+ * "nothing there" and "it went wrong" as the same thing, because both arrived
+ * as a falsy `?.success`, and a server action that resolves to `undefined` is
+ * not a shape any client can reason about.
+ *
+ * Not-found now says so. It is still `success: false`, deliberately: every
+ * caller's else branch means "no record for this year, make one", which is
+ * exactly right for a miss. `notFound` is there for the one caller that needs
+ * to tell a miss from a failure — an employee simply has no entitlements set
+ * for a year they did not work, and that is not an error to report.
+ *
+ * @param {string} employeeId
+ * @param {string} leaveYear e.g. "2026-27". A *string*: the field is a String
+ *   and a calendar year number matches nothing.
+ * @param {boolean} [server] return the document itself rather than JSON.
+ */
 export async function getLeaveData(employeeId, leaveYear, server) {
   try {
     const data = await CommonLeaveModel.findOne({ employeeId, leaveYear });
     if (data)
       return { success: true, data: server ? data : JSON.stringify(data) };
+    return {
+      success: false,
+      notFound: true,
+      message: `No leave entitlements recorded for ${leaveYear}`,
+    };
   } catch (e) {
     console.log(" Error fetching leave data", e);
     return { success: false, message: "Error fetching leave data" };

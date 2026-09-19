@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { syncMissingLeaveTypesNew } from "@/server/leaveServer/countLeaveServer";
-import { syncMissingLeaveTypes } from "@/server/leaveServer/leaveServer";
 import { ScanSearch } from "lucide-react";
 
 export default function LeaveScan({ item, queryKey }) {

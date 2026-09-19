@@ -2,30 +2,23 @@
 import { useFetchQuery } from "@/hooks/use-query";
 import { getEmployeeWiseData } from "@/server/employeServer/employeServer";
 import { employeeDeatils } from "@/server/officeServer/officeEmployeeDetails";
-import { createContext, useState, useContext, useEffect, useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
+
+/**
+ * The employee record the screens under it are about.
+ *
+ * `selectedAvatar` used to live here: a picture chosen from a strip of stock
+ * faces and kept in localStorage under one shared key. It was never anybody's
+ * photo — it was whatever the last person to use this browser picked, shown as
+ * every employee's portrait on every record. Employees have real photos now
+ * (`newData.profileImage`), so the stock list and its localStorage key are gone.
+ */
 
 // create a context
 const AvatarContext = createContext();
 
 // create a provider
 const AvatarProvider = ({ slug, children, searchParams }) => {
-  const [selectedAvatar, setSelectedAvatar] = useState(null); // Don't use localStorage here
-  const [isClient, setIsClient] = useState(false); // to ensure client-only logic
-
-  useEffect(() => {
-    setIsClient(true);
-    const savedAvatar =
-      localStorage.getItem("selectedAvatar") ||
-      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/9439775.jpg-4JVJWOjPksd3DtnBYJXoWHA5lc1DU9.jpeg";
-    setSelectedAvatar(savedAvatar);
-  }, []);
-
-  useEffect(() => {
-    if (isClient && selectedAvatar) {
-      localStorage.setItem("selectedAvatar", selectedAvatar);
-    }
-  }, [selectedAvatar, isClient]);
-
   const queryKey = ["employeeDeatils", slug];
   const { data } = useFetchQuery({
     params: slug,
@@ -41,8 +34,6 @@ const AvatarProvider = ({ slug, children, searchParams }) => {
   return (
     <AvatarContext.Provider
       value={{
-        selectedAvatar,
-        setSelectedAvatar,
         newData: memoData,
         slug,
         searchParams,
@@ -65,23 +56,6 @@ const useAvatar = () => {
 const SiteEmployeeContext = createContext();
 // create a provider for site employee context
 const SiteEmployeeProvider = ({ children, slug, searchParams }) => {
-  const [selectedAvatar, setSelectedAvatar] = useState(null); // Don't use localStorage here
-  const [isClient, setIsClient] = useState(false); // to ensure client-only logic
-
-  useEffect(() => {
-    setIsClient(true);
-    const savedAvatar =
-      localStorage.getItem("selectedAvatar") ||
-      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/9439775.jpg-4JVJWOjPksd3DtnBYJXoWHA5lc1DU9.jpeg";
-    setSelectedAvatar(savedAvatar);
-  }, []);
-
-  useEffect(() => {
-    if (isClient && selectedAvatar) {
-      localStorage.setItem("selectedAvatar", selectedAvatar);
-    }
-  }, [selectedAvatar, isClient]);
-
   const queryKey = ["employeeDeatils", slug];
   const { data } = useFetchQuery({
     params: slug,
@@ -97,8 +71,6 @@ const SiteEmployeeProvider = ({ children, slug, searchParams }) => {
   return (
     <SiteEmployeeContext.Provider
       value={{
-        selectedAvatar,
-        setSelectedAvatar,
         newData: memoData,
         slug,
         searchParams,

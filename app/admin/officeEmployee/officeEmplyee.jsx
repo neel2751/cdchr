@@ -19,15 +19,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { toast } from "sonner";
 import Pagination from "@/lib/pagination";
-import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
-import {
-  getSelectCompanies,
-  getSelectRoleType,
-} from "@/server/selectServer/selectServer";
+import { useFetchQuery } from "@/hooks/use-query";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { CommonContext } from "@/context/commonContext";
-import { BANKFIELD, OFFICEFIELD } from "@/data/fields/fields";
-import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
+import { useOfficeEmployeeFields } from "@/hooks/useOfficeEmployeeFields";
 import Alert from "@/components/alert/alert";
 import OfficeEmployeeForm from "./components/officeEmployeeForm";
 import CompanyWiseCountCard from "./components/companyWiseCountCard";
@@ -35,6 +30,10 @@ import { sendVisaReminderManually } from "@/server/visaServer/visaServer";
 import VisaReminderDialog from "../_components/visaReminderDialog";
 import ResetPasswordDialog from "../_components/resetPasswordDialog";
 import LockdownDialog from "../_components/lockdownDialog";
+import ResetTwoFactorDialog from "../_components/resetTwoFactorDialog";
+import { resetTwoFactorForEmployee } from "@/server/2FAServer/TwoAuthserver";
+import RightToWorkDialog from "../_components/rightToWorkDialog";
+import { recordRightToWorkCheck } from "@/server/visaServer/rightToWorkServer";
 
 const VISA_STATUS_OPTIONS = [
   { label: "All Visa", value: "" },
@@ -42,12 +41,6 @@ const VISA_STATUS_OPTIONS = [
   { label: "Expired", value: "expired" },
   { label: "Valid", value: "valid" },
 ];
-// Fields only editable by users who may also read them.
-const PROTECTED_FIELD_NAMES = [
-  ...BANKFIELD.map((item) => item.name),
-  "employeNI",
-];
-
 const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   // "active" = the main Office Management page (active staff only);
   // "previous" = the Previous Office Employees page (inactive staff only).
@@ -126,42 +119,17 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   const { newData: officeEmployeeData = [], totalCount = 0 } =
     queryResult || {};
 
-  const { data: selectRoleType = [] } = useFetchSelectQuery({
-    queryKey: ["selectRoleType"],
-    fetchFn: getSelectRoleType,
-  });
-
-  const { data: selectCompany = [] } = useFetchSelectQuery({
-    queryKey: ["selectCompany"],
-    fetchFn: getSelectCompanies,
-  });
-
-  const { data: sensitiveAccess } = useFetchQuery({
-    fetchFn: canViewSensitiveDetails,
-    queryKey: ["canViewSensitiveDetails"],
-  });
-  const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
-
-  const field = OFFICEFIELD.filter(
-    // Bank and NI fields are only editable by users allowed to see them; the
-    // server leaves the stored values alone when these fields are absent.
-    (item) =>
-      canSeeSensitiveDetails || !PROTECTED_FIELD_NAMES.includes(item.name),
-  ).map((item) => {
-    if (item.name === "department") {
-      return {
-        ...item,
-        options: selectRoleType,
-      };
-    }
-    if (item.name === "company") {
-      return {
-        ...item,
-        options: selectCompany,
-      };
-    }
-    return item;
-  });
+  // The form's fields, the sensitive-field filter and the three database-backed
+  // option lists, all from one place. This used to be forty lines here and a
+  // different forty on the employee Edit tab, which is how that tab ended up
+  // showing three fields out of thirty — the two copies had nothing holding
+  // them together. The department and company lists come back out because the
+  // filter row below needs the same two.
+  const {
+    fields: field,
+    selectRoleType,
+    selectCompany,
+  } = useOfficeEmployeeFields();
 
   const handleClose = () => {
     setInitialValues(null);
@@ -246,6 +214,10 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
       employeeType: "OfficeEmploye",
       name: item?.name,
       visaEndDate: item?.visaEndDate,
+      // The reminder dialog also reports when right to work was last checked:
+      // an expiring visa is exactly what prompts the next check.
+      immigrationType: item?.immigrationType,
+      checks: item?.rightToWorkChecks,
     });
 
   const confirmVisaReminder = (ccHr) => {
@@ -261,8 +233,20 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
 
   const { mutate: resetPassword, isPending: isResettingPassword } =
     useSubmitMutation({
-      mutationFn: async ({ employeeId, newPassword, reason }) =>
-        resetOfficeEmployeePassword({ employeeId, newPassword, reason }),
+      mutationFn: async ({
+        employeeId,
+        newPassword,
+        reason,
+        signOutEverywhere,
+        requirePasswordChange,
+      }) =>
+        resetOfficeEmployeePassword({
+          employeeId,
+          newPassword,
+          reason,
+          signOutEverywhere,
+          requirePasswordChange,
+        }),
       invalidateKey: queryKey,
       onSuccessMessage: (message) => message || "Password reset successfully",
       onClose: () => setResetTarget(null),
@@ -270,9 +254,20 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
 
   const onResetPassword = (item) => setResetTarget(item);
 
-  const confirmResetPassword = ({ newPassword, reason }) => {
+  const confirmResetPassword = ({
+    newPassword,
+    reason,
+    signOutEverywhere,
+    requirePasswordChange,
+  }) => {
     if (!resetTarget?._id) return;
-    resetPassword({ employeeId: resetTarget._id, newPassword, reason });
+    resetPassword({
+      employeeId: resetTarget._id,
+      newPassword,
+      reason,
+      signOutEverywhere,
+      requirePasswordChange,
+    });
   };
 
   const [lockdownTarget, setLockdownTarget] = useState(null);
@@ -290,6 +285,61 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
   const confirmLockdown = ({ reason }) => {
     if (!lockdownTarget?._id) return;
     lockdown({ employeeId: lockdownTarget._id, reason });
+  };
+
+  // Last resort for someone who has lost both their authenticator app and their
+  // recovery codes. Invalidates the list so the 2FA badge on the row clears.
+  const [reset2FATarget, setReset2FATarget] = useState(null);
+
+  const { mutate: resetTwoFactor, isPending: isResettingTwoFactor } =
+    useSubmitMutation({
+      mutationFn: async ({ employeeId, reason }) =>
+        resetTwoFactorForEmployee({ employeeId, reason }),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) => message || "2FA reset",
+      onClose: () => setReset2FATarget(null),
+    });
+
+  const onReset2FA = (item) => setReset2FATarget(item);
+
+  const confirmReset2FA = ({ reason }) => {
+    if (!reset2FATarget?._id) return;
+    resetTwoFactor({ employeeId: reset2FATarget._id, reason });
+  };
+
+  // Right-to-work checks are recorded from a row action rather than the
+  // employee form: each check is a dated event kept alongside the previous
+  // ones, and the visa reminder is what prompts HR to record the next one.
+  const [rightToWorkTarget, setRightToWorkTarget] = useState(null);
+
+  const { mutate: recordRightToWork, isPending: isRecordingRightToWork } =
+    useSubmitMutation({
+      mutationFn: async (payload) => recordRightToWorkCheck(payload),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) => message || "Right-to-work check recorded",
+      onClose: () => setRightToWorkTarget(null),
+    });
+
+  const onRecordRightToWork = (item) =>
+    setRightToWorkTarget({
+      employeeId: item?._id,
+      employeeType: "OfficeEmploye",
+      name: item?.name,
+      email: item?.email,
+      immigrationType: item?.immigrationType,
+      immigrationCategory: item?.immigrationCategory,
+      visaStartDate: item?.visaStartDate,
+      visaEndDate: item?.visaEndDate,
+      checks: item?.rightToWorkChecks,
+    });
+
+  const confirmRightToWork = (payload) => {
+    if (!rightToWorkTarget?.employeeId) return;
+    recordRightToWork({
+      employeeId: rightToWorkTarget.employeeId,
+      employeeType: rightToWorkTarget.employeeType,
+      ...payload,
+    });
   };
 
   const immigrationField = field.find((it) => it.name === "immigrationType");
@@ -327,6 +377,8 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
           isSendingReminder,
           onResetPassword,
           onLockdown,
+          onReset2FA,
+          onRecordRightToWork,
         }}
       >
         <div>
@@ -492,6 +544,22 @@ const OfficeEmplyee = ({ searchParams, variant = "active" }) => {
             }}
             onConfirm={confirmLockdown}
             isPending={isLockingDown}
+          />
+          <ResetTwoFactorDialog
+            target={reset2FATarget}
+            onOpenChange={(o) => {
+              if (!o) setReset2FATarget(null);
+            }}
+            onConfirm={confirmReset2FA}
+            isPending={isResettingTwoFactor}
+          />
+          <RightToWorkDialog
+            target={rightToWorkTarget}
+            onOpenChange={(o) => {
+              if (!o) setRightToWorkTarget(null);
+            }}
+            onConfirm={confirmRightToWork}
+            isPending={isRecordingRightToWork}
           />
         </div>
       </CommonContext.Provider>

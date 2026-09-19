@@ -19,13 +19,14 @@ import {
 } from "../ui/card";
 import { format } from "date-fns";
 import { useAttendanceSocket } from "@/hooks/useAttendanceSocket";
-import { useEffect, useState } from "react";
+
+const RECEPTION_AVATAR =
+  "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg";
 
 export default function QRCodeSocket() {
   console.log("QRCodeSocket rendered");
   const { data: session } = useSession();
   const employeeId = session?.user?._id;
-  const [avatar, setAvatar] = useState(null);
 
   const {
     attendanceList,
@@ -41,14 +42,6 @@ export default function QRCodeSocket() {
   const newData = attendanceList[0];
   const availableActions = getAvailableActions(newData);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const selectedAvatar =
-        localStorage.getItem("selectedAvatar") ||
-        "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg";
-      setAvatar(selectedAvatar);
-    }
-  }, []);
 
   return (
     <>
@@ -57,16 +50,13 @@ export default function QRCodeSocket() {
           <CardTitle>
             <div className="flex items-center gap-2">
               <img
-                src={
-                  avatar ||
-                  "https://res.cloudinary.com/drcjzx0sw/image/upload/v1746444818/hr_jlxx1c.svg"
-                }
+                src={RECEPTION_AVATAR}
                 alt={session?.user?.name || "User Avatar"}
                 width={40}
                 height={40}
                 className="rounded-full"
               />
-              {session?.user?.name || "User"}'s Attendance
+              {session?.user?.name || "User"}&rsquo;s Attendance
             </div>
           </CardTitle>
           <CardDescription className="flex items-center gap-2 text-indigo-600">

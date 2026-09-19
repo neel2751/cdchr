@@ -2,17 +2,13 @@
 
 import { connect } from "@/db/db";
 import CommonLeaveModel from "@/models/commonLeaveModel";
-import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import {
   addDays,
   addMonths,
   addWeeks,
-  differenceInDays,
   differenceInWeeks,
-  format,
   getYear,
-  isPast,
 } from "date-fns";
 import mongoose from "mongoose";
 import { getServerSideProps } from "../session/session";
@@ -21,6 +17,18 @@ import { fetchLeaveCategory } from "../category/category";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
 import { createObjectId } from "@/lib/mongodb";
 import { getLeaveSettings } from "../leaveSettingServer";
+import { decrypt } from "@/lib/algo";
+import { resolveEmployeeTarget } from "@/lib/employeeAccess";
+
+/** decrypt() throws on a malformed token; a bad slug should just mean "me". */
+function safeDecryptId(value) {
+  if (!value) return null;
+  try {
+    return decrypt(value) || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function storeLeave(employeeId, data) {
   try {
@@ -332,13 +340,41 @@ export async function countLeave(employeeId, data) {
   }
 }
 
-export async function getEmployeeLeaveData() {
+/**
+ * One person's leave entitlements for one leave year.
+ *
+ * Took no arguments at all until now, which meant it could only ever answer
+ * for the signed-in user and only for today's leave year. Its one caller is
+ * the leave card on an employee's record — so HR opening somebody else's Leave
+ * tab was shown *their own* allowance under that employee's name, and the leave
+ * year filter on that card could not move it.
+ *
+ * Called with no arguments it behaves exactly as before.
+ *
+ * @param {{ slug?: string, leaveYear?: string }} [input] `slug` is the
+ *   encrypted employee id; it goes through the usual access rule, so asking
+ *   about somebody else without the permission answers for you.
+ */
+export async function getEmployeeLeaveData(input) {
   try {
     await connect();
     const { props } = await getServerSideProps();
-    const employeeId = props?.session?.user?._id;
-    const leaveYear = getLeaveYearString(new Date());
-    const data = getLeaveData(employeeId, leaveYear);
+    const sessionId = props?.session?.user?._id;
+
+    const scoped = input ? Object.hasOwn(input, "slug") : false;
+    const { employeeId: targetId } = scoped
+      ? await resolveEmployeeTarget(safeDecryptId(input.slug))
+      : { employeeId: sessionId };
+
+    const employeeId = targetId || sessionId;
+    const leaveYear = input?.leaveYear || getLeaveYearString(new Date());
+
+    // A year nobody has set entitlements for is ordinary, not an error — the
+    // card above simply has nothing to show. Translated here rather than in
+    // getLeaveData, whose other callers want the miss to read as a failure so
+    // they create the missing record.
+    const data = await getLeaveData(employeeId, leaveYear);
+    if (data?.notFound) return { success: true, data: null };
     return data;
   } catch (error) {
     console.log(" Error fetching employee leave data:", error);
@@ -346,113 +382,70 @@ export async function getEmployeeLeaveData() {
   }
 }
 
+/**
+ * One employee's entitlement record for one leave year.
+ *
+ * Used to return `undefined` when no record existed — the `if (data)` had no
+ * `else`, so the function fell off the end. Every caller then had to treat
+ * "nothing there" and "it went wrong" as the same thing, because both arrived
+ * as a falsy `?.success`, and a server action that resolves to `undefined` is
+ * not a shape any client can reason about.
+ *
+ * Not-found now says so. It is still `success: false`, deliberately: every
+ * caller's else branch means "no record for this year, make one", which is
+ * exactly right for a miss. `notFound` is there for the one caller that needs
+ * to tell a miss from a failure — an employee simply has no entitlements set
+ * for a year they did not work, and that is not an error to report.
+ *
+ * @param {string} employeeId
+ * @param {string} leaveYear e.g. "2026-27". A *string*: the field is a String
+ *   and a calendar year number matches nothing.
+ * @param {boolean} [server] return the document itself rather than JSON.
+ */
 export async function getLeaveData(employeeId, leaveYear, server) {
   try {
     const data = await CommonLeaveModel.findOne({ employeeId, leaveYear });
     if (data)
       return { success: true, data: server ? data : JSON.stringify(data) };
+    return {
+      success: false,
+      notFound: true,
+      message: `No leave entitlements recorded for ${leaveYear}`,
+    };
   } catch (e) {
     console.log(" Error fetching leave data", e);
     return { success: false, message: "Error fetching leave data" };
   }
 }
 
-export async function syncMissingLeaveTypes(employeeId, data) {
-  try {
-    const currentYear = new Date().getFullYear();
-    const server = true;
-    // check in the common leave data
-    const leaveData = await getLeaveData(employeeId, currentYear, server);
-    if (leaveData?.success) {
-      await checkWithStoreLeaveType(leaveData, employeeId);
-    } else {
-      const storeLeaveData = await storeLeave(employeeId, data);
-      if (!storeLeaveData?.success) return storeLeaveData;
-      const checkData = { data: JSON.parse(storeLeaveData?.data) };
-      await checkWithStoreLeaveType(checkData, employeeId);
-      return { success: true, message: "Leave data synced successfully" };
-    }
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: "Error syncing leave data" };
-  }
-}
-
-async function checkWithStoreLeaveType(leaveData, employeeId) {
-  try {
-    const leaveYear = getYear(new Date());
-    const allLeave = await LeaveCategoryModel.find();
-    const existingLeave = leaveData?.data?.leaveData.map(
-      (leave) => leave.leaveType
-    );
-    const missingLeaveTypes = allLeave.filter(
-      (globalLeave) => !existingLeave?.includes(globalLeave.leaveType)
-    );
-    if (missingLeaveTypes.length > 0) {
-      await CommonLeaveModel.updateOne(
-        { employeeId, leaveYear },
-        {
-          $push: { leaveData: { $each: missingLeaveTypes } },
-        }
-      );
-      return { success: true, message: "Missing leave types synced" };
-    } else {
-      return { success: true, message: "No missing leave types found" };
-    }
-  } catch (error) {
-    console.log(error);
-  }
-}
-
-export async function storeEmployeeLeave(data, id) {
-  try {
-    const { props } = await getServerSideProps();
-    const employeeId = props?.session?.user?._id;
-    const leaveYear = getYear(new Date());
-    await connect();
-    const isEligible = await checkEligibility(employeeId, data, id);
-    if (!isEligible?.success) return isEligible;
-    if (id) {
-      console.log("update leave data");
-      const existingLeave = await editLeaveRequest(data, id);
-      return existingLeave;
-    } else {
-      console.log("create new leave request");
-      const leaveType = data?.leaveType;
-      const remaining = isEligible?.data?.remaining
-        ? -isEligible?.countDays
-        : isEligible?.data?.total - isEligible?.countDays;
-      const updateData = await CommonLeaveModel.updateOne(
-        { employeeId, leaveYear, "leaveData.leaveType": leaveType },
-        {
-          $inc: {
-            "leaveData.$.used": isEligible?.countDays,
-            "leaveData.$.remaining": remaining,
-          },
-        }
-      );
-      if (!updateData?.matchedCount)
-        return { success: false, message: "Error updating leave data" };
-      const leaveRequestData = {
-        ...data,
-        employeeId,
-        leaveYear,
-        leaveDays: isEligible?.countDays,
-        leaveSubmitDate: new Date(),
-        submitBy: employeeId,
-      };
-      const requestLeaveResult = await LeaveRequestModel.create(
-        leaveRequestData
-      );
-      if (!requestLeaveResult)
-        return { success: false, message: "Error creating leave request" };
-      return { success: true, message: "Leave request created successfully" }; // TODO: return leave request id
-    }
-  } catch (error) {
-    console.log(" Error fetching employee leave data", error);
-    return { success: false, message: "Error fetching employee leave data" };
-  }
-}
+// Removed here: syncMissingLeaveTypes, checkWithStoreLeaveType,
+// storeEmployeeLeave, checkEligibility and editLeaveRequest.
+//
+// All five were dead — nothing in the application called them — and all five
+// were broken the same way, which is almost certainly why they were abandoned
+// rather than maintained. CommonLeave.leaveYear is a String like "2026-27",
+// written by getLeaveYearString(). These passed a number:
+// `new Date().getFullYear()` and `getYear(new Date())`, which Mongoose casts to
+// "2026". That matches nothing, ever.
+//
+// So the lookups could not succeed. syncMissingLeaveTypes always fell to its
+// else branch and created a second CommonLeave row for an employee who already
+// had one — the "branch on falsy" was not a style choice, it was the only
+// branch that ever ran. storeEmployeeLeave's balance update silently matched no
+// document, while editLeaveRequest, which it calls, really did rewrite the
+// leave request: leave edited, balance untouched.
+//
+// The working versions are in countLeaveServer.js — syncMissingLeaveTypesNew,
+// which is what the scan button and handleOfficeEmployee actually call, and
+// which builds its leave year with getLeaveYearString(). Booking goes through
+// storeEmployeeLeaveData in leaveRequestServer.js.
+//
+// Deleted rather than repaired because two of them were exported "use server"
+// functions, which are addressable endpoints whether or not a button points at
+// them — and because working replacements already exist.
+//
+// isDateOverLapping is kept below: exported, read-only, no year bug. It simply
+// has no caller at the moment.
 
 export async function isDateOverLapping(employeeId, data, id) {
   try {
@@ -478,181 +471,3 @@ export async function isDateOverLapping(employeeId, data, id) {
   }
 }
 
-async function checkEligibility(employeeId, data, id) {
-  try {
-    const isOverLapping = await isDateOverLapping(employeeId, data, id);
-    if (isOverLapping)
-      return { success: false, message: "Leave dates are overlapping" }; // Return error message
-
-    const leaveData = await getLeaveData(employeeId, getYear(new Date()), true);
-    if (!leaveData?.success)
-      return { success: false, message: "Error fetching leave data" };
-
-    // Fetch existing leave data
-    const existingLeave = leaveData?.data?.leaveData.find(
-      (leave) => leave.leaveType === data?.leaveType
-    );
-    if (!existingLeave)
-      return { success: false, message: "Leave type not found Contact Admin" };
-
-    // Calculate days of leave in the update request
-    const updatedLeaveDays = differenceInDays(
-      data?.leaveEndDate,
-      data?.leaveStartDate
-    );
-
-    // const originalLeave = leaveData?.data?.leaveData.find(
-    //   (leave) => leave._id === id
-    // );
-    // const originalLeaveDays = originalLeave
-    //   ? differenceInDays(
-    //       originalLeave.leaveEndDate,
-    //       originalLeave.leaveStartDate
-    //     )
-    //   : 0;
-
-    // Check the current stored leave (if any) begin updated
-
-    const countDays = differenceInDays(
-      data?.leaveEndDate,
-      data?.leaveStartDate
-    );
-    if (countDays > existingLeave?.total)
-      return {
-        success: false,
-        message: `${existingLeave?.leaveType} days exceeded`,
-      };
-    if (countDays > existingLeave?.remaining)
-      return {
-        success: false,
-        message: `under ${existingLeave?.leaveType} ${existingLeave?.remaining} days remaining`,
-      };
-    if (existingLeave?.eligibleDate && !isPast(existingLeave?.eligibleDate)) {
-      return {
-        success: false,
-        message: `Not eligible until ${format(
-          existingLeave?.eligibleDate,
-          "PPP"
-        )} for ${existingLeave?.leaveType}`,
-      };
-    }
-    return {
-      success: true,
-      message: "Eligible for leave",
-      data: existingLeave,
-      countDays,
-    };
-  } catch (error) {
-    console.log("Error checking eligibility", error);
-    return { success: false, message: "Error checking eligibility" };
-  }
-}
-
-async function editLeaveRequest(data, requestId) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    await connect();
-    const { leaveType, leaveStartDate, leaveEndDate, leaveReason } = data;
-
-    // Step 1: Fetch the leave request being edited
-    const leaveRequest = await LeaveRequestModel.findById(requestId).session(
-      session
-    );
-    if (!leaveRequest)
-      return { success: false, message: "Leave request not found" };
-
-    // Step 2: Check if editing is allowed
-    if (
-      leaveRequest?.leaveStatus === "Approved" ||
-      leaveRequest?.leaveStatus === "Rejected"
-    )
-      return {
-        success: false,
-        message: "Cannot edit approved or rejected leave request",
-      };
-
-    // Step 3: Fetch total allowed, used, and remaining balance
-    const commonLeave = await CommonLeaveModel.findOne({
-      employeeId: leaveRequest?.employeeId,
-      leaveYear: leaveRequest?.leaveYear,
-    }).session(session);
-
-    if (!commonLeave)
-      return { success: false, message: "Leave balance not found" };
-
-    const leaveData = commonLeave.leaveData.find(
-      (leave) => leave.leaveType === leaveRequest.leaveType
-    );
-    if (!leaveData) return { success: false, message: "Leave data not found" };
-
-    const { total, used, remaining } = leaveData;
-
-    // Calculate the total approved days for this leave request type
-    const approvedLeaveRequests = await LeaveRequestModel.find({
-      employeeId: leaveRequest?.employeeId,
-      leaveYear: leaveRequest?.leaveYear,
-      leaveType: leaveType,
-      leaveStatus: "Approved",
-    }).session(session);
-
-    const approvedDays = approvedLeaveRequests.reduce(
-      (sum, req) => sum + req.leaveDays,
-      0
-    );
-
-    // Count the days through the leave request
-    const leaveDays = differenceInDays(
-      new Date(leaveEndDate),
-      new Date(leaveStartDate)
-    );
-
-    // Step 4: Validate against the updated request
-    const originalLeaveDays = leaveRequest?.leaveDays;
-    const leaveDaysDifference = leaveDays - originalLeaveDays;
-
-    // New remaining balance if this edit is approved
-    const newRemainingBalance = total - approvedDays - leaveDaysDifference;
-
-    if (leaveDaysDifference > 0 && newRemainingBalance < 0)
-      return {
-        success: false,
-        message: `Insufficient leave balance. You only have ${remaining} days left for ${leaveType}.`,
-      };
-
-    // Step 5: Update the common leave record
-    const updatedCommonLeave = {
-      ...leaveData,
-      total: total,
-      used:
-        used +
-        approvedDays +
-        (leaveRequest?.leaveStatus === "Approved" ? 0 : leaveDaysDifference),
-      remaining: remaining - leaveDaysDifference,
-    };
-    commonLeave.leaveData = commonLeave.leaveData.map((leave) =>
-      leave.leaveType === leaveRequest.leaveType ? updatedCommonLeave : leave
-    );
-    await commonLeave.save({ session });
-
-    // Step 6: Update the leave request with the new deatils
-    leaveRequest.leaveType = leaveType;
-    leaveRequest.leaveStartDate = leaveStartDate;
-    leaveRequest.leaveEndDate = leaveEndDate;
-    leaveRequest.leaveDays = leaveDays;
-    leaveRequest.leaveReason = leaveReason;
-    leaveRequest.leaveDays = leaveDays;
-
-    await leaveRequest.save({ session });
-
-    // Commit the transaction
-    await session.commitTransaction();
-    return { success: true, message: "Leave request updated successfully" };
-  } catch (error) {
-    await session.abortTransaction();
-    console.log(" Error editing leave request:", error);
-    return { success: false, message: "Error editing leave request" };
-  } finally {
-    session.endSession();
-  }
-}

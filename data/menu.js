@@ -37,6 +37,14 @@ export const MENU = [
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "Briefcase",
   },
+  // Sits next to Office Staff because it is the same records seen from the
+  // other side: what the people on that list say is wrong about them.
+  {
+    name: "Change Requests",
+    path: "/admin/profileRequests",
+    role: ["superAdmin", "admin"],
+    icon: "ClipboardIcon",
+  },
   {
     name: "Office Attendance",
     path: "/admin/attendance",
@@ -261,19 +269,19 @@ export const COMMONMENUITEMS = [
   // appeared to have two "Assign Site" items. It now lives in MENU only.
   {
     name: "My Attendance",
-    path: "/admin/my-attendance",
+    path: "/admin/me/attendance",
     role: ["user"],
     icon: "CalendarClock",
   },
   {
-    name: "My Weekly Shifts",
-    path: "/admin/my-weekly-shifts",
+    name: "My Shifts",
+    path: "/admin/me/shifts",
     role: ["user"],
     icon: "CalendarDays",
   },
   {
-    name: "My Leaves",
-    path: "/admin/my-leaves",
+    name: "My Leave",
+    path: "/admin/me/leave",
     role: ["user"],
     icon: "Stamp",
   },
@@ -285,6 +293,49 @@ export const COMMONMENUITEMS = [
     path: "/admin/my-announcements",
     role: ["superAdmin", "admin", "user"],
     icon: "Megaphone",
+  },
+  // `hidden` entries are permission bypasses without a sidebar link. They exist
+  // because proxy.js decides what an ordinary employee may open by looking at
+  // this list, while the sidebar decides what to show from the same list — two
+  // questions that usually have the same answer and here do not.
+  //
+  // /admin/me is the profile area, reached from the avatar menu rather than the
+  // sidebar: it is looked at rarely, and a link to it alongside the daily items
+  // would crowd them. One entry covers every tab under it.
+  {
+    name: "My Profile",
+    path: "/admin/me",
+    role: ["superAdmin", "admin", "user"],
+    icon: "UserRound",
+    hidden: true,
+  },
+  // The paths this area used to live at. Each is now a page that redirects, and
+  // each needs to be reachable for that redirect to run — otherwise an old
+  // bookmark lands on the dashboard with no explanation instead of on the page
+  // the person asked for.
+  {
+    name: "My Attendance (moved)",
+    path: "/admin/my-attendance",
+    role: ["superAdmin", "admin", "user"],
+    hidden: true,
+  },
+  {
+    name: "My Weekly Shifts (moved)",
+    path: "/admin/my-weekly-shifts",
+    role: ["superAdmin", "admin", "user"],
+    hidden: true,
+  },
+  {
+    name: "My Leaves (moved)",
+    path: "/admin/my-leaves",
+    role: ["superAdmin", "admin", "user"],
+    hidden: true,
+  },
+  {
+    name: "Account (moved)",
+    path: "/admin/account",
+    role: ["superAdmin", "admin", "user"],
+    hidden: true,
   },
 ];
 

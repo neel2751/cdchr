@@ -11,6 +11,25 @@ import { deleteFileFromS3 } from "../aws/upload";
 import EmployeModel from "@/models/employeModel";
 import { getLeaveYearString } from "@/lib/getLeaveYear";
 import RoleBasedModel from "@/models/rolebasedModel";
+import {
+  getEmployeeManageAccess,
+  resolveEmployeeTarget,
+} from "@/lib/employeeAccess";
+
+/**
+ * decrypt() throws on a tampered or malformed token rather than returning
+ * false, and every caller here is about to hand the result to an access check
+ * that treats a missing id as "use your own". Swallowing the throw keeps that
+ * path intact instead of surfacing a decryption error to the user.
+ */
+function safeDecrypt(value) {
+  if (!value) return null;
+  try {
+    return decrypt(value) || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function extractData(params) {
   try {
@@ -187,57 +206,13 @@ export async function employeeLeaveDetails(params) {
   }
 }
 
-export async function updateOfficeEmployeeData(data) {
-  if (!data) return { success: false, message: "No Data Provided" };
-  const { employeeId: id, tab } = data;
-  try {
-    const updatedEmp = await OfficeEmployeeModel.findOne({ _id: id }).exec();
-    if (id && tab === "basic") {
-      // update an existing office employee
-      if (!updatedEmp) {
-        return { success: false, message: "Employee Not Found" };
-      }
-      // checking  for unique fields both email and phone
-      const hasSameEmail = await OfficeEmployeeModel.findOne({
-        email: data.email,
-        delete: false, // only check for active employees
-        _id: { $ne: id },
-      }).exec();
-      const hasSamePhone = await OfficeEmployeeModel.findOne({
-        phoneNumber: data.phoneNumber,
-        delete: false, // only check for active employees
-        _id: { $ne: id },
-      }).exec();
-      if (hasSameEmail || hasSamePhone) {
-        throw new Error("This Email or Phone Number is Already In Use");
-      }
-      // check password is hash or not
-
-      Object.assign(updatedEmp, data);
-      const updatedData = await updatedEmp.save();
-      if (!updatedData)
-        return { success: false, message: "Error Updating Employee" };
-      return { success: true, data: JSON.stringify(updatedData) };
-    } else {
-      Object.assign(updatedEmp, data);
-      const updatedData = await updatedEmp.save();
-      if (!updatedData)
-        return { success: false, message: "Error Updating Employee" };
-      return { success: true, data: JSON.stringify(updatedData) };
-    }
-  } catch (error) {
-    console.log(error.message);
-    return {
-      success: false,
-      message: "Something went wrong on Office Employee",
-    };
-    // return {
-    //   success: false,
-    //   error: "Failed to create office employee",
-    // };
-  }
-  // const isExists = await OfficeEmployeeModel.findOne({ email }).lean().exec();
-}
+// updateOfficeEmployeeData() was removed here. Nothing in the application
+// called it — the employee edit form goes through handleOfficeEmployee() in
+// officeServer.js — but it was an exported server action, which is an
+// addressable endpoint whether or not a button points at it, and it took an
+// employee id and an arbitrary payload from its caller and assigned the payload
+// straight onto the record. Deleting it is the fix; the live path is
+// authorised in officeServer.js.
 
 export async function changeOfficeEmployeePassword(data, id) {
   if (!data) return { success: false, message: "No Data Provided" };
@@ -275,6 +250,11 @@ export async function changeOfficeEmployeePassword(data, id) {
       return { success: false, message: "Error Hashing Password" };
     }
     updatedEmp.password = hashedPassword; // Update the password with the new hashed password
+    // Whatever brought them here, they have now chosen their own password, so
+    // the forced-change gate in proxy.js lets them back into the app. Without
+    // this they would set a new password and still be redirected here — a loop
+    // with no way out.
+    updatedEmp.mustChangePassword = false;
     const updatedData = await updatedEmp.save();
     if (!updatedData) {
       return { success: false, message: "Error Updating Password" };
@@ -322,6 +302,11 @@ export async function changeEmployeePassword(data, id) {
       return { success: false, message: "Error Hashing Password" };
     }
     updatedEmp.password = hashedPassword; // Update the password with the new hashed password
+    // Whatever brought them here, they have now chosen their own password, so
+    // the forced-change gate in proxy.js lets them back into the app. Without
+    // this they would set a new password and still be redirected here — a loop
+    // with no way out.
+    updatedEmp.mustChangePassword = false;
     const updatedData = await updatedEmp.save();
     if (!updatedData) {
       return { success: false, message: "Error Updating Password" };
@@ -353,34 +338,78 @@ export async function deleteOfficeEmployee(id) {
   }
 }
 
+/**
+ * Remove files that reached S3 before the upload was rejected, so a refused
+ * upload does not leave objects behind that nothing references.
+ *
+ * Awaited as a batch: the callers previously used `forEach(async ...)`, which
+ * fires each delete without awaiting any of them and returns before they
+ * settle. A rejected delete is logged rather than thrown — failing to tidy up
+ * must not change the message the caller gets back.
+ */
+async function discardUploadedFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) return;
+  const results = await Promise.allSettled(
+    files.filter((file) => file?.key).map((file) => deleteFileFromS3(file.key))
+  );
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.log("Failed to remove orphaned upload:", result.reason?.message);
+    }
+  }
+}
+
 export async function uploadDocument(data) {
   if (!data) return { success: false, message: "No Data Provided" };
-  const { props } = await getServerSideProps();
-  const { _id } = props?.session?.user;
+  // Filing a document against somebody's record is an HR act: the file becomes
+  // part of what the company holds about them. An employee who wants something
+  // added asks for it to be added. Without this the action took an employeeId
+  // from its caller, so any session could file anything against anyone.
+  const { user, canManage } = await getEmployeeManageAccess();
+  if (!user?._id) return { success: false, message: "Not signed in" };
+  if (!canManage) {
+    await discardUploadedFiles(data?.documentsFiles);
+    return {
+      success: false,
+      message: "Only HR can add documents to an employee record",
+    };
+  }
+  const { _id } = user;
   const { employeeId, title, docType, documentsFiles } = data;
   try {
     await connect();
 
+    // Checked up front for both paths. This used to live inside the "no
+    // existing record" branch only, so an upload onto an employee who already
+    // had documents skipped validation and could store a file with no title.
+    if (!title || !docType || !documentsFiles || documentsFiles.length === 0) {
+      await discardUploadedFiles(documentsFiles);
+      return {
+        success: false,
+        message: "Title, DocType and Files are required",
+      };
+    }
+
+    // The employee's document record, whatever state its files are in. This
+    // deliberately does NOT require a live file via `$elemMatch`: once every
+    // file had been deleted the record stopped matching, and the upload below
+    // created a second record for the same employee.
     const docuemntData = await DocumentModel.findOne({
       employeeId: createObjectId(employeeId),
       isDeleted: false,
-      // we have to check only document is not deleted
-      documentsFiles: {
-        $elemMatch: { isDeleted: false }, // Check if a document with the same title and type already exists and is not deleted
-      },
-      // documentsFiles: { $elemMatch: { fileName: title, docType } },
     });
-    // Check if the document already exists for the employee
-    if (
-      docuemntData &&
-      docuemntData.documentsFiles.some(
-        (file) => file.title === title && file.docType === docType
-      )
-    ) {
-      documentsFiles.forEach(async (file) => {
-        console.log("Deleting file from S3:", file.key);
-        await deleteFileFromS3(file.key);
-      });
+
+    // Only a file that is still there can clash. Deleting a document is a soft
+    // delete — the entry stays in `documentsFiles` with `isDeleted: true` — so
+    // without this check a deleted title could never be reused, even though it
+    // is gone from the employee's file list. Archived files keep
+    // `isDeleted: false` and stay visible, so they still block a reused title.
+    const hasLiveDuplicate = docuemntData?.documentsFiles?.some(
+      (file) => !file.isDeleted && file.title === title && file.docType === docType
+    );
+
+    if (hasLiveDuplicate) {
+      await discardUploadedFiles(documentsFiles);
       return {
         success: false,
         message: "Document with this title and type already exists",
@@ -409,21 +438,6 @@ export async function uploadDocument(data) {
       return { success: true, data: JSON.stringify(updatedDocument) };
     } else {
       // If document does not exist, create a new one
-      if (
-        !title ||
-        !docType ||
-        !documentsFiles ||
-        documentsFiles.length === 0
-      ) {
-        documentsFiles.forEach(async (file) => {
-          console.log("Deleting file from S3:", file.key);
-          await deleteFileFromS3(file.key);
-        });
-        return {
-          success: false,
-          message: "Title, DocType and Files are required",
-        };
-      }
       const newDocument = new DocumentModel({
         employeeId: createObjectId(employeeId),
         documentsFiles: documentsFiles.map((file) => ({
@@ -453,7 +467,10 @@ export async function uploadDocument(data) {
 
 export async function getEmployeeDocuments(params) {
   if (!params) return { success: false, message: "No Params Provided" };
-  const employeeId = decrypt(params.slug);
+  // The slug is the only thing naming whose documents these are, and it comes
+  // from the caller. Anyone without a staff-management permission is pinned to
+  // their own id — the rule extractData() already applies to profile reads.
+  const { employeeId } = await resolveEmployeeTarget(safeDecrypt(params.slug));
   if (!employeeId) return { success: false, message: "User not found" };
   try {
     await connect();
@@ -507,9 +524,20 @@ export async function getEmployeeDocuments(params) {
 export async function deleteEmployeeDocument(data) {
   if (!data) return { success: false, message: "No Data Provided" };
   const { documentId, fileKey } = data;
-  console.log("Deleting Document:", documentId, fileKey);
   if (!documentId || !fileKey) {
     return { success: false, message: "Document ID and File Key are required" };
+  }
+  // Same reasoning as uploadDocument: a document on file is the company's
+  // record, not the employee's copy of it, so removing one is an HR act. The
+  // pair of ids here names a file directly and belongs to nobody in
+  // particular, which is exactly why the caller has to be checked.
+  const { user, canManage } = await getEmployeeManageAccess();
+  if (!user?._id) return { success: false, message: "Not signed in" };
+  if (!canManage) {
+    return {
+      success: false,
+      message: "Only HR can remove documents from an employee record",
+    };
   }
   try {
     await connect();

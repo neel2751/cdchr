@@ -78,9 +78,16 @@ export async function GET(req, { params }) {
         "Content-Type": obj.ContentType || "application/octet-stream",
         // Branding rarely changes and is requested on every page load; private
         // assets must not be cached by shared proxies.
-        "Cache-Control":
-          PUBLIC_CATEGORIES.has(category)
-            ? "public, max-age=3600, stale-while-revalidate=86400"
+        //
+        // Avatars are private but sit in the sidebar of every screen, so
+        // `no-store` meant refetching a photograph on each navigation. `private`
+        // keeps them in the one viewer's browser and out of shared caches, and
+        // a replacement gets a fresh random key, so a cached copy can never be
+        // the wrong picture — only briefly a deleted one.
+        "Cache-Control": PUBLIC_CATEGORIES.has(category)
+          ? "public, max-age=3600, stale-while-revalidate=86400"
+          : category === "avatars"
+            ? "private, max-age=600"
             : "private, no-store",
       },
     });

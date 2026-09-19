@@ -2,7 +2,6 @@
 import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
-import { storeLeave } from "../leaveServer/leaveServer";
 import { createObjectId } from "@/lib/mongodb";
 import { getCompanyById } from "../companyServer/companyServer";
 import CompanyModel from "@/models/companyModel";
@@ -41,6 +40,10 @@ import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getServerSideProps } from "../session/session";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
+import {
+  getEmployeeManageAccess,
+  pickSelfEditableFields,
+} from "@/lib/employeeAccess";
 
 const UNITED_KINGDOM = "United Kingdom";
 
@@ -52,22 +55,79 @@ const UNITED_KINGDOM = "United Kingdom";
  * Bank details are left untouched when the payload has none of those fields —
  * a user without the bank permission never sees them, so an edit from them
  * must not wipe what is stored.
+ *
+ * The right-to-work history is dropped: the edit form is seeded from the list
+ * row, so it round-trips those keys, and only recordRightToWorkCheck() may
+ * append to an append-only log.
  */
 const buildOfficeEmployeePayload = (data) => {
-  const { accountName, bankName, accountNumber, sortCode, country, ...rest } =
-    data;
+  const {
+    accountName,
+    bankName,
+    accountNumber,
+    sortCode,
+    country,
+    rightToWorkChecks,
+    lastRightToWorkCheckDate,
+    ...rest
+  } = data;
   const hasBankFields = accountName || bankName || accountNumber || sortCode;
+
+  // Only decide `country` when the payload is actually about it.
+  //
+  // Not a fix for a live bug — a guard against a latent one. Every caller today
+  // submits the whole record: react-hook-form hands `handleSubmit` a clone of
+  // its form values, which keeps the defaults of fields that were never
+  // mounted, so `country` arrives even on a screen that never showed it. That
+  // is also why `rightToWorkChecks` has to be stripped above.
+  //
+  // But `country` is derived, not entered — it is only rendered for non-British
+  // staff, and otherwise falls through to `country || UNITED_KINGDOM`. Any
+  // caller that sends a genuinely partial payload would therefore reset a
+  // non-UK employee to United Kingdom without touching the field. Deciding it
+  // only when the payload carries something to decide it from costs nothing
+  // for the callers that send everything, and removes the trap for one that
+  // does not.
+  const decidesCountry =
+    Object.prototype.hasOwnProperty.call(data, "immigrationType") ||
+    country !== undefined;
+
   return {
     ...rest,
-    country:
-      data?.immigrationType === "British"
-        ? UNITED_KINGDOM
-        : country || UNITED_KINGDOM,
+    ...(decidesCountry
+      ? {
+          country:
+            data?.immigrationType === "British"
+              ? UNITED_KINGDOM
+              : country || UNITED_KINGDOM,
+        }
+      : {}),
     ...(hasBankFields
       ? { bankDetail: { accountName, bankName, accountNumber, sortCode } }
       : {}),
   };
 };
+
+/**
+ * Whether the signed-in user may change employee records at all.
+ *
+ * The same question handleOfficeEmployee answers for itself before writing,
+ * exposed so a screen can hide a save button instead of offering one that will
+ * be refused. Shaped like canViewSensitiveDetails() so both read the same way
+ * at the call site.
+ *
+ * The Edit tab used to decide this with `role === "superAdmin"`, which hid the
+ * button from every admin while leaving the fields enabled — they could type a
+ * correction and then find nothing to press, with nothing on screen saying why.
+ */
+export async function canManageEmployees() {
+  const { canManage } = await getEmployeeManageAccess();
+  return {
+    success: true,
+    message: "Employee management access resolved",
+    data: canManage,
+  };
+}
 
 export const handleOfficeEmployee = withAudit(
   "OfficeEmployee.upsert",
@@ -78,30 +138,65 @@ export const handleOfficeEmployee = withAudit(
   // check if email and phone  already exist in db
   if (!data) return { success: false, message: "No Data Provided" };
   try {
+    // Who is calling, and whose record they are entitled to write. Without
+    // this the action took an id and a payload from its caller and assigned the
+    // payload onto that record — so any signed-in account could set
+    // isSuperAdmin on itself. See lib/employeeAccess.js for why the permission
+    // list is the shape it is; a caller holding any of them is unaffected.
+    const { user, canManage } = await getEmployeeManageAccess();
+    if (!user?._id) return { success: false, message: "Not signed in" };
+
+    const isSelfEdit = !canManage;
+    if (isSelfEdit && (!id || String(id) !== String(user._id))) {
+      return {
+        success: false,
+        message: "You can only change your own details",
+      };
+    }
+
+    // An employee editing themselves writes the handful of fields they own —
+    // address and next of kin — and nothing else. Everything the record exists
+    // to assert goes through HR.
+    const payload = isSelfEdit ? pickSelfEditableFields(data) : data;
+
     if (id) {
       // update an existing office employee
       const updatedEmp = await OfficeEmployeeModel.findOne({ _id: id }).exec();
       if (!updatedEmp) {
         return { success: false, message: "Employee Not Found" };
       }
-      // checking  for unique fields both email and phone
-      const hasSameEmail = await OfficeEmployeeModel.findOne({
-        email: data.email,
-        delete: false, // only check for active employees
-        _id: { $ne: id },
-      }).exec();
-      const hasSamePhone = await OfficeEmployeeModel.findOne({
-        phoneNumber: data.phoneNumber,
-        delete: false, // only check for active employees
-        _id: { $ne: id },
-      }).exec();
+      // checking  for unique fields both email and phone. Each check runs only
+      // when the payload actually carries that field: Mongoose drops undefined
+      // keys from a query, so `{ email: undefined }` would match the first
+      // other employee in the company and refuse a legitimate save.
+      const hasSameEmail = payload.email
+        ? await OfficeEmployeeModel.findOne({
+            email: payload.email,
+            delete: false, // only check for active employees
+            _id: { $ne: id },
+          }).exec()
+        : null;
+      const hasSamePhone = payload.phoneNumber
+        ? await OfficeEmployeeModel.findOne({
+            phoneNumber: payload.phoneNumber,
+            delete: false, // only check for active employees
+            _id: { $ne: id },
+          }).exec()
+        : null;
       if (hasSameEmail || hasSamePhone) {
         throw new Error("This Email or Phone Number is Already In Use");
       }
       // if the email is changing we have to convert it to lowercase
-      data.email = data.email.toLowerCase();
+      if (payload.email) payload.email = payload.email.toLowerCase();
       const beforeEmp = updatedEmp.toObject();
-      Object.assign(updatedEmp, buildOfficeEmployeePayload(data));
+      // The self-edit payload is already exactly the fields being written, so
+      // it is assigned as-is. buildOfficeEmployeePayload() must not run over it:
+      // it fills in `country` from `immigrationType`, and with neither field
+      // present that resets a non-UK employee's country to United Kingdom.
+      Object.assign(
+        updatedEmp,
+        isSelfEdit ? payload : buildOfficeEmployeePayload(payload)
+      );
       const updatedData = await updatedEmp.save();
       if (!updatedData)
         return { success: false, message: "Error Updating Employee" };
@@ -373,6 +468,57 @@ export const getOfficeEmployee = async (filterData) => {
                 as: "visaReminders",
               },
             },
+            // Current 2FA enrolment, so a super admin can see who is protected
+            // and how many recovery codes they have left before deciding to
+            // reset anyone — the reset is then an informed action rather than a
+            // blind one.
+            //
+            // `twofas` is a global collection (GLOBAL_COLLECTIONS in
+            // lib/tenantPlugin.js), so the aggregate hook leaves this lookup
+            // unscoped, which is correct: enrolment records carry no tenantId
+            // and a tenant match would silently empty the join.
+            {
+              $lookup: {
+                from: "twofas",
+                let: { empId: "$_id" },
+                pipeline: [
+                  { $match: { $expr: { $eq: ["$employeeId", "$$empId"] } } },
+                  {
+                    $project: {
+                      _id: 0,
+                      isEnabled: 1,
+                      backupCodesRemaining: {
+                        $size: {
+                          $filter: {
+                            input: { $ifNull: ["$backupCodes", []] },
+                            as: "c",
+                            cond: { $eq: ["$$c.usedAt", null] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+                as: "twoFactor",
+              },
+            },
+            {
+              $addFields: {
+                twoFactorEnabled: {
+                  $ifNull: [
+                    { $arrayElemAt: ["$twoFactor.isEnabled", 0] },
+                    false,
+                  ],
+                },
+                twoFactorBackupCodes: {
+                  $ifNull: [
+                    { $arrayElemAt: ["$twoFactor.backupCodesRemaining", 0] },
+                    0,
+                  ],
+                },
+              },
+            },
+            { $unset: "twoFactor" },
           ],
         },
       },
@@ -453,7 +599,16 @@ export const GenerateHashPassword = async (password) => {
  */
 export const resetOfficeEmployeePassword = withAudit(
   "Password.reset",
-  async ({ employeeId, newPassword, reason } = {}) => {
+  async ({
+    employeeId,
+    newPassword,
+    reason,
+    // Both default true: a reset is nearly always a response to a lockout or a
+    // suspected compromise, and an omitted flag should not quietly leave old
+    // sessions alive or the admin's password standing forever.
+    signOutEverywhere = true,
+    requirePasswordChange = true,
+  } = {}) => {
     const { props } = await getServerSideProps();
     const actor = props?.session?.user;
 
@@ -490,7 +645,48 @@ export const resetOfficeEmployeePassword = withAudit(
         return { success: false, message: "Failed to secure the new password" };
       }
       employee.password = hashed;
+
+      // Sessions are JWTs, so there is nothing to delete server-side. Every
+      // token carries the moment it was issued; moving this stamp forward makes
+      // auth.js refuse anything older, which ends every signed-in device at
+      // once — including whoever may have been using the old password.
+      if (signOutEverywhere) {
+        employee.sessionsValidFrom = new Date();
+      }
+
+      // The admin has necessarily seen this password. Requiring a change means
+      // it only ever gets them through the door once.
+      employee.mustChangePassword = !!requirePasswordChange;
+
       await employee.save();
+
+      // Confirm the two security flags actually landed, rather than assuming.
+      //
+      // Mongoose silently drops unknown paths on save, and `mongoose.models` is
+      // a module-level singleton that survives a hot reload — so a server still
+      // running the schema from before these fields existed writes the password
+      // and quietly discards the rest. The admin is told the account was
+      // secured, the employee signs in with no forced change, and nothing
+      // anywhere reports a problem. Reading the flags back is what turns that
+      // into something visible.
+      const saved = await OfficeEmployeeModel.findById(employeeId)
+        .select("mustChangePassword sessionsValidFrom")
+        .lean();
+
+      const flagsMissing =
+        (!!requirePasswordChange && saved?.mustChangePassword !== true) ||
+        (!!signOutEverywhere && !saved?.sessionsValidFrom);
+
+      if (flagsMissing) {
+        return {
+          success: false,
+          message:
+            "The password was changed, but 'sign out everywhere' and 'require a " +
+            "password change' could not be saved — the server is running an " +
+            "older version of the employee record. Restart the app and set them " +
+            "again.",
+        };
+      }
 
       // Lift any failed-login lockout so the user can sign in with the new password.
       await clearLockByEmail(employee.email);
@@ -514,10 +710,24 @@ export const resetOfficeEmployeePassword = withAudit(
           },
           reason: String(reason).trim(),
           lockCleared: true,
+          signedOutEverywhere: !!signOutEverywhere,
+          mustChangePassword: !!requirePasswordChange,
         },
       });
 
-      return { success: true, message: "Password reset successfully" };
+      // Said plainly, because both are consequences the admin should be able to
+      // confirm landed rather than infer from the toggles they set.
+      const consequences = [
+        signOutEverywhere && "signed out of all devices",
+        requirePasswordChange && "will be asked to set their own at next login",
+      ].filter(Boolean);
+
+      return {
+        success: true,
+        message: consequences.length
+          ? `Password reset. ${targetName} has been ${consequences.join(" and ")}.`
+          : "Password reset successfully",
+      };
     } catch (error) {
       console.log("Error in resetOfficeEmployeePassword:", error);
       return { success: false, message: "Error resetting password" };
