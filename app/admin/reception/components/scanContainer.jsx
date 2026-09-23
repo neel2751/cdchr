@@ -14,7 +14,8 @@ import {
   createReceptionUser,
   getReceptionUsers,
 } from "@/server/receptionServer/receptionServer";
-import { useFetchQuery } from "@/hooks/use-query";
+import { useFetchQuery, useFetchSelectQuery } from "@/hooks/use-query";
+import { getClockLocations } from "@/server/clockServer/locations";
 import ScanUserTable from "./scanUserTable";
 
 export default function SacnContainer() {
@@ -36,6 +37,14 @@ export default function SacnContainer() {
 
   const { newData: receptionUsers = [] } = data || {};
 
+  // Offices only, active only. A desk registered to a site would issue codes
+  // naming a job rather than a place.
+  const { data: locations = [] } = useFetchSelectQuery({
+    queryKey: ["clockLocations"],
+    fetchFn: getClockLocations,
+  });
+  const offices = locations.filter((l) => !l.projectSiteId);
+
   const { mutate: submitUser } = useSubmitMutation({
     mutationFn: async (data) => createReceptionUser(data, initialValues?._id),
     invalidateKey: ["reception-users"],
@@ -49,7 +58,14 @@ export default function SacnContainer() {
     setShowDialog(true);
   };
   const handleEdit = (item) => {
-    setInitialValues(item);
+    setInitialValues({
+      ...item,
+      // The list populates the office so the card can show its name; the form
+      // needs the id back, or the select opens with nothing chosen and a save
+      // would quietly clear it.
+      clockLocationId:
+        item?.clockLocationId?._id || item?.clockLocationId || "",
+    });
     setIsEdit(true);
     setShowDialog(true);
   };
@@ -79,6 +95,17 @@ export default function SacnContainer() {
         },
       },
     },
+    // Where this desk is. Not required: a company with one office has nothing
+    // to choose, and a screen registered under Screens & devices overrides it
+    // anyway. Left empty, the desk asks whoever is standing at it.
+    {
+      name: "clockLocationId",
+      labelText: "Office this desk is in",
+      type: "select",
+      size: true,
+      placeholder: "Ask at the desk",
+      options: offices.map((o) => ({ value: o._id, label: o.name })),
+    },
   ];
 
   return (
@@ -87,14 +114,17 @@ export default function SacnContainer() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <CardTitle>Reception Scan Users</CardTitle>
+              <CardTitle>Reception Desks</CardTitle>
               <CardDescription>
-                Manage the users who can perform scans at the reception.
+                The accounts a front desk signs in as. Each one can be given an
+                office, and each screen it runs on can be registered
+                individually — attendance scanned there is recorded against
+                that office instead of whichever one the person picked.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button onClick={handleAdd} variant="outline">
-                Add Scan User
+                Add reception desk
               </Button>
             </div>
           </div>

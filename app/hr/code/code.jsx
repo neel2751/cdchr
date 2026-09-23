@@ -221,9 +221,13 @@ export default function OfficeQRCode({ siteId, className }) {
         <div className="rounded-md border bg-gray-50 p-2 text-[11px] text-gray-600">
           {boundLocationId && enrolled?.locationName ? (
             <p>
-              This screen is registered to{" "}
-              <strong>{enrolled.locationName}</strong>. Attendance scanned here
-              is recorded against that office.
+              Attendance scanned here is recorded at{" "}
+              <strong>{enrolled.locationName}</strong>
+              {enrolled.source === "screen"
+                ? " — this screen is registered to it."
+                : " — from this reception account. Registering the screen"
+                  + " itself, using the ID below, keeps it right even if"
+                  + " somebody else signs in."}
             </p>
           ) : (
             <p>

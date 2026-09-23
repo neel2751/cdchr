@@ -410,6 +410,78 @@ async function main() {
     });
   });
 
+  await check("the account's office covers an unenrolled screen", async () => {
+    // A replacement tablet, or a second browser. Without this the desk falls
+    // all the way back to asking, and the answer lives in that browser only.
+    as("superAdmin", "superAdmin");
+    const { getDeviceLocation } = await import(
+      "@/server/deviceServer/deviceManagementServer"
+    );
+    const ClockLocation = (await import("@/models/clockLocationModel")).default;
+    const OfficeUser = (await import("@/models/officeModel")).default;
+
+    await withTenant(async () => {
+      const office = await ClockLocation.create({
+        name: "Desk Default Office",
+        kind: "office",
+      });
+      // The signed-in account is what the fallback reads, so it has to be the
+      // one the session stub is pretending to be.
+      await OfficeUser.findOneAndUpdate(
+        { _id: ids.superAdmin },
+        {
+          $set: {
+            clockLocationId: office._id,
+            isReception: true,
+            name: "Front Desk Account",
+            email: `desk-account-${Date.now()}@example.com`,
+            password: "x",
+          },
+        },
+        { upsert: true },
+      );
+
+      const got = JSON.parse(
+        (await getDeviceLocation({ deviceId: "AN-UNKNOWN-SCREEN" })).data,
+      );
+      assert.equal(got.locationName, "Desk Default Office");
+      assert.equal(got.source, "account");
+    });
+  });
+
+  await check("an enrolled screen beats the account's office", async () => {
+    // The screen is the thing physically in a room. Two receptionists signing
+    // in on alternate days are still one screen in one office.
+    as("superAdmin", "superAdmin");
+    const { getDeviceLocation, setDeviceLocation } = await import(
+      "@/server/deviceServer/deviceManagementServer"
+    );
+    const ClockLocation = (await import("@/models/clockLocationModel")).default;
+    const OfficeUser = (await import("@/models/officeModel")).default;
+
+    await withTenant(async () => {
+      const screenOffice = await ClockLocation.create({
+        name: "Screen Wins Office",
+        kind: "office",
+      });
+      await OfficeUser.findOneAndUpdate(
+        { _id: ids.superAdmin },
+        { $push: { authorizedDevices: { deviceId: "SCREEN-2" } } },
+      );
+      await setDeviceLocation({
+        userId: String(ids.superAdmin),
+        deviceId: "SCREEN-2",
+        locationId: String(screenOffice._id),
+      });
+
+      const got = JSON.parse(
+        (await getDeviceLocation({ deviceId: "SCREEN-2" })).data,
+      );
+      assert.equal(got.locationName, "Screen Wins Office");
+      assert.equal(got.source, "screen");
+    });
+  });
+
   await check("an unenrolled screen answers nothing, not a guess", async () => {
     // It has to fall through to asking. Guessing an office here would file
     // attendance at the wrong one with nothing looking broken.
@@ -417,7 +489,13 @@ async function main() {
     const { getDeviceLocation } = await import(
       "@/server/deviceServer/deviceManagementServer"
     );
+    const OfficeUser = (await import("@/models/officeModel")).default;
     await withTenant(async () => {
+      // No screen AND no desk office: the only case where it should ask.
+      await OfficeUser.findOneAndUpdate(
+        { _id: ids.superAdmin },
+        { $set: { clockLocationId: null } },
+      );
       const got = JSON.parse(
         (await getDeviceLocation({ deviceId: "NEVER-SEEN" })).data,
       );
@@ -444,6 +522,95 @@ async function main() {
       );
       assert.equal(got.locationId, undefined, "an archived office still bound");
     });
+  });
+
+  /* ------------------------------------------------- the reception list */
+
+  await check("only reception accounts are listed", async () => {
+    // This filtered on `delete: false` alone, so the screen showed every
+    // office employee in the company and an administrator had to know which
+    // of them was the front desk.
+    as("superAdmin", "superAdmin");
+    const { getReceptionUsers } = await import(
+      "@/server/receptionServer/receptionServer"
+    );
+    const OfficeUser = (await import("@/models/officeModel")).default;
+
+    await withTenant(async () => {
+      await OfficeUser.create({
+        name: "Ordinary Office Staff",
+        email: `staff-${Date.now()}@example.com`,
+        password: "x",
+        delete: false,
+      });
+      await OfficeUser.create({
+        name: "The Front Desk",
+        email: `front-${Date.now()}@example.com`,
+        password: "x",
+        delete: false,
+        isReception: true,
+      });
+
+      const listed = JSON.parse((await getReceptionUsers()).data);
+      const names = listed.map((u) => u.name);
+      assert.ok(names.includes("The Front Desk"), "the desk is missing");
+      assert.ok(
+        !names.includes("Ordinary Office Staff"),
+        "office staff are still being listed as reception accounts",
+      );
+    });
+  });
+
+  await check("a reception password reset works and is hashed", async () => {
+    // Two bugs met here: the guard read `user.isReception`, which nothing set
+    // and the session never carried, so it refused everybody; and the hash was
+    // not awaited, so a Promise went into the password field and the account
+    // could never sign in again — while the screen said it had worked.
+    as("superAdmin", "superAdmin");
+    const { updateReceptionUserPassword } = await import(
+      "@/server/receptionServer/receptionServer"
+    );
+    const OfficeUser = (await import("@/models/officeModel")).default;
+    const { isMatchedPassword } = await import("@/utils/bcrypt");
+
+    await withTenant(async () => {
+      const desk = await OfficeUser.create({
+        name: "Resettable Desk",
+        email: `reset-${Date.now()}@example.com`,
+        password: "x",
+        delete: false,
+        isReception: true,
+      });
+
+      const res = await updateReceptionUserPassword(
+        String(desk._id),
+        "NewPass123!",
+      );
+      assert.equal(res.success, true, res.message);
+
+      const after = await OfficeUser.findById(desk._id).lean();
+      assert.equal(
+        typeof after.password,
+        "string",
+        "a Promise was stored instead of a hash",
+      );
+      assert.ok(
+        await isMatchedPassword("NewPass123!", after.password),
+        "the stored value is not a usable hash of the new password",
+      );
+    });
+  });
+
+  await check("a non-super-admin cannot reset a desk password", async () => {
+    as("adminGranted", "admin");
+    const { updateReceptionUserPassword } = await import(
+      "@/server/receptionServer/receptionServer"
+    );
+    const res = await withTenant(() =>
+      updateReceptionUserPassword(String(ids.reception), "whatever"),
+    );
+    assert.equal(res.success, false);
+    assert.match(res.message, /unauthor/i);
   });
 
   await mongoose.connection.db.dropDatabase();

@@ -3,8 +3,32 @@
 import OfficeUserModel from "@/models/officeModel";
 import { getServerSideProps } from "../session/session";
 import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
+import { createObjectId, isValidObjectId } from "@/lib/mongodb";
+import ClockLocationModel from "@/models/clockLocationModel";
 import EmployeModel from "@/models/employeModel";
 import { connect } from "@/db/db";
+
+/**
+ * Turn whatever the form sent into a usable office id, or null.
+ *
+ * Null is a real answer and means "ask at the desk" — it is not a failure, so
+ * an unset or cleared field is allowed through rather than refused. What is
+ * refused is a value naming something that is not an active office: a site
+ * would make the desk issue codes against a job, and an archived office would
+ * mint codes for a place nobody can clock in at.
+ */
+async function resolveOffice(value) {
+  if (!value || !isValidObjectId(value)) return null;
+  await connect();
+  const office = await ClockLocationModel.findOne({
+    _id: createObjectId(value),
+    projectSiteId: null,
+    isActive: true,
+  })
+    .select("_id")
+    .lean();
+  return office ? office._id : null;
+}
 
 export async function createReceptionUser(data, userId) {
   const { props } = await getServerSideProps();
@@ -55,6 +79,11 @@ export async function createReceptionUser(data, userId) {
         ...data,
         email: email,
         password: password,
+        // What makes this a reception account rather than office staff. The
+        // screen that lists these filters on it, so without the stamp a new
+        // desk would not appear on the screen that created it.
+        isReception: true,
+        clockLocationId: await resolveOffice(data?.clockLocationId),
         createdBy: user._id,
         updatedBy: user._id,
       });
@@ -109,6 +138,12 @@ export async function updateReceptionUser(data, userId) {
       userId,
       {
         ...data,
+        // Validated rather than taken as given: an id from anywhere, or one
+        // naming an archived office, would leave the desk pointed at a place
+        // that cannot be clocked in at.
+        ...(data?.clockLocationId !== undefined
+          ? { clockLocationId: await resolveOffice(data.clockLocationId) }
+          : {}),
         updatedBy: user._id,
       },
       { new: true }
@@ -141,10 +176,17 @@ export async function getReceptionUsers(query = {}) {
 
   try {
     await connect();
+    // Reception accounts only. This filtered on `delete: false` alone, so the
+    // screen listed every office employee in the company and an administrator
+    // had to know which of them was the front desk.
     const users = await OfficeUserModel.find({
       delete: false,
+      isReception: true,
       ...query,
-    }).select("-password -delete -createdBy -updatedBy");
+    })
+      .select("-password -delete -createdBy -updatedBy")
+      .populate({ path: "clockLocationId", select: "name isActive" })
+      .lean();
 
     return {
       success: true,
@@ -252,7 +294,12 @@ export async function getReceptionUserById(userId) {
 export async function updateReceptionUserPassword(userId, newPassword) {
   const { props } = await getServerSideProps();
   const { user } = props?.session || {};
-  if (!user || !user.isReception) {
+  // Was `!user.isReception`. Nothing ever set that field and the session never
+  // carried it, so this action refused every caller including the super admin
+  // who owns the screen. Every other action in this file is super admin, and a
+  // password reset for someone else's account is not something a reception
+  // desk should be doing to itself.
+  if (!user || user.role !== "superAdmin") {
     return {
       success: false,
       message: "Unauthorized access",
@@ -281,7 +328,10 @@ export async function updateReceptionUserPassword(userId, newPassword) {
     }
 
     // update the password
-    const hashedPassword = hashPassword(newPassword);
+    //
+    // `await` was missing: a Promise was written into the password field, so
+    // the account could never sign in again and the screen said it had worked.
+    const hashedPassword = await hashPassword(newPassword);
     await OfficeUserModel.findByIdAndUpdate(userId, {
       password: hashedPassword,
       updatedBy: user._id,

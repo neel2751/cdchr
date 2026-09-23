@@ -4,6 +4,7 @@ import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import ClockLocationModel from "@/models/clockLocationModel";
 import OfficeUserModel from "@/models/officeModel";
 import { featureRefusal } from "@/lib/requireFeature";
+import { getServerSideProps } from "../session/session";
 
 /**
  * Trusted devices for the reception desk.
@@ -251,7 +252,7 @@ export async function setDeviceLocation({ userId, deviceId, locationId } = {}) {
       success: true,
       message: target
         ? `This screen now issues codes for "${target.name}"`
-        : "This screen will ask which office it is in",
+        : "This screen now falls back to the office set on this desk",
     };
   } catch (error) {
     console.error("Error setting device location:", error);
@@ -262,56 +263,93 @@ export async function setDeviceLocation({ userId, deviceId, locationId } = {}) {
 /**
  * Which office is the screen in front of me?
  *
- * Looks the device up across the company rather than only on the signed-in
- * account, deliberately: the *screen* is what was enrolled, and a desk where
- * two receptionists sign in on alternate days is one screen in one office, not
- * two. Tenant scoping keeps the search inside the company.
+ * Three answers, in this order, and the order is the point:
  *
- * Returns `{ locationId, locationName }` when the screen is enrolled, and nulls
- * when it is not — in which case the caller asks, as it always did.
+ *   1. **The screen**, if someone enrolled it. Looked up across the company
+ *      rather than only on the signed-in account, deliberately: the screen is
+ *      what is physically in a room, and a desk where two receptionists sign
+ *      in on alternate days is one screen in one office, not two.
+ *   2. **The account**, if the desk has a default office. Covers a screen
+ *      nobody has enrolled yet — a replacement tablet, a second browser —
+ *      without falling all the way back to asking.
+ *   3. **Nothing**, in which case the caller asks. It never guesses: a guess
+ *      files attendance at the wrong office and nothing looks broken.
+ *
+ * Tenant scoping keeps every lookup inside the company.
  */
 export async function getDeviceLocation({ deviceId } = {}) {
   const refusal = await featureRefusal("reception");
   if (refusal) return refusal;
 
-  try {
-    if (!deviceId) return { success: true, data: JSON.stringify({}) };
-    await connect();
+  const nothing = { success: true, data: JSON.stringify({}) };
 
-    const owner = await OfficeUserModel.findOne({
-      authorizedDevices: {
-        $elemMatch: { deviceId, locationId: { $ne: null } },
-      },
-      delete: { $ne: true },
-    })
-      .select("authorizedDevices")
-      .lean();
-
-    const entry = owner?.authorizedDevices?.find(
-      (d) => d.deviceId === deviceId && d.locationId,
-    );
-    if (!entry) return { success: true, data: JSON.stringify({}) };
-
-    // The location is read rather than trusted from the device entry: an
-    // office archived after enrolment must not keep minting codes.
-    const location = await ClockLocationModel.findOne({
-      _id: entry.locationId,
-      isActive: true,
-    })
+  /**
+   * Read the location itself rather than trusting the id that was stored.
+   * An office archived after enrolment must stop minting codes, not keep
+   * going because a device row still names it.
+   */
+  const liveOffice = async (locationId) => {
+    if (!locationId) return null;
+    return ClockLocationModel.findOne({ _id: locationId, isActive: true })
       .select("name")
       .lean();
-    if (!location) return { success: true, data: JSON.stringify({}) };
+  };
+
+  try {
+    await connect();
+
+    // 1. the screen
+    if (deviceId) {
+      const owner = await OfficeUserModel.findOne({
+        authorizedDevices: {
+          $elemMatch: { deviceId, locationId: { $ne: null } },
+        },
+        delete: { $ne: true },
+      })
+        .select("authorizedDevices")
+        .lean();
+
+      const entry = owner?.authorizedDevices?.find(
+        (d) => d.deviceId === deviceId && d.locationId,
+      );
+      const office = await liveOffice(entry?.locationId);
+      if (office) {
+        return {
+          success: true,
+          data: JSON.stringify({
+            locationId: String(office._id),
+            locationName: office.name,
+            source: "screen",
+          }),
+        };
+      }
+    }
+
+    // 2. the account signed in at it
+    const { props } = await getServerSideProps();
+    const sessionUser = props?.session?.user;
+    if (!sessionUser?._id || !isValidObjectId(sessionUser._id)) return nothing;
+
+    const account = await OfficeUserModel.findById(
+      createObjectId(sessionUser._id),
+    )
+      .select("clockLocationId")
+      .lean();
+
+    const fromAccount = await liveOffice(account?.clockLocationId);
+    if (!fromAccount) return nothing;
 
     return {
       success: true,
       data: JSON.stringify({
-        locationId: String(location._id),
-        locationName: location.name,
+        locationId: String(fromAccount._id),
+        locationName: fromAccount.name,
+        source: "account",
       }),
     };
   } catch (error) {
     console.error("Error resolving device location:", error);
     // Falls back to asking rather than failing the screen.
-    return { success: true, data: JSON.stringify({}) };
+    return nothing;
   }
 }

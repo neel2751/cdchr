@@ -10,6 +10,23 @@ import Link from "next/link";
 import React from "react";
 
 export default function ScanUserTable({ data, onEdit }) {
+  if (!data?.length) {
+    // Reception accounts are now a distinct kind of account rather than every
+    // office employee, so this list is empty until one is added. An empty grid
+    // reads as broken; saying why does not.
+    return (
+      <div className="rounded-md border border-dashed p-6 text-center">
+        <p className="text-sm font-medium">No reception desks yet</p>
+        <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+          A reception desk is the account a front desk signs in as, separate
+          from ordinary office staff. Add one to give it an office and register
+          the screens it runs on, so attendance scanned there is recorded at
+          the right office.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-x-auto">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -25,16 +42,28 @@ export default function ScanUserTable({ data, onEdit }) {
                   {user.email}
                 </CardDescription>
                 {/* Shown on the card so an administrator can see at a glance
-                    which desks are set up, without opening each one. */}
+                    which desks are set up, without opening each one. The two
+                    lines are the two places an office can come from, in the
+                    order the desk resolves them. */}
+                <p className="text-xs text-muted-foreground">
+                  {user.clockLocationId?.name ? (
+                    <>
+                      Office: <strong>{user.clockLocationId.name}</strong>
+                    </>
+                  ) : (
+                    <span className="text-amber-700">
+                      No office — the desk asks whoever is standing at it
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {user.authorizedDevices?.length
                     ? `${user.authorizedDevices.length} screen${
                         user.authorizedDevices.length === 1 ? "" : "s"
-                      }${
-                        user.authorizedDevices.some((d) => d.locationId)
-                          ? ""
-                          : " — no office set"
-                      }`
+                      } registered` +
+                      (user.authorizedDevices.some((d) => d.locationId)
+                        ? ""
+                        : " (none set to an office)")
                     : "No screens registered"}
                 </p>
               </div>

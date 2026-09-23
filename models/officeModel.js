@@ -51,6 +51,29 @@ const officeUserSchema = new mongoose.Schema(
       },
     ],
     enforceDeviceLock: { type: Boolean, default: true },
+
+    // This account exists to run a reception desk, rather than belonging to a
+    // member of office staff.
+    //
+    // The distinction had no field behind it: getReceptionUsers filtered on
+    // `delete: false` alone, so the Reception screen listed every office
+    // employee in the company, and updateReceptionUserPassword guarded on
+    // `user.isReception` — which nothing set and the session never carried, so
+    // that action could never authorise anybody at all.
+    isReception: { type: Boolean, default: false },
+
+    // The office this desk stands in.
+    //
+    // A screen registered under authorizedDevices wins over this, because the
+    // screen is the thing that is physically in a room. This is the fallback
+    // for a desk signing in on a device nobody has enrolled yet — without it
+    // the screen falls all the way back to asking the person standing at it,
+    // whose answer lives in that browser only.
+    clockLocationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ClockLocation",
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,

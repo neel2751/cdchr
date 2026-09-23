@@ -147,8 +147,22 @@ const DeviceManagementSection = ({ officeUser }) => {
           </li>
         </ol>
         <p className="mt-2 text-xs">
-          A screen left on <em>Ask each time</em> still works — it asks the
-          person standing at it, and remembers the answer in that browser only.
+          A screen left on <em>Use this desk&apos;s office</em> falls back to
+          the office set on this account
+          {officeUser?.clockLocationId?.name ? (
+            <>
+              {" "}
+              (<strong>{officeUser.clockLocationId.name}</strong>)
+            </>
+          ) : (
+            <>
+              {" "}
+              — which is not set, so it will ask the person standing at it and
+              remember the answer in that browser only
+            </>
+          )}
+          . Registering the screen itself is stronger: it holds whoever signs
+          in, and survives a cleared cache.
         </p>
       </div>
 
@@ -197,10 +211,12 @@ const DeviceManagementSection = ({ officeUser }) => {
                   onValueChange={(v) => handleLocationChange(device.deviceId, v)}
                 >
                   <SelectTrigger className="w-52">
-                    <SelectValue placeholder="Ask each time" />
+                    <SelectValue placeholder="Use this desk&apos;s office" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">Ask each time</SelectItem>
+                    <SelectItem value="__none">
+                      Use this desk&apos;s office
+                    </SelectItem>
                     {offices.map((o) => (
                       <SelectItem key={o._id} value={o._id}>
                         {o.name}
@@ -258,10 +274,12 @@ const DeviceManagementSection = ({ officeUser }) => {
               }
             >
               <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Ask each time" />
+                <SelectValue placeholder="Use this desk&apos;s office" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none">Ask each time</SelectItem>
+                <SelectItem value="__none">
+                  Use this desk&apos;s office
+                </SelectItem>
                 {offices.map((o) => (
                   <SelectItem key={o._id} value={o._id}>
                     {o.name}
