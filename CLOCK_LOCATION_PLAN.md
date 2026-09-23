@@ -606,7 +606,7 @@ order that bought it into a row nobody can explain.
 Each row shows how many units have actually sold, because that is the question a price
 change raises.
 
-### 6.9 Delivery and order tracking — NOT YET BUILT
+### 6.9 Delivery and order tracking — BUILT (E3)
 
 What exists today is the minimum that gets hardware to a customer: an order is marked
 shipped with a carrier and a tracking reference, and the customer sees that string on
@@ -631,9 +631,38 @@ What is missing, roughly in the order it will start to hurt:
 - **Payments and invoicing.** Deliberately outside the app for now — the order carries a
   total for reference and the invoice happens separately.
 
-None of this is required to sell a customer twenty working tags, which is why none of it
-is built. It is written down here so that when the first customer asks "where is my
-order", the answer is a known piece of work rather than a surprise.
+**What E3 built**, of the above:
+
+- **Tracking the customer can read.** `data/carriers.js` holds a carrier per row with a
+  tracking URL template; the customer sees a link, not a reference to paste somewhere.
+  A carrier with no template, or one whose URL we get wrong, degrades to plain text —
+  a missing link reads as "copy this", a broken one reads as "your parcel does not
+  exist".
+- **Partial shipments.** An order now has *shipments*, each with its own carrier,
+  reference, parcel count and units. The "nothing unverified ships" rule moved from the
+  order to the unit, so forty verified tags go out while ten are still being made and
+  the order reads `partially-shipped`.
+- **A delivered state**, per shipment, recorded either by us or by the customer
+  confirming receipt — `deliveredSource` keeps those apart, because they are different
+  claims and a dispute turns on which was made.
+- **Returns and replacements.** A returned unit retires its ClockTag (the half that
+  matters — a dead chip left active is a tag nobody can account for) and a replacement
+  is appended to the same order, linked in both directions, starting from `pending` with
+  a fresh key.
+- **Status is derived**, in `lib/tagOrderStatus.js`, never set by hand. The old flag was
+  written by the ship action, which is exactly how an order could read "shipped" with
+  half its units on the bench: it recorded that somebody pressed a button.
+
+**Still not built**, and still not required to sell twenty working tags:
+
+- **Dispatch detail** beyond parcel count: weight, label printing, and an address that
+  is validated rather than a free-text line. Label printing needs a carrier API
+  integration, which is a different kind of work from everything above.
+- **Stock.** Lead times are still a number typed into the catalogue rather than
+  anything that knows how many blanks are on the shelf. This is an inventory feature,
+  not a delivery one.
+- **Payments and invoicing.** Deliberately outside the app — the order carries a total
+  for reference and the invoice happens separately.
 
 ---
 
