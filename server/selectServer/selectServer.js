@@ -87,7 +87,11 @@ export const getAllProjects = async () => {
     await connect();
     const roles = await ProjectSiteModel.aggregate([
       {
-        $match: { siteDelete: false, isActive: true }, // Filters documents where delete is false
+        // `$ne: true` — see siteProjectServer.js. `{ siteDelete: false }` skips
+        // documents written before the field existed, which left five of one
+        // company's seven active sites unpickable in every site dropdown: the
+        // rota, site assignment and expenses all read this list.
+        $match: { siteDelete: { $ne: true }, isActive: true },
       },
       {
         $project: {
@@ -212,6 +216,33 @@ export const getSelectOfficeEmployee = async () => {
   } catch (error) {
     console.log(error);
     return { status: false, message: "Error Occured" };
+  }
+};
+
+/**
+ * Site employees only. `getSelectEmployee` merges both workforces into one
+ * list, which is no use to a filter that has already been narrowed to site
+ * staff — picking an office employee there would always return nothing.
+ */
+export const getSelectSiteEmployee = async () => {
+  try {
+    await connect();
+    const employees = await EmployeModel.aggregate([
+      { $match: { delete: false, isActive: true } },
+      {
+        $project: {
+          _id: 0,
+          value: "$_id",
+          label: { $concat: ["$firstName", " ", "$lastName"] },
+        },
+      },
+      { $sort: { label: 1 } },
+    ]).exec();
+
+    return { success: true, data: JSON.stringify(employees || []) };
+  } catch (error) {
+    console.log("Error in getSelectSiteEmployee", error);
+    return { success: false, data: JSON.stringify([]) };
   }
 };
 

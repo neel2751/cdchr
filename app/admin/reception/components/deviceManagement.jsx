@@ -18,8 +18,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useFetchSelectQuery } from "@/hooks/use-query";
+import { getClockLocations } from "@/server/clockServer/locations";
+import {
   addDevice,
   revokeDevice,
+  setDeviceLocation,
   toggleDeviceLock,
 } from "@/server/deviceServer/deviceManagementServer";
 import { useRouter } from "next/navigation";
@@ -29,7 +39,16 @@ import { toast } from "sonner";
 const DeviceManagementSection = ({ officeUser }) => {
   const [newDeviceId, setNewDeviceId] = useState("");
   const [newDeviceName, setNewDeviceName] = useState("");
+  const [newDeviceLocation, setNewDeviceLocation] = useState("");
   const router = useRouter();
+
+  // Offices only. A screen registered to a site would issue codes naming a job
+  // rather than a place, and a site screen already knows where it is.
+  const { data: locations = [] } = useFetchSelectQuery({
+    queryKey: ["clockLocations"],
+    fetchFn: getClockLocations,
+  });
+  const offices = locations.filter((l) => !l.projectSiteId);
 
   const onUpdate = () => {
     router.refresh();
@@ -42,12 +61,16 @@ const DeviceManagementSection = ({ officeUser }) => {
       userId: officeUser._id,
       deviceId: newDeviceId,
       deviceName: newDeviceName,
+      locationId: newDeviceLocation || null,
     });
     if (response.success) {
       toast.success("Device added successfully.");
       setNewDeviceId("");
       setNewDeviceName("");
+      setNewDeviceLocation("");
       onUpdate(); // Refresh the data
+    } else {
+      toast.error(response?.message || "Could not add that device.");
     }
   };
 
@@ -64,6 +87,20 @@ const DeviceManagementSection = ({ officeUser }) => {
     } catch (error) {
       console.log("Error revoking device:", error);
       toast.error("Failed to revoke device.");
+    }
+  };
+
+  const handleLocationChange = async (deviceId, locationId) => {
+    const response = await setDeviceLocation({
+      userId: officeUser._id,
+      deviceId,
+      locationId: locationId === "__none" ? null : locationId,
+    });
+    if (response?.success) {
+      toast.success(response.message);
+      onUpdate();
+    } else {
+      toast.error(response?.message || "Could not set the location.");
     }
   };
 
@@ -116,6 +153,7 @@ const DeviceManagementSection = ({ officeUser }) => {
             <TableHead className="p-2 text-left">
               Hardware ID (Fingerprint)
             </TableHead>
+            <TableHead className="p-2 text-left">Clocks in at</TableHead>
             <TableHead className="p-2 text-center">Action</TableHead>
           </TableRow>
         </TableHeader>
@@ -128,6 +166,24 @@ const DeviceManagementSection = ({ officeUser }) => {
               <TableCell className="p-2">{device.deviceName}</TableCell>
               <TableCell className="p-2 font-mono text-sm text-blue-600">
                 {device?.deviceId}
+              </TableCell>
+              <TableCell className="p-2">
+                <Select
+                  value={device?.locationId ? String(device.locationId) : "__none"}
+                  onValueChange={(v) => handleLocationChange(device.deviceId, v)}
+                >
+                  <SelectTrigger className="w-52">
+                    <SelectValue placeholder="Ask each time" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Ask each time</SelectItem>
+                    {offices.map((o) => (
+                      <SelectItem key={o._id} value={o._id}>
+                        {o.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell className="p-2 text-center">
                 <Button
@@ -143,7 +199,7 @@ const DeviceManagementSection = ({ officeUser }) => {
           {officeUser?.authorizedDevices?.length === 0 && (
             <TableRow>
               <TableCell
-                colSpan="3"
+                colSpan="4"
                 className="p-4 text-center text-gray-500 italic"
               >
                 No devices authorized yet.
@@ -159,6 +215,8 @@ const DeviceManagementSection = ({ officeUser }) => {
           <CardTitle>Add New Authorized Device</CardTitle>
           <CardDescription>
             To authorize a new device, enter its name and hardware ID below.
+            Registering it to an office means codes from that screen record
+            attendance there, without anyone at the desk having to choose.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -169,6 +227,24 @@ const DeviceManagementSection = ({ officeUser }) => {
               value={newDeviceName}
               onChange={(e) => setNewDeviceName(e.target.value)}
             />
+            <Select
+              value={newDeviceLocation || "__none"}
+              onValueChange={(v) =>
+                setNewDeviceLocation(v === "__none" ? "" : v)
+              }
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Ask each time" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Ask each time</SelectItem>
+                {offices.map((o) => (
+                  <SelectItem key={o._id} value={o._id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               className="border p-2 rounded flex-1 font-mono"
               placeholder="Paste Hardware ID here..."

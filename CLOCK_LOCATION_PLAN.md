@@ -746,3 +746,135 @@ is to become the control on sites where GPS cannot be relied on.
 
 The bottom two rows are the answer to the original question. A tag or a geofence is the
 only thing in this table that a two-person site can actually sustain.
+
+---
+
+## 10. After the migration: four problems found by looking at the screens
+
+Raised after the locations screen went live. The first one is not a clock problem at
+all — the locations list is telling the truth and the **Site Projects screen is lying**.
+
+### 10.1 Six sites are missing from Site Projects, not extra in Locations
+
+`server/siteProjectServer/siteProjectServer.js:23`:
+
+```js
+const query = { siteDelete: false };
+```
+
+`siteDelete` was added to the schema later, with `default: false`. A default only
+applies to documents **written after it exists** — the six sites created before it have
+no such field, and `{ siteDelete: false }` does not match a missing field. The same
+filter is in `server/selectServer/selectServer.js:90`, which feeds every site dropdown.
+
+Measured on production, one tenant:
+
+| | Count |
+|---|---|
+| Sites that exist | 10 |
+| Visible on the Site Projects screen | **4** |
+| Active sites | 7 |
+| Selectable in any site dropdown | **2** |
+
+So five of seven active sites cannot be picked for a rota, an assignment or an expense,
+and have not been pickable since `siteDelete` was introduced. This is a pre-existing
+bug with nothing to do with clocking; the locations backfill simply made it visible by
+listing all ten.
+
+**Fix**
+
+1. `{ siteDelete: { $ne: true } }` in both queries — matches missing, false and null,
+   and excludes only a genuine deletion. Use `$ne: true` rather than backfilling alone,
+   so the next field added with a default does not repeat this.
+2. A one-time script to stamp `siteDelete: false` on the six, so the data matches the
+   schema.
+3. While in there: the aggregation does `$skip` → `$limit` → `$sort`, so it sorts
+   *within the page it already cut*. Page 2 is not the second page of a sorted list.
+   `$sort` must come first.
+
+### 10.2 Two sites with the same name
+
+Both `Park Road New` rows are real, undeleted sites — one Active, one On Hold. Only one
+was visible on the Site Projects screen, because of §10.1, which is why the pair looked
+like a locations bug.
+
+Uniqueness belongs **at the source, not at the mirror**. A location's name is a copy of
+the site's; refusing the copy while allowing the original leaves the two permanently
+disagreeing, which is what the migration hit. So:
+
+1. Refuse a duplicate **when a site is created or renamed** in Site Projects, checked
+   against other sites *and* offices in that company. That is where a person types a
+   name and where the message can be acted on.
+2. Keep the site sync forgiving. A site must never fail to save because of its clock
+   location, so `syncLocationForSite` keeps auto-disambiguating.
+3. Surface existing clashes on the Locations screen rather than silently living with
+   them — a short "2 locations share a name" warning with a link to rename.
+
+**Order matters.** §10.1 first: right now they cannot see one of the two Park Road News
+to rename it. Enforcing uniqueness before that would refuse edits to a site whose
+duplicate is invisible.
+
+### 10.3 There is no way to set the default office
+
+`isDefault` is shown as a star and blocks archiving, but nothing anywhere sets it. It
+gets its value from `ensureDefaultLocation()`, which adopts a lone existing office —
+which is why **London Office** is marked default: it was the only office at migration
+time, so it was adopted rather than a second "Head Office" being invented (§3.4).
+
+What the flag actually means, and what the screen never says: *this is where a clock-in
+that names no location is recorded* — an office scan before locations existed, and the
+fallback if a scan arrives with no site.
+
+**Fix**: a `setDefaultLocation` action (super admin, offices only — a site cannot be the
+fallback for records that have no site), a "Make default" row action, and one line of
+explanation on the card. The unique partial index already prevents two.
+
+### 10.4 A QR scan cannot say which office it happened at
+
+The reception desk at `/hr` mints codes through `OfficeQRCode`. With no `siteId` it
+shows a picker — "Which office is this screen in?" — and remembers the answer in
+`localStorage`.
+
+That is too weak to attribute attendance:
+
+- It is **per browser**, so it is lost on a cache clear, a new device or a private tab.
+- It is **chosen by whoever is standing there**, not by an administrator.
+- A wrong choice **fails silently** — attendance lands at the other office and nothing
+  looks broken.
+
+The token itself is already fine: `ClockToken` carries an authoritative `locationId`
+(§3), so only the *choosing* is weak.
+
+Two ways to fix it, and they are not equivalent:
+
+**A — bind the location to the reception account.** A desk is a fixed thing; so is the
+account that stands at it. Add `clockLocationId` to the reception user, set by the super
+admin on the existing reception form. `/hr/code` reads it and shows no picker.
+*Cheapest, and an administrator makes the decision.*
+
+Complication found while checking: `getReceptionUsers` filters on `{ delete: false }`
+only, so the "Reception Users" screen currently lists **every** office employee, and
+there is no field marking an account as reception at all. Option A therefore needs that
+concept to exist first — small, but not zero.
+
+**B — bind the location to the registered device.** `models/officeModel.js` already has
+`authorizedDevices[{ deviceId, deviceName }]` and `enforceDeviceLock`, and
+`/admin/reception` already manages them. Add `locationId` to each device entry: the
+screen in Office 2 is enrolled once and identifies itself thereafter, regardless of who
+signs in. *Survives shared accounts and one account running several desks, and reuses
+machinery that already exists.*
+
+**Recommendation: B**, with A's account field as the fallback when a device is not
+enrolled. B matches the physical reality — the *screen* is in an office, the person is
+not — and it is the same enrolment story NFC tags already use (§5), so there is one
+mental model rather than two.
+
+Either way the picker stays as a last resort for a company with one office, where there
+is nothing to get wrong.
+
+### 10.5 Suggested order
+
+1. §10.1 — the site list. Largest blast radius, unblocks the rest, unrelated to clocking.
+2. §10.3 — default office. Self-contained, small.
+3. §10.2 — name uniqueness. Needs §10.1 done so both duplicates are visible.
+4. §10.4 — QR office binding. Largest, and the only one needing a decision first.

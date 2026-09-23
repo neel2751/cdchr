@@ -104,8 +104,15 @@ export async function officeNameTaken(name, exceptId = null) {
   const trimmed = (name || "").trim();
   if (!trimmed) return false;
 
+  // Case-insensitive: "head office" and "Head Office" are the same name to a
+  // person reading a picker, and the index alone would let both exist.
+  const exact = new RegExp(
+    `^${trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+    "i",
+  );
+
   const clash = await ClockLocationModel.findOne({
-    name: trimmed,
+    name: exact,
     projectSiteId: null,
     isActive: true,
     ...(exceptId ? { _id: { $ne: exceptId } } : {}),

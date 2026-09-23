@@ -215,6 +215,96 @@ export const updateClockLocation = withAudit(
 );
 
 /**
+ * Choose which office is the default.
+ *
+ * The default is where a clock-in that names no location is recorded: an office
+ * scan from before locations existed, and the fallback when a scan arrives with
+ * no site. Until now nothing set it — `ensureDefaultLocation()` picked one on
+ * first use and that was the end of it, so a company with two offices was stuck
+ * with whichever one the migration happened to adopt.
+ *
+ * Offices only. A site cannot be the fallback for records that have no site;
+ * allowing it would file office attendance under a job.
+ *
+ * Not retroactive, deliberately, and the same rule as tag reassignment (§5 of
+ * CLOCK_LOCATION_PLAN.md): records already written keep the location they were
+ * written with. Moving them would rewrite where somebody was, which nobody can
+ * verify after the fact.
+ */
+export const setDefaultLocation = withAudit(
+  "ClockLocation.setDefault",
+  async ({ id } = {}) => {
+    try {
+      const auth = await requireSuperAdmin();
+      if (!auth.ok) return { success: false, message: auth.message };
+      if (!id || !isValidObjectId(id)) {
+        return { success: false, message: "Invalid location" };
+      }
+
+      await connect();
+      const target = await ClockLocationModel.findById(
+        createObjectId(id),
+      ).lean();
+      if (!target) return { success: false, message: "Location not found" };
+
+      if (target.projectSiteId) {
+        return {
+          success: false,
+          message:
+            "A site cannot be the default. The default is where clock-ins " +
+            "that name no site are recorded, so it has to be an office.",
+        };
+      }
+      if (!target.isActive) {
+        return {
+          success: false,
+          message: "An archived location cannot be the default.",
+        };
+      }
+      if (target.isDefault) {
+        return { success: true, message: `"${target.name}" is already the default` };
+      }
+
+      const previous = await ClockLocationModel.findOne({
+        isDefault: true,
+      }).lean();
+
+      // Clear first, then set. The partial unique index allows exactly one
+      // default per company, so setting before clearing collides with the
+      // office that currently holds it.
+      if (previous) {
+        await ClockLocationModel.updateOne(
+          { _id: previous._id },
+          { $set: { isDefault: false } },
+        );
+      }
+      await ClockLocationModel.updateOne(
+        { _id: target._id },
+        { $set: { isDefault: true } },
+      );
+
+      recordAudit({
+        entityId: target._id,
+        before: previous ? { isDefault: previous.name } : undefined,
+        after: { isDefault: target.name },
+        description: previous
+          ? `Default clock-in location moved from "${previous.name}" to "${target.name}"`
+          : `Default clock-in location set to "${target.name}"`,
+      });
+
+      return {
+        success: true,
+        message: `"${target.name}" is now the default. Existing records keep the location they were recorded at.`,
+      };
+    } catch (error) {
+      console.log("Error setting default location:", error);
+      return { success: false, message: "Could not set the default" };
+    }
+  },
+  { module: "ClockLocation" },
+);
+
+/**
  * Archive a location.
  *
  * Never deleted: clock records point at it, and those are a record of where

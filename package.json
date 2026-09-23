@@ -39,7 +39,8 @@
     "audit:smtp": "node scripts/audit-smtp-accounts.mjs",
     "audit:feature-guards": "node scripts/audit-feature-guards.mjs",
     "audit:features": "node --import ./scripts/lib/alias-loader.mjs scripts/audit-features.mjs",
-    "clock:cutover": "node scripts/set-clock-cutover.mjs"
+    "clock:cutover": "node scripts/set-clock-cutover.mjs",
+    "site:backfill-delete-flag": "node scripts/backfill-site-delete-flag.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",
