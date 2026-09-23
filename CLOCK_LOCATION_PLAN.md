@@ -171,6 +171,7 @@ Run them in this order. It is **not** the order they were written in:
 npm run clock:dedupe      # no duplicate employee-days, so the unique index can build
 npm run clock:locations    # create the places, stamp every existing record
 npm run clock:migrate      # move clocks + siteclocks into clockrecords
+npm run clock:cutover      # fence off the imported history from the review queue
 ```
 
 Each takes `--apply`; without it they are a dry run and write nothing.
@@ -189,6 +190,17 @@ tenant:
   that would have split their history across two places, and reassignment is
   deliberately not retroactive, so it would not have been fixable afterwards. It now
   adopts a lone existing office as the default instead.
+- **Migrated history has to be fenced off.** The auto-closer flags shifts nobody
+  clocked out of so an admin can settle them. Pointed at imported history it flagged
+  24 — spread over sixteen months, the newest five months old, none of them now
+  answerable. A queue of unanswerable items is one people stop opening. So each
+  company has a **cutover date** (`clockCutoverDate` on WorkSetting): nothing before it
+  is flagged, and nothing before it is priced for overtime either, since writing a pay
+  figure onto a pre-cutover record is the same retroactive change and a quieter one.
+  Set it with `npm run clock:cutover -- --apply` after the three migrations, or edit it
+  on the clock rules screen. `null` — the default — means no floor, which is correct
+  for a company with no legacy data: there is nothing unreviewed to hide, and a floor
+  would only mask real gaps.
 - **Two sites may share a name.** The name-uniqueness index applied to every location
   and halted the backfill halfway on a company running two jobs both called "Park Road
   New". That is not a data error. Uniqueness now applies to **offices only** — an

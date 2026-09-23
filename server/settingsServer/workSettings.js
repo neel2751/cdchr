@@ -9,7 +9,27 @@ import {
 } from "@/lib/workHours";
 import WorkSettingModel from "@/models/workSettingModel";
 import { BANK_HOLIDAY_REGIONS } from "@/data/bankHolidayRegions";
+import {
+  DEFAULT_MAX_SHIFT_HOURS,
+  describeMinutes,
+  resolveClockRules,
+  resolveCutover,
+} from "@/lib/clockRules";
 import { getServerSideProps } from "../session/session";
+
+/** The enforced policy in one phrase, for the audit log. */
+function describeClockPolicy(rules) {
+  const on = [];
+  if (rules.minMinutesBeforeBreak > 0)
+    on.push(`no break within ${describeMinutes(rules.minMinutesBeforeBreak)}`);
+  if (rules.minBreakMinutes > 0)
+    on.push(`breaks at least ${describeMinutes(rules.minBreakMinutes)}`);
+  if (rules.minMinutesBeforeClockOut > 0)
+    on.push(
+      `clock out after ${describeMinutes(rules.minMinutesBeforeClockOut)}`,
+    );
+  return on.length ? on.join(", ") : "off";
+}
 
 /**
  * The company-wide working-time defaults, creating the single settings
@@ -43,6 +63,30 @@ export async function getWorkSettings() {
 }
 
 /**
+ * Just the clock rules, resolved and ready to enforce.
+ *
+ * A plain read with defaults rather than `getWorkSettings`, because this sits
+ * on the scan path: a company that has never opened the settings screen should
+ * not have a document written for them every time someone clocks in, and a
+ * settings read that fails should fall back to the defaults rather than stop
+ * the scanner.
+ */
+export async function getClockRules() {
+  try {
+    await connect();
+    const settings = await WorkSettingModel.findOne()
+      .select(
+        "maxShiftHours minMinutesBeforeBreak minBreakMinutes minMinutesBeforeClockOut clockCutoverDate",
+      )
+      .lean();
+    return resolveClockRules(settings);
+  } catch (error) {
+    console.log("Error loading clock rules, using defaults:", error);
+    return resolveClockRules(null);
+  }
+}
+
+/**
  * Change the company-wide defaults. Super admin only: the fixed figure values
  * the paid leave of everyone who is not on custom hours, so it moves numbers
  * across the whole organisation at once.
@@ -54,6 +98,11 @@ export const updateWorkSettings = withAudit(
     defaultDaysPerWeek,
     observesBankHolidays,
     bankHolidayRegion,
+    maxShiftHours,
+    minMinutesBeforeBreak,
+    minBreakMinutes,
+    minMinutesBeforeClockOut,
+    clockCutoverDate,
   } = {}) {
     try {
       const { props } = await getServerSideProps();
@@ -96,6 +145,75 @@ export const updateWorkSettings = withAudit(
         return { success: false, message: "Unknown bank holiday region" };
       }
 
+      // Clock rules. Each is left at its saved value when the caller does not
+      // mention it, for the same reason the bank holiday rule is: a save from
+      // one form must not reset a setting another form owns.
+      const keepOrSet = (incoming, saved, fallback) =>
+        incoming === undefined ? saved ?? fallback : Number(incoming);
+
+      const clockRules = {
+        maxShiftHours: keepOrSet(
+          maxShiftHours,
+          before?.maxShiftHours,
+          DEFAULT_MAX_SHIFT_HOURS,
+        ),
+        minMinutesBeforeBreak: keepOrSet(
+          minMinutesBeforeBreak,
+          before?.minMinutesBeforeBreak,
+          0,
+        ),
+        minBreakMinutes: keepOrSet(
+          minBreakMinutes,
+          before?.minBreakMinutes,
+          0,
+        ),
+        minMinutesBeforeClockOut: keepOrSet(
+          minMinutesBeforeClockOut,
+          before?.minMinutesBeforeClockOut,
+          0,
+        ),
+      };
+
+      // The cutover is a date, not a number, so it sits outside keepOrSet and
+      // the numeric bounds below. Three cases, all meaningful:
+      //   undefined -> not mentioned, keep what is saved
+      //   null / "" -> explicitly cleared, meaning flag all history
+      //   a date    -> the floor
+      let cutover = before?.clockCutoverDate ?? null;
+      if (clockCutoverDate !== undefined) {
+        if (clockCutoverDate === null || clockCutoverDate === "") {
+          cutover = null;
+        } else {
+          const parsed = resolveCutover(clockCutoverDate);
+          if (!parsed) {
+            return { success: false, message: "Invalid clock cutover date" };
+          }
+          // A future cutover would silently switch the auto-closer off for
+          // everything up to it — including shifts not yet worked. That is
+          // never what someone means, and it fails silently, so it is refused.
+          if (parsed.getTime() > Date.now()) {
+            return {
+              success: false,
+              message: "The clock cutover date cannot be in the future",
+            };
+          }
+          cutover = parsed;
+        }
+      }
+
+      const bounds = {
+        maxShiftHours: [1, 24, "Maximum shift length must be between 1 and 24 hours"],
+        minMinutesBeforeBreak: [0, 720, "Minimum time before a break must be between 0 and 720 minutes"],
+        minBreakMinutes: [0, 720, "Minimum break length must be between 0 and 720 minutes"],
+        minMinutesBeforeClockOut: [0, 1440, "Minimum time before clocking out must be between 0 and 1440 minutes"],
+      };
+      for (const [key, [min, max, message]] of Object.entries(bounds)) {
+        const value = clockRules[key];
+        if (!Number.isFinite(value) || value < min || value > max) {
+          return { success: false, message };
+        }
+      }
+
       const after = await WorkSettingModel.findOneAndUpdate(
         {},
         {
@@ -103,6 +221,8 @@ export const updateWorkSettings = withAudit(
           defaultDaysPerWeek: days,
           observesBankHolidays: observes,
           bankHolidayRegion: region,
+          ...clockRules,
+          clockCutoverDate: cutover,
           updatedBy:
             user?._id && isValidObjectId(user._id)
               ? createObjectId(user._id)
@@ -120,6 +240,7 @@ export const updateWorkSettings = withAudit(
               defaultDaysPerWeek: before.defaultDaysPerWeek,
               observesBankHolidays: before.observesBankHolidays ?? false,
               bankHolidayRegion: before.bankHolidayRegion ?? "england-and-wales",
+              ...resolveClockRules(before),
             }
           : undefined,
         after: {
@@ -127,10 +248,16 @@ export const updateWorkSettings = withAudit(
           defaultDaysPerWeek: after?.defaultDaysPerWeek,
           observesBankHolidays: after?.observesBankHolidays ?? false,
           bankHolidayRegion: after?.bankHolidayRegion ?? "england-and-wales",
+          ...resolveClockRules(after),
         },
         description:
           `Company working time set to ${hours}h/week over ${days} days; ` +
-          `bank holidays ${observes ? `observed (${region}, not deducted from leave)` : "treated as working days"}`,
+          `bank holidays ${observes ? `observed (${region}, not deducted from leave)` : "treated as working days"}; ` +
+          `shifts capped at ${clockRules.maxShiftHours}h; ` +
+          `clock rules ${describeClockPolicy(clockRules)}; ` +
+          (cutover
+            ? `open shifts reviewed from ${cutover.toISOString().slice(0, 10)}`
+            : "open shifts reviewed across all history"),
       });
 
       return {
