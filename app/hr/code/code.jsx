@@ -64,6 +64,12 @@ export default function OfficeQRCode({ siteId, className }) {
   // What the screen itself says it is, once the device has been looked up.
   // `null` while unknown, `{}` once we know it is not enrolled.
   const [enrolled, setEnrolled] = useState(null);
+  // This screen's own fingerprint, shown so it can be read off and given to an
+  // administrator. Without it the Hardware ID field on the Reception screen is
+  // unfillable: the fingerprint is computed in this browser and appeared
+  // nowhere, so there was no way to discover what to type.
+  const [myDeviceId, setMyDeviceId] = useState("");
+  const [copied, setCopied] = useState(false);
   const currentTokenRef = useRef("");
   const socketRef = useRef(null);
   const expiryTimerRef = useRef(null);
@@ -96,6 +102,7 @@ export default function OfficeQRCode({ siteId, className }) {
       try {
         const deviceId = await getDeviceId();
         if (cancelled) return;
+        setMyDeviceId(deviceId || "");
         const res = deviceId
           ? await getDeviceLocation({ deviceId })
           : { data: "{}" };
@@ -210,11 +217,43 @@ export default function OfficeQRCode({ siteId, className }) {
         </div>
       ) : null}
 
-      {boundLocationId && enrolled?.locationName ? (
-        <p className="text-[11px] text-gray-500">
-          This screen is registered to{" "}
-          <strong>{enrolled.locationName}</strong>.
-        </p>
+      {!siteId && myDeviceId ? (
+        <div className="rounded-md border bg-gray-50 p-2 text-[11px] text-gray-600">
+          {boundLocationId && enrolled?.locationName ? (
+            <p>
+              This screen is registered to{" "}
+              <strong>{enrolled.locationName}</strong>. Attendance scanned here
+              is recorded against that office.
+            </p>
+          ) : (
+            <p>
+              This screen is not registered to an office. An administrator can
+              register it under Reception, using the ID below, so nobody has to
+              choose each time.
+            </p>
+          )}
+          <div className="mt-1 flex items-center gap-2">
+            <span className="shrink-0">Screen ID:</span>
+            <code className="truncate rounded bg-white px-1 py-0.5 font-mono">
+              {myDeviceId}
+            </code>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => {
+                // Clipboard needs a secure context and can be refused; the ID
+                // is on screen either way, so a failure just means typing it.
+                navigator.clipboard
+                  ?.writeText(myDeviceId)
+                  .then(() => setCopied(true))
+                  .catch(() => setCopied(false));
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       <Button

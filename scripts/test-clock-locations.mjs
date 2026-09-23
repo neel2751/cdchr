@@ -302,6 +302,52 @@ async function main() {
     );
   });
 
+  await check("the full list includes archived places", async () => {
+    // Site Projects lists every site whatever its state. The settings table
+    // reads this list, so if it dropped archived ones a company with ten sites
+    // would see seven and nothing would say where the rest went.
+    const { getAllClockLocations, getClockLocations } = await import(
+      "@/server/clockServer/locations"
+    );
+
+    const closed = new mongoose.Types.ObjectId();
+    await syncLocationForSite(closed, { name: "Closed Job", isActive: true });
+    await syncLocationForSite(closed, { name: "Closed Job", isActive: false });
+
+    const all = JSON.parse((await getAllClockLocations()).data);
+    const active = JSON.parse((await getClockLocations()).data);
+
+    assert.ok(
+      all.some((l) => l.name === "Closed Job"),
+      "the archived location is missing from the full list",
+    );
+    assert.ok(
+      !active.some((l) => l.name === "Closed Job"),
+      "an archived place was offered to a picker",
+    );
+    assert.ok(all.length > active.length);
+  });
+
+  await check("every site has a location, archived or not", async () => {
+    // The invariant behind the two screens agreeing. A site without one cannot
+    // be clocked in at, and would be invisible here while visible there.
+    const ProjectSite = (await import("@/models/siteProjectModel")).default;
+    const { getAllClockLocations } = await import(
+      "@/server/clockServer/locations"
+    );
+
+    const sitesInDb = await ProjectSite.countDocuments({
+      siteDelete: { $ne: true },
+    });
+    const all = JSON.parse((await getAllClockLocations()).data);
+    const fromSites = all.filter((l) => l.projectSiteId).length;
+
+    assert.ok(
+      fromSites >= sitesInDb,
+      `${sitesInDb} site(s) but only ${fromSites} site location(s)`,
+    );
+  });
+
   await check("a company cannot have two defaults", async () => {
     await assert.rejects(
       () =>

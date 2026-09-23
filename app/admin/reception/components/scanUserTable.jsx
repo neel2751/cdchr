@@ -24,6 +24,19 @@ export default function ScanUserTable({ data, onEdit }) {
                 <CardDescription className="text-sm text-muted-foreground">
                   {user.email}
                 </CardDescription>
+                {/* Shown on the card so an administrator can see at a glance
+                    which desks are set up, without opening each one. */}
+                <p className="text-xs text-muted-foreground">
+                  {user.authorizedDevices?.length
+                    ? `${user.authorizedDevices.length} screen${
+                        user.authorizedDevices.length === 1 ? "" : "s"
+                      }${
+                        user.authorizedDevices.some((d) => d.locationId)
+                          ? ""
+                          : " — no office set"
+                      }`
+                    : "No screens registered"}
+                </p>
               </div>
               <Button
                 onClick={() => onEdit(user)}
@@ -31,9 +44,12 @@ export default function ScanUserTable({ data, onEdit }) {
               >
                 Edit
               </Button>
+              {/* "View" said nothing about what was behind it. This is where
+                  a desk's screens are registered, and where each one is told
+                  which office it stands in. */}
               <Link href={`/admin/reception/${user._id}`} className="ml-2">
                 <Button className="bg-green-500 text-white rounded hover:bg-green-600">
-                  View
+                  Screens &amp; devices
                 </Button>
               </Link>
             </CardHeader>

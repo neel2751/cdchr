@@ -126,13 +126,37 @@ const DeviceManagementSection = ({ officeUser }) => {
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-md border mt-6">
-      <h3 className="text-lg font-bold text-gray-800 mb-4">
-        Hardware Security (Device Lock)
+      <h3 className="text-lg font-bold text-gray-800 mb-1">
+        Screens &amp; devices
       </h3>
+      {/* The instructions were the missing half of this feature: the hardware
+          ID is computed in the reception browser, so an administrator sitting
+          at a different machine had no way to discover what to paste. */}
+      <div className="mb-5 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+        <p className="font-medium">Registering a reception screen</p>
+        <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs">
+          <li>
+            On the reception device itself, sign in and open the attendance
+            screen. It shows its own <strong>Screen ID</strong> with a Copy
+            button.
+          </li>
+          <li>Paste that ID below, name the screen, and choose its office.</li>
+          <li>
+            From then on codes from that screen record attendance at that
+            office, and nobody at the desk is asked to choose.
+          </li>
+        </ol>
+        <p className="mt-2 text-xs">
+          A screen left on <em>Ask each time</em> still works — it asks the
+          person standing at it, and remembers the answer in that browser only.
+        </p>
+      </div>
 
       {/* 1. Toggle Master Switch */}
       <div className="flex items-center mb-6">
-        <span className="mr-3 font-medium">Enforce Device Lock:</span>
+        <span className="mr-3 font-medium">
+          Enforce Device Lock (sign-in limited to these devices):
+        </span>
         <Button
           className={`px-4 py-1 rounded ${
             officeUser?.enforceDeviceLock

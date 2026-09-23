@@ -51,6 +51,21 @@ export const MENU = [
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "CalendarClock",
   },
+  // Same gap the Expenses entry below describes: the page, the actions and the
+  // device management had all existed for a while and nothing linked to them,
+  // so only a super admin who already knew the URL could reach it. That is
+  // where a reception screen is registered to an office — without it the
+  // desk asks whoever is standing there which office it is in, and a wrong
+  // answer files attendance at the other one.
+  //
+  // `/admin/reception` is already on the `reception` plan flag in
+  // data/features.js, so proxy.js gates it for a company without the module.
+  {
+    name: "Reception Desk",
+    path: "/admin/reception",
+    role: ["superAdmin"],
+    icon: "MonitorSmartphone",
+  },
   // {
   //   name: "Leave Management",
   //   path: "/admin/leave",
@@ -108,10 +123,21 @@ export const MENU = [
   // Puts site employees on a site for a given day. The submenu that used to be
   // here pointed at /shiftview/viewshifts and /addEmpToShift, neither of which
   // is a route in this app — and the sidebar never rendered submenus anyway.
+  // This is where a site manager does a roll-call: it carries the clock
+  // actions for site staff. It was superAdmin-only, which meant the one person
+  // standing on the site could not clock their own team in — the capability
+  // existed and the person who needed it could not reach it.
+  //
+  // `role` only decides who sees the link in the *superAdmin* sidebar; for
+  // every other role the sidebar and proxy.js both go by granted permissions
+  // (server/selectServer/selectServer.js#getEmployeeMenu). So widening this
+  // makes the screen grantable and discoverable, and grants stay the control.
+  // The server actions behind it are authorised separately — see
+  // server/clockServer/clockAuth.js.
   {
     name: "Site Assignments",
     path: "/admin/siteAssignEmployee",
-    role: ["superAdmin"],
+    role: ["superAdmin", "admin", "user"],
     icon: "Network",
   },
   // The page, the server actions and the models have existed for a while, but

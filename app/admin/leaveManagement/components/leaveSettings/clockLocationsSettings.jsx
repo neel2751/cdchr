@@ -35,7 +35,7 @@ import { useFetchSelectQuery } from "@/hooks/use-query";
 import {
   archiveClockLocation,
   createClockLocation,
-  getClockLocations,
+  getAllClockLocations,
   setDefaultLocation,
   updateClockLocation,
 } from "@/server/clockServer/locations";
@@ -56,14 +56,19 @@ import {
 export default function ClockLocationsSettings() {
   const queryClient = useQueryClient();
   const { data: locations = [], isLoading } = useFetchSelectQuery({
-    queryKey: ["clockLocations"],
-    fetchFn: getClockLocations,
+    queryKey: ["clockLocationsAll"],
+    // Archived ones included. Site Projects lists every site whatever its
+    // state; showing only active ones here made a company with ten sites see
+    // seven, with nothing saying where the others went.
+    fetchFn: getAllClockLocations,
   });
 
   const [newName, setNewName] = React.useState("");
   const [editing, setEditing] = React.useState(null); // { id, name }
 
   const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["clockLocationsAll"] });
+    // The pickers read the active-only list.
     queryClient.invalidateQueries({ queryKey: ["clockLocations"] });
     // The attendance screens group by location.
     queryClient.invalidateQueries({ queryKey: ["OfficeEmployeeClock"] });
@@ -105,8 +110,10 @@ export default function ClockLocationsSettings() {
 
   const busy = adding || renaming || archiving || defaulting;
 
-  const offices = locations.filter((l) => !l.projectSiteId);
-  const sites = locations.filter((l) => l.projectSiteId);
+  const active = locations.filter((l) => l.isActive !== false);
+  const archived = locations.filter((l) => l.isActive === false);
+  const offices = active.filter((l) => !l.projectSiteId);
+  const sites = active.filter((l) => l.projectSiteId);
 
   // Names shared by two or more places. New duplicates are refused at the point
   // they are typed, but the ones already in the data are not going to fix
@@ -114,14 +121,18 @@ export default function ClockLocationsSettings() {
   // rota or a report. Compared case-insensitively, the same way the checks are.
   const clashes = React.useMemo(() => {
     const seen = new Map();
-    for (const l of locations) {
+    for (const l of locations.filter((l) => l.isActive !== false)) {
       const key = (l.name || "").trim().toLowerCase();
       if (!key) continue;
       seen.set(key, (seen.get(key) || 0) + 1);
     }
     return [...seen.entries()]
       .filter(([, count]) => count > 1)
-      .map(([key]) => locations.find((l) => (l.name || "").trim().toLowerCase() === key)?.name)
+      .map(
+        ([key]) =>
+          locations.find((l) => (l.name || "").trim().toLowerCase() === key)
+            ?.name,
+      )
       .filter(Boolean);
   }, [locations]);
 
@@ -300,6 +311,49 @@ export default function ClockLocationsSettings() {
                 </TableBody>
               </Table>
             </div>
+
+            {archived.length ? (
+              <div className="space-y-2 rounded-md border border-dashed p-3">
+                <p className="text-sm font-medium text-neutral-600">
+                  Archived ({archived.length})
+                </p>
+                <p className="text-xs text-neutral-500">
+                  Closed places. They stay listed because attendance still
+                  points at them, and that history has to remain readable —
+                  a site archives itself here when it is closed on Site
+                  Projects, which is why this list can be shorter than that
+                  one.
+                </p>
+                <ul className="space-y-1 pt-1">
+                  {archived.map((location) => (
+                    <li
+                      key={location._id}
+                      className="flex items-center gap-2 text-sm text-neutral-400"
+                    >
+                      {location.projectSiteId ? (
+                        <HardHat className="size-4" />
+                      ) : (
+                        <Building2 className="size-4" />
+                      )}
+                      <span className="line-through">{location.name}</span>
+                      <span className="text-[11px]">
+                        {location.projectSiteId
+                          ? "site closed on Site Projects"
+                          : "office archived here"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <p className="text-xs text-neutral-500">
+              {active.length} active
+              {archived.length ? ` · ${archived.length} archived` : ""} ·{" "}
+              {sites.length + archived.filter((l) => l.projectSiteId).length}{" "}
+              from Site Projects. Every site has a location here, so these
+              totals should match that screen.
+            </p>
 
             <div className="space-y-2 rounded-md border p-3">
               <Label htmlFor="newLocation" className="text-sm">

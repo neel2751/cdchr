@@ -21,6 +21,7 @@ import {
   UserX,
   Settings,
   Megaphone,
+  MonitorSmartphone,
   Receipt,
   Mail,
 } from "lucide-react";
@@ -53,6 +54,7 @@ const ICON_MAP = {
   UserX: UserX,
   Settings: Settings,
   Megaphone: Megaphone,
+  MonitorSmartphone: MonitorSmartphone,
   Receipt: Receipt,
   Mail: Mail,
 };

@@ -63,6 +63,34 @@ export async function getClockLocations() {
   }
 }
 
+/**
+ * The same list, archived places included.
+ *
+ * Separate from `getClockLocations` rather than a parameter, because every
+ * other caller is a picker — the QR screen, the tag editor, the rules editor —
+ * and offering an archived place to clock in at would be wrong in all of them.
+ * Only the management table wants the full list.
+ *
+ * It wants it because the two screens otherwise disagree: Site Projects lists
+ * every site regardless of state, this listed only active ones, and a company
+ * with ten sites saw seven here with nothing explaining the gap. An archived
+ * location is not missing, it is closed — and it has to be visible to say so.
+ */
+export async function getAllClockLocations() {
+  try {
+    await connect();
+    const rows = await ClockLocationModel.find({})
+      .sort({ isDefault: -1, isActive: -1, kind: 1, name: 1 })
+      .populate({ path: "projectSiteId", select: "siteName isActive" })
+      .lean();
+
+    return { success: true, data: JSON.stringify(rows) };
+  } catch (error) {
+    console.log("Error loading clock locations:", error);
+    return { success: false, message: "Could not load locations" };
+  }
+}
+
 export const createClockLocation = withAudit(
   "ClockLocation.create",
   async ({ name, kind = "office", projectSiteId = null } = {}) => {
