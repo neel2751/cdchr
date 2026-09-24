@@ -15,6 +15,7 @@ import CompanyModel from "@/models/companyModel";
 import TagOrderModel from "@/models/tagOrderModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
+import { recordStockMovement } from "./stock";
 import { normaliseUid } from "../clockServer/clockTagStore";
 import { getServerSideProps } from "../session/session";
 
@@ -199,6 +200,28 @@ export async function fetchUnitKey({ orderNumber, index } = {}) {
         { $set: { "units.$.keyIssuedAt": new Date(), status: "provisioning" } },
       ),
     );
+
+    // A blank has left the shelf. Counted here rather than at write, because
+    // this is the moment an operator is holding one physical chip: counting at
+    // write would miss every chip that failed, and counting at both write and
+    // failure would count a chip that was written and then failed twice.
+    // server/tagServer/stock.js has the full reasoning.
+    //
+    // Never allowed to fail the fetch. The operator is standing at the bench
+    // with the chip in their hand; a bookkeeping error must not stop them.
+    const sku = order.items?.[0]?.productSku;
+    if (sku) {
+      await recordStockMovement({
+        sku,
+        delta: -1,
+        reason: "consumed",
+        orderNumber,
+        unitIndex: unit.index,
+        byName: auth.user.name,
+      }).catch((error) =>
+        console.log("Could not record stock for a key issue:", error?.message),
+      );
+    }
 
     // The audit records THAT a key was issued. Never the key.
     await logAuditDirect({

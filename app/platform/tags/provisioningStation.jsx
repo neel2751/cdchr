@@ -8,6 +8,7 @@ import {
   KeyRound,
   Loader2,
   Package,
+  Printer,
   RefreshCw,
   Truck,
   Undo2,
@@ -414,6 +415,22 @@ export default function ProvisioningStation() {
                           {s.trackingRef ? ` · ${s.trackingRef}` : ""}
                           {s.parcelCount > 1 ? ` · ${s.parcelCount} parcels` : ""}
                         </span>
+                        <span className="flex items-center gap-2">
+                          {/* Opened in a new tab: the operator prints while
+                              packing and comes back to the station, rather
+                              than losing their place in the queue. */}
+                          <a
+                            href={`/platform/tags/label?order=${encodeURIComponent(
+                              order.orderNumber,
+                            )}&shipment=${encodeURIComponent(s.reference)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Button size="sm" variant="outline" className="h-7">
+                              <Printer className="mr-1 size-3.5" />
+                              Label
+                            </Button>
+                          </a>
                         {s.deliveredAt ? (
                           <span className="text-green-700">
                             delivered{" "}
@@ -438,6 +455,7 @@ export default function ProvisioningStation() {
                             Mark delivered
                           </Button>
                         )}
+                        </span>
                       </div>
                     ))}
                   </div>

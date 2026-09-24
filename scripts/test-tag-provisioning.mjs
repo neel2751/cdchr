@@ -501,6 +501,121 @@ async function main() {
     assert.ok(tags.every((t) => t.keyRef?.includes(":")));
   });
 
+  /* --------------------------------------------------------------- stock */
+
+  await check("issuing a key takes a blank off the shelf", async () => {
+    // Counted at key issue, not at write: this is the moment an operator has
+    // one physical chip in their hand. Counting at write would miss every chip
+    // that failed; counting at both would count a written-then-failed chip
+    // twice.
+    const { getStockLevels } = await import("@/server/tagServer/stock");
+    const levels = JSON.parse((await getStockLevels()).data);
+    const level = levels.find((l) => l.sku === "RND-30-424");
+    assert.ok(level, "the product is missing from stock levels");
+
+    // Three fetches happened above, one per unit. The deliberate failure on
+    // unit 1 took no blank: its key had been sealed at accept but never
+    // fetched, so nobody had picked a chip up for it — which is exactly the
+    // distinction counting at fetch is meant to capture.
+    assert.equal(
+      level.stockOnHand,
+      -3,
+      "a blank was not counted for every key issued",
+    );
+  });
+
+  await check("a shortfall warns and refuses nothing", async () => {
+    // A count that says zero while an operator holds a blank is the count
+    // being wrong. Blocking here would stop a real person doing a thing they
+    // are physically doing.
+    const { getStockLevels } = await import("@/server/tagServer/stock");
+    const levels = JSON.parse((await getStockLevels()).data);
+    const level = levels.find((l) => l.sku === "RND-30-424");
+    assert.equal(level.short, true, "a negative balance did not flag short");
+  });
+
+  await check("receiving stock puts blanks back", async () => {
+    const { getStockLevels, receiveStock } = await import(
+      "@/server/tagServer/stock"
+    );
+    const res = await receiveStock({
+      sku: "RND-30-424",
+      quantity: 100,
+      note: "First batch",
+    });
+    assert.equal(res.success, true, res.message);
+
+    const levels = JSON.parse((await getStockLevels()).data);
+    const level = levels.find((l) => l.sku === "RND-30-424");
+    assert.equal(level.stockOnHand, 97, "100 received against -3 is 97");
+    assert.equal(level.short, false);
+  });
+
+  await check("a stocktake takes the counted total, not a difference", async () => {
+    // A person at a shelf knows what they counted. Making them subtract is how
+    // a correction becomes a second error.
+    const { adjustStock, getStockLevels, getStockHistory } = await import(
+      "@/server/tagServer/stock"
+    );
+    const res = await adjustStock({ sku: "RND-30-424", countedTotal: 90 });
+    assert.equal(res.success, true, res.message);
+
+    const levels = JSON.parse((await getStockLevels()).data);
+    assert.equal(
+      levels.find((l) => l.sku === "RND-30-424").stockOnHand,
+      90,
+      "the counted total was not taken at face value",
+    );
+
+    // The ledger says what happened, which is the point of a ledger.
+    const history = JSON.parse(
+      (await getStockHistory({ sku: "RND-30-424" })).data,
+    );
+    assert.equal(history[0].reason, "adjusted");
+    assert.equal(history[0].delta, -7, "97 counted down to 90 is -7");
+  });
+
+  await check("a stocktake that matches writes nothing", async () => {
+    // A ledger line that changes nothing is noise a reader has to skip.
+    const { adjustStock, getStockHistory } = await import(
+      "@/server/tagServer/stock"
+    );
+    const before = JSON.parse(
+      (await getStockHistory({ sku: "RND-30-424" })).data,
+    ).length;
+
+    const res = await adjustStock({ sku: "RND-30-424", countedTotal: 90 });
+    assert.equal(res.success, true);
+
+    const after = JSON.parse(
+      (await getStockHistory({ sku: "RND-30-424" })).data,
+    ).length;
+    assert.equal(after, before, "a no-op stocktake added a ledger line");
+  });
+
+  await check("the cache is a sum, so it heals if it drifts", async () => {
+    // Corrupt the cache the way a crash between two writes would, then make a
+    // movement: the recount rebuilds from the ledger rather than incrementing
+    // whatever it found.
+    const TagProduct = (await import("@/models/tagProductModel")).default;
+    const { receiveStock, getStockLevels } = await import(
+      "@/server/tagServer/stock"
+    );
+
+    await TagProduct.updateOne(
+      { sku: "RND-30-424" },
+      { $set: { stockOnHand: 9999 } },
+    );
+    await receiveStock({ sku: "RND-30-424", quantity: 10 });
+
+    const levels = JSON.parse((await getStockLevels()).data);
+    assert.equal(
+      levels.find((l) => l.sku === "RND-30-424").stockOnHand,
+      100,
+      "the cache was incremented from a wrong value instead of recounted",
+    );
+  });
+
   /* ------------------------------------------------ returns and replacements */
 
   await check("a returned tag is retired in the customer's registry", async () => {

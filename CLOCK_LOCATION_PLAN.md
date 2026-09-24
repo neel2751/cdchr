@@ -653,14 +653,40 @@ What is missing, roughly in the order it will start to hurt:
   written by the ship action, which is exactly how an order could read "shipped" with
   half its units on the bench: it recorded that somebody pressed a button.
 
+**Stock** (added after E3). `TagStockMovement` is a ledger of every blank on or off the
+shelf; `TagProduct.stockOnHand` is a cache rebuilt by summing it, so a count that drifts
+heals rather than staying wrong.
+
+A blank is counted as gone **at key issue, not at write**. That looks early and is the
+only correct point: fetching a key is an operator holding one physical chip. Counting at
+write would miss every chip that failed; counting at both write and failure would count
+a written-then-failed chip twice, because that is one blank, not two. A failed unit is
+reissued a new key and fetched again, which takes another blank — which is what happens
+on the bench.
+
+**Stock refuses nothing.** A count saying zero while an operator holds a blank is the
+count being wrong, not the blank being imaginary. Shortfalls warn, everywhere they
+matter, and block nothing. The catalogue shows three numbers rather than one — on hand,
+promised to open orders, and actually free — because twenty blanks with eighteen
+promised is two available, and ordering against the twenty is how the next customer
+waits a fortnight.
+
+**Labels** print from the provisioning station, per shipment. What they are **not** is a
+carrier's postage label: those carry a scannable barcode the carrier allocates through
+their own account and API, and a parcel carrying an invented barcode gets stopped rather
+than delivered. That integration needs credentials and is still outstanding. What prints
+is the dispatch label that goes on the box beside the carrier's own — who it is for,
+what is in it (with the UIDs, so a customer quoting a dead tag can be found on the
+order), which order and shipment, and where to return it. Sender details live in
+`PlatformSetting`, a one-document platform-level model, because every other settings
+model in the codebase belongs to a customer.
+
 **Still not built**, and still not required to sell twenty working tags:
 
-- **Dispatch detail** beyond parcel count: weight, label printing, and an address that
-  is validated rather than a free-text line. Label printing needs a carrier API
-  integration, which is a different kind of work from everything above.
-- **Stock.** Lead times are still a number typed into the catalogue rather than
-  anything that knows how many blanks are on the shelf. This is an inventory feature,
-  not a delivery one.
+- **Carrier label integration.** Royal Mail Click & Drop, the DPD API, and so on —
+  postage allocated by the carrier. Needs an account and credentials.
+- **Weight and dimensions**, and an address validated rather than typed. Parcel count is
+  in; the rest is not.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.
 
