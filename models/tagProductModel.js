@@ -51,6 +51,12 @@ const tagProductSchema = new mongoose.Schema(
     // moment of need is finding out too late.
     reorderLevel: { type: Number, default: 0, min: 0 },
 
+    // One tag, in grams. Every postage API prices on weight and none of them
+    // will accept an order without it, so a product with no weight cannot
+    // have a label bought for it — which the dispatch screen says rather than
+    // guessing a number that turns into a surcharge.
+    weightGrams: { type: Number, default: 0, min: 0 },
+
     customisation: {
       logo: { type: Boolean, default: false },
       text: { type: Boolean, default: false },

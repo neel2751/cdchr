@@ -187,6 +187,7 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 3 }],
         shippingAddress: "1 Elm Street",
+        shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
       }),
     );
     assert.equal(res.success, true, res.message);
@@ -208,6 +209,7 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 1 }],
         shippingAddress: "1 Elm Street",
+        shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
       }),
     );
     assert.equal(res.success, false);
@@ -224,6 +226,7 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 5 }],
         shippingAddress: "x",
+        shipTo: { line1: "x", city: "London", countryCode: "GB" },
       }),
     );
     assert.equal(res.success, false);
@@ -614,6 +617,173 @@ async function main() {
       100,
       "the cache was incremented from a wrong value instead of recounted",
     );
+  });
+
+  /* --------------------------------------------------------------- postage */
+
+  await check("postage is refused without a structured address", async () => {
+    // The free-text address is not parsed into parts. Guessing which typed
+    // line is the city delivers the parcel somewhere else, silently.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    // Saved through the action rather than written straight into the
+    // collection, so the sealing and the hint are the ones the app actually
+    // produces.
+    const { saveCarrierAccount } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    const saved = await saveCarrierAccount({
+      provider: "royal-mail",
+      credentials: { apiKey: "test-key" },
+      isEnabled: true,
+    });
+    assert.equal(saved.success, true, saved.message);
+
+    // The fixture order has one, so take it away: this is the case where a
+    // customer ordered before structured addresses were collected.
+    await runWithTenant(String(tenantId), () =>
+      TagOrder.updateOne({ orderNumber }, { $unset: { shipTo: "" } }),
+    );
+
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /structured address/i);
+  });
+
+  await check("postage is refused without a weight", async () => {
+    // Every postage API prices on weight. A guessed one is a surcharge,
+    // charged later and to us.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    await runWithTenant(String(tenantId), () =>
+      TagOrder.updateOne(
+        { orderNumber },
+        {
+          $set: {
+            shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
+          },
+        },
+      ),
+    );
+
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /no weight/i);
+  });
+
+  await check("a disabled account cannot buy", async () => {
+    // Stored but untested is not the same as ready. An adapter here has never
+    // been run against a live account.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    const CarrierAccount = (await import("@/models/carrierAccountModel")).default;
+    const TagProduct = (await import("@/models/tagProductModel")).default;
+
+    await TagProduct.updateOne({ sku: "RND-30-424" }, { $set: { weightGrams: 5 } });
+    await CarrierAccount.updateOne(
+      { provider: "royal-mail" },
+      { $set: { isEnabled: false } },
+    );
+
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /switched off/i);
+
+    await CarrierAccount.updateOne(
+      { provider: "royal-mail" },
+      { $set: { isEnabled: true } },
+    );
+  });
+
+  await check("A LABEL IS BOUGHT AT MOST ONCE", async () => {
+    // The rule that protects real money: a second purchase is a second
+    // postage charge, and the first label is still on the box.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+
+    await runWithTenant(String(tenantId), () =>
+      TagOrder.updateOne(
+        { orderNumber },
+        {
+          $set: {
+            "shipments.$[s].labelData": "JVBERi0xLjQK",
+            "shipments.$[s].labelFormat": "pdf",
+            "shipments.$[s].labelAllocatedAt": new Date(),
+          },
+        },
+        { arrayFilters: [{ "s.reference": `${orderNumber}/1` }] },
+      ),
+    );
+
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    assert.equal(res.success, false, "it bought a second label");
+    assert.match(res.message, /already has a label/i);
+  });
+
+  await check("discarding says it does not cancel with the carrier", async () => {
+    // Saying "voided" about a label that is still live and still charged
+    // would be a lie that costs money.
+    const { discardShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    const res = await discardShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+    });
+    assert.equal(res.success, true, res.message);
+    assert.match(res.message, /does not/i);
+
+    const order = await runWithTenant(String(tenantId), () =>
+      TagOrder.findOne({ orderNumber }).lean(),
+    );
+    const shipment = order.shipments.find(
+      (sh) => sh.reference === `${orderNumber}/1`,
+    );
+    assert.ok(!shipment.labelData, "the stored label survived");
+    assert.ok(
+      shipment.trackingRef,
+      "the tracking number was cleared too — it is still the live one",
+    );
+  });
+
+  await check("credentials never come back out of the account list", async () => {
+    const { getCarrierAccounts } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    const payload = JSON.parse((await getCarrierAccounts()).data);
+    const serialised = JSON.stringify(payload);
+
+    assert.ok(
+      !serialised.includes("test-key"),
+      "a plaintext credential reached the screen",
+    );
+    // Not even the sealed blob: there is no reason for a browser to hold it.
+    assert.ok(
+      !/[A-Za-z0-9+/]{16,}={0,2}:[A-Za-z0-9+/]{16,}/.test(serialised),
+      "a sealed credential reached the screen",
+    );
+    const rm = payload.providers.find((p) => p.key === "royal-mail");
+    assert.equal(rm.hints.apiKey, "····-key", "no hint to identify the key");
   });
 
   /* ------------------------------------------------ returns and replacements */

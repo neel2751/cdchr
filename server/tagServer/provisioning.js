@@ -78,8 +78,13 @@ export async function getProvisioningQueue() {
       })
         .sort({ createdAt: -1 })
         .limit(50)
-        // Never send sealed key material to a screen.
-        .select("-units.keyRef")
+        // Never send sealed key material to a screen. `shipments.labelData`
+        // is excluded for a different reason: it is a base64 PDF of ~50KB per
+        // shipment, and the queue reloads after every action — sending fifty
+        // orders' worth of postage to a screen that only needs to know a label
+        // exists is a slow screen for no benefit. It is fetched on demand by
+        // getShipmentPostage().
+        .select("-units.keyRef -shipments.labelData")
         .lean(),
     );
 
@@ -97,6 +102,12 @@ export async function getProvisioningQueue() {
       data: JSON.stringify(
         orders.map((o) => ({
           ...o,
+          shipments: (o.shipments || []).map((sh) => ({
+            ...sh,
+            // The label itself was left behind; whether there is one is what
+            // the screen actually branches on.
+            hasLabel: Boolean(sh.labelAllocatedAt),
+          })),
           companyName: nameOf.get(String(o.tenantId)) || "Unknown company",
         })),
       ),

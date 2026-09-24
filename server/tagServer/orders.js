@@ -105,7 +105,7 @@ function orderNumber() {
 
 export const placeTagOrder = withAudit(
   "TagOrder.place",
-  async ({ items = [], shippingAddress, notes } = {}) => {
+  async ({ items = [], shippingAddress, shipTo = {}, notes } = {}) => {
     try {
       const { props } = await getServerSideProps();
       const user = props?.session?.user;
@@ -118,6 +118,16 @@ export const placeTagOrder = withAudit(
       }
       if (!shippingAddress?.trim()) {
         return { success: false, message: "A delivery address is required" };
+      }
+      // The parts a postage label needs. Collected rather than parsed out of
+      // the free text above: deciding which typed line is the city is a guess,
+      // and a wrong guess delivers the parcel somewhere else without anything
+      // looking broken.
+      if (!shipTo?.line1?.trim() || !shipTo?.city?.trim()) {
+        return {
+          success: false,
+          message: "The street and town are needed separately for the postage label",
+        };
       }
 
       await connect();
@@ -172,6 +182,15 @@ export const placeTagOrder = withAudit(
         currency,
         total,
         shippingAddress: shippingAddress.trim(),
+        shipTo: {
+          name: (shipTo.name || "").trim(),
+          company: (shipTo.company || "").trim(),
+          line1: shipTo.line1.trim(),
+          line2: (shipTo.line2 || "").trim(),
+          city: shipTo.city.trim(),
+          postcode: (shipTo.postcode || "").trim().toUpperCase(),
+          countryCode: (shipTo.countryCode || "GB").trim().toUpperCase(),
+        },
         notes: notes?.trim(),
         placedBy: createObjectId(user._id),
         placedByName: user.name,

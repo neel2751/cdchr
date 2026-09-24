@@ -110,6 +110,29 @@ const shipmentSchema = new mongoose.Schema(
     deliveredByName: String,
 
     notes: String,
+
+    // ---- postage (lib/carrierProviders.js) ----
+    //
+    // Who sold us the label, as distinct from `carrier`, which is who is
+    // carrying it. Usually the same company; not always, and a manual
+    // purchase has no provider at all.
+    labelProvider: String,
+    // base64. A Royal Mail label is ~50KB of PDF; the alternative is a file
+    // store and a second thing that can be missing when the label is needed.
+    labelData: String,
+    labelFormat: { type: String, enum: ["pdf", "png", "zpl"] },
+    labelAllocatedAt: Date,
+    // The carrier's own id for the order behind this label, so a query to
+    // their support desk has something to quote.
+    labelProviderRef: String,
+    // Cleared on a successful purchase. Kept when one fails, so the screen can
+    // say what went wrong rather than only that nothing happened.
+    labelError: String,
+
+    // What we told the carrier the parcel weighs. Required by every postage
+    // API, and priced on: a wrong weight is a surcharge, not a rejection.
+    weightGrams: Number,
+
     _id: false,
   },
   { _id: false },
@@ -159,7 +182,27 @@ const tagOrderSchema = new mongoose.Schema(
     currency: { type: String, default: "GBP" },
     total: Number,
 
+    // Free text, as the customer typed it. Kept for display and for a
+    // manually bought label, where a human reads it.
     shippingAddress: String,
+
+    // The same address, in the fields a postage API demands.
+    //
+    // Held separately rather than parsed out of the free text above. Deciding
+    // which line of a typed address is the city is a guess, and a wrong guess
+    // sends the parcel to the wrong place without anything looking broken —
+    // so the customer is asked for the parts, and a label cannot be bought
+    // without them.
+    shipTo: {
+      name: String,
+      company: String,
+      line1: String,
+      line2: String,
+      city: String,
+      postcode: String,
+      countryCode: { type: String, default: "GB" },
+    },
+
     notes: String,
 
     placedBy: mongoose.Schema.Types.ObjectId,

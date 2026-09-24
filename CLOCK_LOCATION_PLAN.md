@@ -681,12 +681,46 @@ order), which order and shipment, and where to return it. Sender details live in
 `PlatformSetting`, a one-document platform-level model, because every other settings
 model in the codebase belongs to a customer.
 
-**Still not built**, and still not required to sell twenty working tags:
+**Carrier postage** (added after the labels above). `lib/carrierProviders.js` holds one
+adapter per carrier behind a single contract: given a shipment, an address and a weight,
+return a tracking number *and* a label, or throw. Never one without the other — a
+tracking number with no label is postage nobody can print.
 
-- **Carrier label integration.** Royal Mail Click & Drop, the DPD API, and so on —
-  postage allocated by the carrier. Needs an account and credentials.
-- **Weight and dimensions**, and an address validated rather than typed. Parcel count is
-  in; the rest is not.
+Royal Mail Click & Drop is implemented against
+`https://api.parcel.royalmail.com/doc/v1/click-and-drop-api-v1.yaml`:
+`POST /orders` with a Bearer key and `label.includeLabelInResponse`, which returns the
+tracking number and a base64 PDF in one call.
+
+> **No adapter here has been run against a live account.** They are written to published
+> specifications, which is not the same as having watched one work. The account screen
+> says so, accounts are off until tested, and a failed purchase leaves the shipment
+> untouched — the operator buys on the carrier's site and types the number in, which is
+> why `manual` is the default and stays supported rather than being a stepping stone.
+
+Two things the API demanded that were on the "not built" list, and so had to stop being:
+
+- **Weight**, per product, in grams. Zero means not measured, and a label cannot be
+  bought — better than guessing a number that becomes a surcharge charged later, to us.
+- **A structured address.** Collected from the customer in parts rather than parsed out
+  of the free-text line, because deciding which typed line is the city is a guess and a
+  wrong guess delivers the parcel somewhere else without anything looking broken.
+
+Credentials are sealed with `lib/secretBox.js` (AES-256-GCM under `TAG_KEY_MASTER`, the
+same key as tag keys — one trust boundary, one key to rotate, and rotating it means
+re-entering carrier tokens as well as re-provisioning hardware). Only a four-character
+hint ever reaches a screen.
+
+A label is bought **at most once per shipment**, guarded on the stored label still being
+absent so two operators cannot both buy. Discarding a stored label says plainly that it
+does **not** cancel it at the carrier — claiming otherwise about a label that is still
+live and still charged would be a lie that costs money.
+
+**Still not built:**
+
+- **Cancelling postage at the carrier.** Discard removes our copy only.
+- **Other carriers.** DPD, Evri and the rest are `manual` until somebody writes their
+  adapter; the contract is there for it.
+- **Dimensions**, and an address validated against a postcode lookup rather than typed.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.
 

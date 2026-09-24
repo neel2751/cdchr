@@ -69,6 +69,7 @@ export async function saveTagProduct({
   currency,
   minQuantity,
   leadTimeDays,
+  weightGrams,
   description,
 } = {}) {
   try {
@@ -111,6 +112,11 @@ export async function saveTagProduct({
       currency: (currency || "GBP").toUpperCase(),
       minQuantity: minQty,
       leadTimeDays: lead,
+      // Every postage API prices on weight and none accepts an order without
+      // it, so a product with none cannot have a label bought for it. Zero is
+      // allowed — it means "not measured yet", which the dispatch screen says
+      // out loud rather than guessing a number that becomes a surcharge.
+      weightGrams: Math.max(0, Math.round(Number(weightGrams) || 0)),
       description: description?.trim(),
     };
 

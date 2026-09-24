@@ -63,6 +63,7 @@ const BLANK = {
   currency: "GBP",
   minQuantity: 10,
   leadTimeDays: 7,
+  weightGrams: 0,
   description: "",
 };
 
@@ -255,6 +256,21 @@ export default function CatalogueEditor() {
                   value={editing.leadTimeDays}
                   onChange={(e) => set({ leadTimeDays: e.target.value })}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="weight">Weight, one tag (g)</Label>
+                <Input
+                  id="weight"
+                  type="number"
+                  min={0}
+                  value={editing.weightGrams ?? 0}
+                  onChange={(e) => set({ weightGrams: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Postage is priced on weight. Left at zero, a label cannot be
+                  bought for this product — which is better than guessing and
+                  being surcharged.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="currency">Currency</Label>

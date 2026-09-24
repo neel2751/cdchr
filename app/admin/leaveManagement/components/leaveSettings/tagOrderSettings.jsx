@@ -72,6 +72,19 @@ export default function TagOrderSettings() {
   const [sku, setSku] = React.useState("");
   const [quantity, setQuantity] = React.useState("");
   const [address, setAddress] = React.useState("");
+  // The parts a postage label needs. Asked for rather than picked out of the
+  // free-text address: guessing which line is the town delivers the parcel
+  // somewhere else, quietly.
+  const [shipTo, setShipTo] = React.useState({
+    name: "",
+    line1: "",
+    line2: "",
+    city: "",
+    postcode: "",
+    countryCode: "GB",
+  });
+  const setPart = (key) => (e) =>
+    setShipTo((s) => ({ ...s, [key]: e.target.value }));
 
   const suitable = products.filter((p) => (onMetal ? p.onMetal : true));
   const chosen = products.find((p) => p.sku === sku) || null;
@@ -81,6 +94,7 @@ export default function TagOrderSettings() {
       placeTagOrder({
         items: [{ productSku: sku, quantity: Number(quantity) }],
         shippingAddress: address,
+        shipTo,
       }).then((res) => {
         if (!res?.success) {
           toast.error(res?.message || "Could not place that order");
@@ -183,6 +197,48 @@ export default function TagOrderSettings() {
               />
             </div>
 
+            <div className="space-y-2 rounded-md border p-3">
+              <p className="text-sm font-medium">Delivery address</p>
+              <p className="text-xs text-neutral-500">
+                Asked for in parts because the postage label needs them that
+                way. Splitting a typed address up is guesswork, and a wrong
+                guess sends the parcel somewhere else.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Input
+                  placeholder="Name for the parcel (optional)"
+                  value={shipTo.name}
+                  onChange={setPart("name")}
+                />
+                <Input
+                  placeholder="Street and number"
+                  value={shipTo.line1}
+                  onChange={setPart("line1")}
+                />
+                <Input
+                  placeholder="Address line 2 (optional)"
+                  value={shipTo.line2}
+                  onChange={setPart("line2")}
+                />
+                <Input
+                  placeholder="Town or city"
+                  value={shipTo.city}
+                  onChange={setPart("city")}
+                />
+                <Input
+                  placeholder="Postcode"
+                  value={shipTo.postcode}
+                  onChange={setPart("postcode")}
+                />
+                <Input
+                  placeholder="Country code (GB)"
+                  maxLength={2}
+                  value={shipTo.countryCode}
+                  onChange={setPart("countryCode")}
+                />
+              </div>
+            </div>
+
             {total > 0 ? (
               <p className="rounded-md border bg-neutral-50 p-2 text-sm">
                 {quantity} × {chosen.name} ={" "}
@@ -195,7 +251,14 @@ export default function TagOrderSettings() {
             ) : null}
 
             <Button
-              disabled={isPending || !sku || !Number(quantity) || !address.trim()}
+              disabled={
+                isPending ||
+                !sku ||
+                !Number(quantity) ||
+                !address.trim() ||
+                !shipTo.line1.trim() ||
+                !shipTo.city.trim()
+              }
               onClick={() => order()}
             >
               {isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}

@@ -38,6 +38,12 @@ import {
   verifyUnit,
 } from "@/server/tagServer/provisioning";
 import { CARRIERS } from "@/data/carriers";
+import {
+  buyShipmentLabel,
+  discardShipmentLabel,
+  getCarrierAccounts,
+  getShipmentPostage,
+} from "@/server/tagServer/carrierLabels";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
 import {
   Select,
@@ -88,6 +94,16 @@ export default function ProvisioningStation() {
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["provisioningQueue"] });
 
+  // Which postage accounts are live. A buy button for an account nobody has
+  // enabled is a button that can only fail.
+  const { data: accounts } = useFetchSelectQuery({
+    queryKey: ["carrierAccounts"],
+    fetchFn: getCarrierAccounts,
+  });
+  const buyable = (accounts?.providers || []).filter(
+    (p) => p.mode === "api" && p.isEnabled,
+  );
+
   const run = (promise, onOk) =>
     promise.then((res) => {
       if (!res?.success) {
@@ -114,11 +130,33 @@ export default function ProvisioningStation() {
           setDispatch((d) => ({ ...d, [args.orderNumber]: {} })),
         );
       if (kind === "delivered") return run(markShipmentDelivered(args));
+      if (kind === "buyLabel") return run(buyShipmentLabel(args));
+      if (kind === "discardLabel") return run(discardShipmentLabel(args));
       if (kind === "return") return run(recordUnitReturn(args));
       if (kind === "replace") return run(replaceUnit(args));
       return Promise.resolve();
     },
   });
+
+  /**
+   * Fetch a stored postage label and hand it to the browser.
+   *
+   * Pulled on demand rather than carried in the queue payload: a base64 PDF
+   * per shipment would be megabytes on a screen that reloads after every
+   * action, to show a button.
+   */
+  const downloadPostage = async (orderNumber, reference) => {
+    const res = await getShipmentPostage({ orderNumber, reference });
+    if (!res?.success) {
+      toast.error(res?.message || "Could not load that label");
+      return;
+    }
+    const { format, base64 } = JSON.parse(res.data);
+    const link = document.createElement("a");
+    link.href = `data:application/${format};base64,${base64}`;
+    link.download = `postage-${reference.replace(/\//g, "-")}.${format}`;
+    link.click();
+  };
 
   const getKey = async (orderNumber, index) => {
     const res = await fetchUnitKey({ orderNumber, index });
@@ -431,6 +469,72 @@ export default function ProvisioningStation() {
                               Label
                             </Button>
                           </a>
+
+                          {/* Postage, as distinct from the dispatch label
+                              above. This is the carrier's own barcode, bought
+                              from their account — see lib/carrierProviders.js. */}
+                          {s.hasLabel ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7"
+                                disabled={isPending}
+                                onClick={() =>
+                                  downloadPostage(order.orderNumber, s.reference)
+                                }
+                              >
+                                Postage
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 text-xs"
+                                disabled={isPending}
+                                title="Removes our copy. Does not cancel it with the carrier."
+                                onClick={() => {
+                                  if (
+                                    !window.confirm(
+                                      "Discard the stored label? This does NOT cancel it with the carrier — if it was paid for, cancel it there too.",
+                                    )
+                                  )
+                                    return;
+                                  act({
+                                    kind: "discardLabel",
+                                    orderNumber: order.orderNumber,
+                                    reference: s.reference,
+                                  });
+                                }}
+                              >
+                                Discard
+                              </Button>
+                            </>
+                          ) : (
+                            buyable.map((p) => (
+                              <Button
+                                key={p.key}
+                                size="sm"
+                                variant="outline"
+                                className="h-7"
+                                disabled={isPending}
+                                onClick={() =>
+                                  act({
+                                    kind: "buyLabel",
+                                    orderNumber: order.orderNumber,
+                                    reference: s.reference,
+                                    provider: p.key,
+                                  })
+                                }
+                              >
+                                Buy via {p.name.split(" ")[0]}
+                              </Button>
+                            ))
+                          )}
+                          {s.labelError ? (
+                            <span className="text-[11px] text-red-600">
+                              {s.labelError}
+                            </span>
+                          ) : null}
                         {s.deliveredAt ? (
                           <span className="text-green-700">
                             delivered{" "}
