@@ -354,6 +354,208 @@ await check("errors are LabelErrors, so callers can show them", async () => {
   );
 });
 
+/* ------------------------------------------------------ the DPD adapter */
+
+const dpd = findProvider("dpd");
+
+const dpdCreds = {
+  username: "user",
+  password: "pass",
+  accountNumber: "123456",
+  networkCode: "1^12",
+};
+
+const dpdCtx = {
+  ...ctx,
+  from: {
+    name: "Us Ltd",
+    address: "Unit 4\nSomewhere\nManchester\nM1 1AA",
+    contact: "0161 000 0000",
+  },
+};
+
+const pdfBytes = () => {
+  const buf = Buffer.from("%PDF-1.4 fake");
+  return {
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length),
+  };
+};
+
+/** A fetch that answers DPD's three calls in order. */
+function dpdFetch({ login, shipment, label } = {}) {
+  const calls = [];
+  const impl = async (url, options) => {
+    calls.push({ url, options });
+    if (url.includes("action=login")) {
+      return login || jsonResponse(200, { data: { geoSession: "SESSION-1" } });
+    }
+    if (url.endsWith("/shipping/shipment")) {
+      return (
+        shipment ||
+        jsonResponse(200, {
+          data: {
+            shipmentId: 4242,
+            consignmentDetail: [{ consignmentNumber: "15501234567890" }],
+          },
+        })
+      );
+    }
+    return label || pdfBytes();
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+await check("DPD logs in, ships, then fetches the label", async () => {
+  const impl = dpdFetch();
+  const res = await withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds));
+
+  assert.equal(res.trackingNumber, "15501234567890");
+  assert.equal(res.labelFormat, "pdf");
+  assert.equal(res.reference, "4242");
+  assert.ok(
+    Buffer.from(res.labelBase64, "base64").toString().startsWith("%PDF"),
+    "the label is not a PDF",
+  );
+
+  assert.equal(impl.calls.length, 3, "expected login, shipment, label");
+
+  // Basic auth on login; the session carried on the calls after it.
+  const expected = Buffer.from("user:pass").toString("base64");
+  assert.equal(impl.calls[0].options.headers.Authorization, `Basic ${expected}`);
+  assert.equal(impl.calls[0].options.headers.GEOClient, "account/123456");
+  assert.equal(impl.calls[1].options.headers.GEOSession, "SESSION-1");
+  assert.equal(impl.calls[2].options.headers.Accept, "application/pdf");
+});
+
+await check("DPD is sent kilograms, never zero", async () => {
+  // Royal Mail wants grams and DPD wants kilos. Rounding 240g to 0 would be a
+  // refusal nobody could read.
+  const impl = dpdFetch();
+  await withFetch(impl, () =>
+    dpd.buy({ ...dpdCtx, weightGrams: 240 }, dpdCreds),
+  );
+  const body = JSON.parse(impl.calls[1].options.body);
+  assert.equal(body.consignment[0].totalWeight, 0.24);
+
+  const light = dpdFetch();
+  await withFetch(light, () => dpd.buy({ ...dpdCtx, weightGrams: 5 }, dpdCreds));
+  const lightBody = JSON.parse(light.calls[1].options.body);
+  assert.ok(lightBody.consignment[0].totalWeight > 0, "a weightless consignment");
+});
+
+await check("the delivery address goes in DPD's fields", async () => {
+  const impl = dpdFetch();
+  await withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds));
+  const to = JSON.parse(impl.calls[1].options.body).consignment[0].deliveryDetails
+    .address;
+  assert.equal(to.street, "1 Elm Street");
+  assert.equal(to.town, "London");
+  assert.equal(to.postcode, "SW1A 1AA");
+  assert.equal(to.countryCode, "GB");
+});
+
+await check("the service code is the stored one, not a guess", async () => {
+  // A wrong network code is the wrong service at the wrong price.
+  const impl = dpdFetch();
+  await withFetch(impl, () =>
+    dpd.buy(dpdCtx, { ...dpdCreds, networkCode: "2^99" }),
+  );
+  const body = JSON.parse(impl.calls[1].options.body);
+  assert.equal(body.consignment[0].networkCode, "2^99");
+});
+
+await check("a bad DPD login never reaches the shipment call", async () => {
+  const impl = dpdFetch({ login: jsonResponse(401, {}) });
+  await assert.rejects(
+    () => withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds)),
+    /rejected the username or password/,
+  );
+  assert.equal(impl.calls.length, 1, "it carried on after a failed login");
+});
+
+await check("a missing DPD credential makes no call at all", async () => {
+  for (const field of ["username", "password", "accountNumber", "networkCode"]) {
+    const creds = { ...dpdCreds };
+    delete creds[field];
+    const impl = dpdFetch();
+    await assert.rejects(
+      () => withFetch(impl, () => dpd.buy(dpdCtx, creds)),
+      new RegExp(`No ${field} is stored`),
+    );
+    assert.equal(impl.calls.length, 0, `it called DPD without ${field}`);
+  }
+});
+
+await check("DPD's error inside a 200 is still a failure", async () => {
+  // DPD reports business failures in the body as well as by status code.
+  // Treating a 200 as success would store a consignment that does not exist.
+  const impl = dpdFetch({
+    shipment: jsonResponse(200, {
+      error: [{ errorMessage: "Invalid network code" }],
+    }),
+  });
+  await assert.rejects(
+    () => withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds)),
+    /Invalid network code/,
+  );
+});
+
+await check("A FAILED LABEL FETCH SENDS SOMEBODY TO MYDPD", async () => {
+  // The consignment already exists at DPD and is chargeable. A message that
+  // implied nothing happened would invite a second one.
+  const impl = dpdFetch({ label: { ok: false, status: 500 } });
+  await assert.rejects(
+    () => withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds)),
+    /15501234567890.*MyDPD/s,
+  );
+});
+
+await check("an empty label is not treated as a label", async () => {
+  const empty = Buffer.alloc(0);
+  const impl = dpdFetch({
+    label: {
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => empty.buffer,
+    },
+  });
+  await assert.rejects(
+    () => withFetch(impl, () => dpd.buy(dpdCtx, dpdCreds)),
+    /empty label/,
+  );
+});
+
+await check("an incomplete DPD shipment is refused", async () => {
+  const noTracking = dpdFetch({
+    shipment: jsonResponse(200, { data: { shipmentId: 1 } }),
+  });
+  await assert.rejects(
+    () => withFetch(noTracking, () => dpd.buy(dpdCtx, dpdCreds)),
+    /incomplete/i,
+  );
+});
+
+await check("testing DPD only logs in", async () => {
+  const impl = dpdFetch();
+  await withFetch(impl, () => dpd.test(dpdCreds));
+  assert.equal(impl.calls.length, 1, "the test bought something");
+});
+
+await check("EVRI IS ABSENT ON PURPOSE", async () => {
+  // Evri publishes no API reference and no machine-readable specification;
+  // access is arranged through an account manager and the endpoint shapes are
+  // not public. An adapter written from guesswork would look like a working
+  // option and fail as though this code were buggy.
+  assert.equal(
+    findProvider("evri"),
+    null,
+    "an Evri adapter appeared — it cannot have been written from a spec",
+  );
+});
+
 const failed = results.filter(([s]) => s !== "pass");
 for (const [status, name] of results) {
   if (status !== "pass") console.log(`  ${status}  ${name}`);

@@ -11,6 +11,7 @@ import {
 import { openSecret, sealSecret, secretHint, secretsConfigured } from "@/lib/secretBox";
 import CarrierAccountModel from "@/models/carrierAccountModel";
 import CompanyModel from "@/models/companyModel";
+import PlatformSettingModel from "@/models/platformSettingModel";
 import TagOrderModel from "@/models/tagOrderModel";
 import TagProductModel from "@/models/tagProductModel";
 import { getServerSideProps } from "../session/session";
@@ -284,14 +285,26 @@ async function readyToBuy(orderNumber, reference) {
     };
   }
 
-  const company = await escapeTenant("postage: the customer", () =>
-    CompanyModel.findById(order.tenantId).select("name").lean(),
-  );
+  const [company, settings] = await Promise.all([
+    escapeTenant("postage: the customer", () =>
+      CompanyModel.findById(order.tenantId).select("name").lean(),
+    ),
+    escapeTenant("postage: our own details", () =>
+      PlatformSettingModel.findOne({ singleton: "only" }).lean(),
+    ),
+  ]);
 
   return {
     order,
     shipment,
     weightGrams,
+    // Where it is going *from*. Royal Mail infers this from the account;
+    // DPD asks for a collection address explicitly, so it has to be here.
+    from: {
+      name: settings?.dispatchFromName || "",
+      address: settings?.dispatchFromAddress || "",
+      contact: settings?.dispatchContact || "",
+    },
     address: {
       name: to.name || "",
       company: to.company || company?.name || "",
@@ -340,6 +353,7 @@ export async function buyShipmentLabel({ orderNumber, reference, provider } = {}
           order: ready.order,
           shipment: ready.shipment,
           address: ready.address,
+          from: ready.from,
           weightGrams: ready.weightGrams,
           parcelCount: ready.shipment.parcelCount || 1,
         },

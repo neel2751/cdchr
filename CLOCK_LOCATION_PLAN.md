@@ -686,10 +686,21 @@ adapter per carrier behind a single contract: given a shipment, an address and a
 return a tracking number *and* a label, or throw. Never one without the other — a
 tracking number with no label is postage nobody can print.
 
-Royal Mail Click & Drop is implemented against
+**Royal Mail Click & Drop** is implemented against
 `https://api.parcel.royalmail.com/doc/v1/click-and-drop-api-v1.yaml`:
 `POST /orders` with a Bearer key and `label.includeLabelInResponse`, which returns the
 tracking number and a base64 PDF in one call.
+
+**DPD UK** takes three: `POST /user/?action=login` (Basic auth, returns
+`data.geoSession`), `POST /shipping/shipment` with `GEOClient`/`GEOSession`, then
+`GET /shipping/shipment/{id}/label/` with `Accept: application/pdf`. The session is
+fetched per purchase rather than cached — an expired cached session fails the *second*
+call, after the consignment exists, which is the worst place to fail. Two details that
+differ from Royal Mail and are easy to get wrong: DPD weighs in **kilograms**, and its
+`networkCode` (the service) is specific to the account's contract, so it is a stored
+setting rather than a constant. If the label fetch fails, the consignment already exists
+and is chargeable, so the message names it and sends somebody to MyDPD rather than
+implying nothing happened.
 
 > **No adapter here has been run against a live account.** They are written to published
 > specifications, which is not the same as having watched one work. The account screen
@@ -718,8 +729,17 @@ live and still charged would be a lie that costs money.
 **Still not built:**
 
 - **Cancelling postage at the carrier.** Discard removes our copy only.
-- **Other carriers.** DPD, Evri and the rest are `manual` until somebody writes their
-  adapter; the contract is there for it.
+- **Evri.** Deliberately not written, and this is the reason rather than a to-do: Evri
+  publishes no developer portal, no API reference and no machine-readable specification.
+  Credentials come from an account manager, the endpoint and OAuth shapes are not
+  public, and the sandbox host older integrations used no longer resolves. An adapter
+  built from guesswork would sit in the provider list looking like a working option and
+  fail as though this code were buggy. Evri is `manual`, which is fully functional. To
+  add it: get credentials and the sandbox pack from an Evri account manager, build
+  against their OAuth flow, and put test labels through their approval before go-live —
+  the contract is ready, the information is what is missing.
+- **Other carriers.** Yodel, UPS, DHL and the rest are `manual` until somebody writes
+  their adapter; the contract is there for it.
 - **Dimensions**, and an address validated against a postcode lookup rather than typed.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.
