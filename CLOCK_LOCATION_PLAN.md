@@ -691,6 +691,20 @@ tracking number with no label is postage nobody can print.
 `POST /orders` with a Bearer key and `label.includeLabelInResponse`, which returns the
 tracking number and a base64 PDF in one call.
 
+**UPS** takes two: `POST {host}/security/v1/oauth/token` (Basic client id/secret,
+form-encoded `grant_type=client_credentials`) then
+`POST {host}/api/shipments/v2409/ship`, which returns the tracking number and a base64
+GIF label together. Three UPS-specific traps, all of which would be quiet bugs:
+`PackageResults` is an **object** for one package and an **array** for several, so
+reading `[0]` of the single form yields undefined on a shipment already charged for;
+weight is a **string** with an explicit unit; and `PaymentInformation` is required —
+without it UPS refuses rather than billing the shipper by default.
+
+UPS is also the only carrier here with a published **test host** (`wwwcie.ups.com`), so
+it is the only one where the environment toggle does anything — and given that nothing
+here has been run for real, it defaults to test, and a label bought there says on the
+screen that it is not real postage.
+
 **DPD UK** takes three: `POST /user/?action=login` (Basic auth, returns
 `data.geoSession`), `POST /shipping/shipment` with `GEOClient`/`GEOSession`, then
 `GET /shipping/shipment/{id}/label/` with `Accept: application/pdf`. The session is
@@ -738,8 +752,14 @@ live and still charged would be a lie that costs money.
   add it: get credentials and the sandbox pack from an Evri account manager, build
   against their OAuth flow, and put test labels through their approval before go-live —
   the contract is ready, the information is what is missing.
-- **Other carriers.** Yodel, UPS, DHL and the rest are `manual` until somebody writes
-  their adapter; the contract is there for it.
+- **Yodel.** Unlike Evri, Yodel *does* publish a developer portal with an Orders API
+  that creates orders and downloads labels as PDF — so an adapter is writable, but not
+  from the outside: the endpoint paths, auth scheme and field names sit behind the
+  portal and were not read. Writing it from the shape alone would be the same guesswork
+  refused for Evri. Sign in at `developer.yodel.co.uk`, hand over the Orders API
+  reference, and it is a short job.
+- **Other carriers.** DHL and the rest are `manual` until somebody writes their adapter;
+  the contract is there for it.
 - **Dimensions**, and an address validated against a postcode lookup rather than typed.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.

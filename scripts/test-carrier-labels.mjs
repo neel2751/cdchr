@@ -544,6 +544,218 @@ await check("testing DPD only logs in", async () => {
   assert.equal(impl.calls.length, 1, "the test bought something");
 });
 
+/* ------------------------------------------------------ the UPS adapter */
+
+const ups = findProvider("ups");
+
+const upsCreds = {
+  clientId: "cid",
+  clientSecret: "csecret",
+  accountNumber: "A1B2C3",
+  serviceCode: "11",
+  environment: "test",
+};
+
+const upsCtx = { ...dpdCtx };
+
+/** A fetch answering UPS's token call then its ship call. */
+function upsFetch({ token, ship } = {}) {
+  const calls = [];
+  const impl = async (url, options) => {
+    calls.push({ url, options });
+    if (url.includes("/security/v1/oauth/token")) {
+      return token || jsonResponse(200, { access_token: "TOK-1" });
+    }
+    return (
+      ship ||
+      jsonResponse(200, {
+        ShipmentResponse: {
+          ShipmentResults: {
+            ShipmentIdentificationNumber: "1Z999AA10123456784",
+            PackageResults: {
+              ShippingLabel: { GraphicImage: "R0lGODlhAQAB" },
+            },
+          },
+        },
+      })
+    );
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+await check("UPS gets a token, then ships", async () => {
+  const impl = upsFetch();
+  const res = await withFetch(impl, () => ups.buy(upsCtx, upsCreds));
+
+  assert.equal(res.trackingNumber, "1Z999AA10123456784");
+  assert.equal(res.labelBase64, "R0lGODlhAQAB");
+  assert.equal(res.labelFormat, "gif");
+  assert.equal(impl.calls.length, 2);
+
+  // Token: Basic auth and a form body. UPS rejects JSON on this call.
+  const expected = Buffer.from("cid:csecret").toString("base64");
+  assert.equal(impl.calls[0].options.headers.Authorization, `Basic ${expected}`);
+  assert.equal(
+    impl.calls[0].options.headers["Content-Type"],
+    "application/x-www-form-urlencoded",
+  );
+  assert.equal(impl.calls[0].options.body, "grant_type=client_credentials");
+
+  assert.equal(impl.calls[1].options.headers.Authorization, "Bearer TOK-1");
+});
+
+await check("THE TEST HOST IS THE DEFAULT", async () => {
+  // No adapter here has been run for real, so the first call any of them
+  // makes should be somewhere that cannot charge anybody.
+  const impl = upsFetch();
+  await withFetch(impl, () => ups.buy(upsCtx, upsCreds));
+  assert.ok(
+    impl.calls.every((c) => c.url.startsWith("https://wwwcie.ups.com")),
+    `a test purchase hit ${impl.calls[0].url}`,
+  );
+
+  const live = upsFetch();
+  await withFetch(live, () =>
+    ups.buy(upsCtx, { ...upsCreds, environment: "production" }),
+  );
+  assert.ok(
+    live.calls.every((c) => c.url.startsWith("https://onlinetools.ups.com")),
+    "production did not use the live host",
+  );
+});
+
+await check("ONE PACKAGE IS AN OBJECT, SEVERAL ARE AN ARRAY", async () => {
+  // The UPS trap. Reading [0] of an object yields undefined, which would read
+  // as "no label" on a shipment UPS has already charged for.
+  const single = upsFetch();
+  const one = await withFetch(single, () => ups.buy(upsCtx, upsCreds));
+  assert.equal(one.labelBase64, "R0lGODlhAQAB", "the object form was missed");
+
+  const many = upsFetch({
+    ship: jsonResponse(200, {
+      ShipmentResponse: {
+        ShipmentResults: {
+          ShipmentIdentificationNumber: "1Z999AA10123456784",
+          PackageResults: [
+            { ShippingLabel: { GraphicImage: "FIRST" } },
+            { ShippingLabel: { GraphicImage: "SECOND" } },
+          ],
+        },
+      },
+    }),
+  });
+  const two = await withFetch(many, () =>
+    ups.buy({ ...upsCtx, parcelCount: 2 }, upsCreds),
+  );
+  assert.equal(two.labelBase64, "FIRST", "the array form was missed");
+});
+
+await check("weight is a string, in kilos, per parcel", async () => {
+  // UPS rejects a number here, and declaring the whole consignment on each
+  // box would over-declare it.
+  const impl = upsFetch();
+  await withFetch(impl, () =>
+    ups.buy({ ...upsCtx, weightGrams: 1000, parcelCount: 2 }, upsCreds),
+  );
+  const pkgs = JSON.parse(impl.calls[1].options.body).ShipmentRequest.Shipment
+    .Package;
+  assert.equal(pkgs.length, 2);
+  assert.equal(typeof pkgs[0].PackageWeight.Weight, "string");
+  assert.equal(pkgs[0].PackageWeight.Weight, "0.5");
+  assert.equal(pkgs[0].PackageWeight.UnitOfMeasurement.Code, "KGS");
+});
+
+await check("payment information is always sent", async () => {
+  // Without it UPS refuses rather than defaulting to billing the shipper.
+  const impl = upsFetch();
+  await withFetch(impl, () => ups.buy(upsCtx, upsCreds));
+  const shipment = JSON.parse(impl.calls[1].options.body).ShipmentRequest
+    .Shipment;
+  assert.equal(
+    shipment.PaymentInformation.ShipmentCharge.BillShipper.AccountNumber,
+    "A1B2C3",
+  );
+  assert.equal(shipment.Service.Code, "11");
+});
+
+await check("the delivery address goes in UPS's fields", async () => {
+  const impl = upsFetch();
+  await withFetch(impl, () => ups.buy(upsCtx, upsCreds));
+  const to = JSON.parse(impl.calls[1].options.body).ShipmentRequest.Shipment
+    .ShipTo.Address;
+  assert.deepEqual(to.AddressLine, ["1 Elm Street"]);
+  assert.equal(to.City, "London");
+  assert.equal(to.PostalCode, "SW1A 1AA");
+  assert.equal(to.CountryCode, "GB");
+});
+
+await check("a bad UPS token never reaches the ship call", async () => {
+  const impl = upsFetch({ token: jsonResponse(401, {}) });
+  await assert.rejects(
+    () => withFetch(impl, () => ups.buy(upsCtx, upsCreds)),
+    /rejected the client ID or secret/,
+  );
+  assert.equal(impl.calls.length, 1, "it shipped after a failed token");
+});
+
+await check("a missing UPS credential makes no call at all", async () => {
+  for (const field of ["clientId", "clientSecret", "accountNumber", "serviceCode"]) {
+    const creds = { ...upsCreds };
+    delete creds[field];
+    const impl = upsFetch();
+    await assert.rejects(
+      () => withFetch(impl, () => ups.buy(upsCtx, creds)),
+      new RegExp(`No ${field} is stored`),
+    );
+    assert.equal(impl.calls.length, 0, `it called UPS without ${field}`);
+  }
+});
+
+await check("UPS's own error reaches the operator", async () => {
+  const impl = upsFetch({
+    ship: jsonResponse(400, {
+      response: { errors: [{ code: "120100", message: "Missing PostalCode" }] },
+    }),
+  });
+  await assert.rejects(
+    () => withFetch(impl, () => ups.buy(upsCtx, upsCreds)),
+    /Missing PostalCode/,
+  );
+});
+
+await check("an incomplete UPS shipment is refused", async () => {
+  const noLabel = upsFetch({
+    ship: jsonResponse(200, {
+      ShipmentResponse: {
+        ShipmentResults: { ShipmentIdentificationNumber: "1Z9" },
+      },
+    }),
+  });
+  await assert.rejects(
+    () => withFetch(noLabel, () => ups.buy(upsCtx, upsCreds)),
+    /incomplete/i,
+  );
+});
+
+await check("testing UPS only fetches a token", async () => {
+  const impl = upsFetch();
+  await withFetch(impl, () => ups.test(upsCreds));
+  assert.equal(impl.calls.length, 1, "the test shipped something");
+});
+
+await check("YODEL IS ABSENT UNTIL SOMEBODY READS THEIR PORTAL", async () => {
+  // Yodel does publish a developer portal with an Orders API that can download
+  // labels — unlike Evri — but the endpoint paths, auth scheme and field names
+  // behind it were not available to read here. Writing it from the shape alone
+  // would be the same guesswork refused for Evri.
+  assert.equal(
+    findProvider("yodel"),
+    null,
+    "a Yodel adapter appeared — check it was written from the real portal docs",
+  );
+});
+
 await check("EVRI IS ABSENT ON PURPOSE", async () => {
   // Evri publishes no API reference and no machine-readable specification;
   // access is arranged through an account manager and the endpoint shapes are

@@ -31,6 +31,20 @@ const carrierAccountSchema = new mongoose.Schema(
       default: () => new Map(),
     },
 
+    // Which of the carrier's hosts to talk to. Not a secret, so it is a plain
+    // field rather than a sealed credential.
+    //
+    // Defaults to test, and that default matters: no adapter here has been run
+    // against a live account, so the first call any of them makes should be to
+    // a sandbox that cannot charge anybody. Only UPS publishes a separate test
+    // host; for carriers that do not, this is ignored and the note on their
+    // adapter says so.
+    environment: {
+      type: String,
+      enum: ["test", "production"],
+      default: "test",
+    },
+
     // Off by default. An account with credentials that nobody has tested is
     // not an account anybody should be buying postage through by accident.
     isEnabled: { type: Boolean, default: false },

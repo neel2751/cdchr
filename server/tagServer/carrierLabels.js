@@ -74,6 +74,10 @@ export async function getCarrierAccounts() {
         needs: p.needs,
         hints: asObject(account?.hints),
         configured: Object.keys(asObject(account?.credentials)).length > 0,
+        environment: account?.environment || "test",
+        // Only UPS publishes a separate test host. Saying so on the screen
+        // stops the toggle reading as a promise the other carriers keep.
+        hasTestHost: p.key === "ups",
         isEnabled: Boolean(account?.isEnabled),
         lastTestedAt: account?.lastTestedAt || null,
         lastTestOk: account?.lastTestOk ?? null,
@@ -97,7 +101,12 @@ export async function getCarrierAccounts() {
  * A blank field leaves whatever is stored alone, so re-saving to change the
  * enabled flag does not wipe a key the screen never received.
  */
-export async function saveCarrierAccount({ provider, credentials = {}, isEnabled } = {}) {
+export async function saveCarrierAccount({
+  provider,
+  credentials = {},
+  isEnabled,
+  environment,
+} = {}) {
   try {
     const auth = await requirePlatformAdmin();
     if (!auth.ok) return { success: false, message: auth.message };
@@ -143,6 +152,12 @@ export async function saveCarrierAccount({ provider, credentials = {}, isEnabled
             credentials: sealed,
             hints,
             ...(isEnabled === undefined ? {} : { isEnabled: Boolean(isEnabled) }),
+            ...(environment === undefined
+              ? {}
+              : {
+                  environment:
+                    environment === "production" ? "production" : "test",
+                }),
           },
           $setOnInsert: { provider },
         },
@@ -181,6 +196,9 @@ async function credentialsFor(provider) {
   for (const [name, sealed] of Object.entries(raw)) {
     open[name] = openSecret(sealed);
   }
+  // Not a secret, so it is not sealed — but the adapters read it off the same
+  // object, because "which host" belongs with "which credentials".
+  open.environment = account.environment || "test";
   return { account, credentials: open };
 }
 
@@ -428,7 +446,13 @@ export async function buyShipmentLabel({ orderNumber, reference, provider } = {}
 
     return {
       success: true,
-      message: `Label bought — ${bought.trackingNumber}`,
+      // Says which host it came from. A test label looks exactly like a real
+      // one and will not get a parcel anywhere.
+      message:
+        `Label bought — ${bought.trackingNumber}` +
+        (found.credentials.environment === "test"
+          ? " (TEST host — this label is not real postage)"
+          : ""),
     };
   } catch (error) {
     console.log("Error buying a label:", error?.message);

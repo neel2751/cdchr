@@ -120,7 +120,10 @@ const shipmentSchema = new mongoose.Schema(
     // base64. A Royal Mail label is ~50KB of PDF; the alternative is a file
     // store and a second thing that can be missing when the label is needed.
     labelData: String,
-    labelFormat: { type: String, enum: ["pdf", "png", "zpl"] },
+    // GIF is here because UPS returns one: their long-standing label format,
+    // and the safest of the ones they offer. Printable, and a browser can
+    // display it without a plugin.
+    labelFormat: { type: String, enum: ["pdf", "png", "zpl", "gif"] },
     labelAllocatedAt: Date,
     // The carrier's own id for the order behind this label, so a query to
     // their support desk has something to quote.

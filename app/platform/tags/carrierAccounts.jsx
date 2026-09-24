@@ -126,12 +126,28 @@ export default function CarrierAccounts() {
                   <p className="text-sm font-medium">{p.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {p.configured ? "Key stored" : "No key stored"}
+                    {p.hasTestHost && p.environment === "test"
+                      ? " · pointed at the TEST host, so nothing it buys is real postage"
+                      : ""}
                     {p.lastTestedAt
                       ? ` · last test ${p.lastTestOk ? "passed" : "failed"}: ${p.lastTestMessage}`
                       : " · never tested"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {p.hasTestHost ? (
+                    <select
+                      className="h-8 rounded-md border px-2 text-xs"
+                      value={p.environment}
+                      disabled={busy}
+                      onChange={(e) =>
+                        save({ provider: p.key, environment: e.target.value })
+                      }
+                    >
+                      <option value="test">Test host</option>
+                      <option value="production">Production</option>
+                    </select>
+                  ) : null}
                   <Label className="text-xs" htmlFor={`en-${p.key}`}>
                     Enabled
                   </Label>
