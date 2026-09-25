@@ -10,6 +10,7 @@ import {
   findProvider,
 } from "@/lib/carrierProviders";
 import { openSecret, sealSecret, secretHint, secretsConfigured } from "@/lib/secretBox";
+import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import CarrierAccountModel from "@/models/carrierAccountModel";
 import CompanyModel from "@/models/companyModel";
 import PlatformSettingModel from "@/models/platformSettingModel";
@@ -288,6 +289,19 @@ async function readyToBuy(orderNumber, reference) {
   }
 
   const to = order.shipTo || {};
+
+  // Checked again here, not only at order time. An order placed before this
+  // rule existed, or edited since, would otherwise reach a carrier with a
+  // postcode they refuse — or worse, one they deliver to the wrong place.
+  const country = (to.countryCode || "GB").toUpperCase();
+  if (country === "GB" && to.line1 && !isValidUkPostcode(to.postcode)) {
+    return {
+      error:
+        `"${to.postcode || "(none)"}" is not a valid UK postcode, so no ` +
+        "carrier will take it. Fix the address on the order first.",
+    };
+  }
+
   if (!to.line1 || !to.city) {
     return {
       error:
@@ -335,7 +349,7 @@ async function readyToBuy(orderNumber, reference) {
       line1: to.line1,
       line2: to.line2 || "",
       city: to.city,
-      postcode: to.postcode || "",
+      postcode: normalisePostcode(to.postcode),
       countryCode: to.countryCode || "GB",
     },
   };

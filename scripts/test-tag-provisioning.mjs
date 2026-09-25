@@ -187,7 +187,12 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 3 }],
         shippingAddress: "1 Elm Street",
-        shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
+        shipTo: {
+          line1: "1 Elm Street",
+          city: "London",
+          postcode: "SW1A 1AA",
+          countryCode: "GB",
+        },
       }),
     );
     assert.equal(res.success, true, res.message);
@@ -209,7 +214,12 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 1 }],
         shippingAddress: "1 Elm Street",
-        shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
+        shipTo: {
+          line1: "1 Elm Street",
+          city: "London",
+          postcode: "SW1A 1AA",
+          countryCode: "GB",
+        },
       }),
     );
     assert.equal(res.success, false);
@@ -226,7 +236,12 @@ async function main() {
       placeTagOrder({
         items: [{ productSku: "RND-30-424", quantity: 5 }],
         shippingAddress: "x",
-        shipTo: { line1: "x", city: "London", countryCode: "GB" },
+        shipTo: {
+          line1: "x",
+          city: "London",
+          postcode: "SW1A 1AA",
+          countryCode: "GB",
+        },
       }),
     );
     assert.equal(res.success, false);
@@ -655,6 +670,38 @@ async function main() {
     assert.match(res.message, /structured address/i);
   });
 
+  await check("postage is refused on an invalid postcode", async () => {
+    // Checked again at purchase, not only at order time: an order placed
+    // before this rule existed would otherwise reach a carrier with a
+    // postcode they refuse, or worse, deliver somewhere else.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    await runWithTenant(String(tenantId), () =>
+      TagOrder.updateOne(
+        { orderNumber },
+        {
+          $set: {
+            shipTo: {
+              line1: "1 Elm Street",
+              city: "London",
+              postcode: "NOT A POSTCODE",
+              countryCode: "GB",
+            },
+          },
+        },
+      ),
+    );
+
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /not a valid UK postcode/i);
+  });
+
   await check("postage is refused without a weight", async () => {
     // Every postage API prices on weight. A guessed one is a surcharge,
     // charged later and to us.
@@ -666,7 +713,12 @@ async function main() {
         { orderNumber },
         {
           $set: {
-            shipTo: { line1: "1 Elm Street", city: "London", countryCode: "GB" },
+            shipTo: {
+          line1: "1 Elm Street",
+          city: "London",
+          postcode: "SW1A 1AA",
+          countryCode: "GB",
+        },
           },
         },
       ),

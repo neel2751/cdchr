@@ -783,7 +783,40 @@ cancelled label found in their network is charged for with a handling fee.
 already cancelled on the carrier's own site, or one from a carrier whose API cannot. It
 still says plainly that it cancels nothing.
 
+**Postcodes** are validated in two separate ways, because they answer two different
+questions with different consequences.
+
+**Shape blocks.** `lib/postcode.js` holds the government's published pattern — kept
+verbatim, because every hand-tidied version of it rejects somebody's real address — and
+a malformed UK postcode is refused both when the order is placed and again when postage
+is bought. It is decided offline, so it cannot fail because a third party is down, and a
+carrier would refuse it anyway. Postcodes are normalised on the way in (`sw1a1aa` →
+`SW1A 1AA`), since carriers vary in how forgiving they are and one postcode stored three
+ways cannot be compared.
+
+**Existence only warns.** `server/addressServer/postcode.js` checks postcodes.io — ONS
+open data, no key, no licence — which knows whether a postcode exists and which local
+authority it is in. It does not know which addresses are at it; that is Royal Mail's PAF
+and PAF is licensed.
+
+Three reasons the second one must not block, all load-bearing:
+
+- ONS data lags new building by months, so a real new-build postcode may be absent.
+- The service being unreachable must never stop an order. `checked` and `known` are
+  separate fields precisely so a timeout can never be reported as "that postcode does
+  not exist".
+- The lookup returns the *local authority*, so SW1A 1AA comes back as **Westminster**
+  while anybody sensible types **London**. Town mismatches warn and nothing more.
+
+Worth recording, because it is the clearest argument for keeping the two questions
+apart: run against the live service, **DN55 1PT, W1A 0AX and PL1 1AA all pass the shape
+check and all 404**. They are the examples the government's own validation documentation
+uses, and they are not real postcodes.
+
 **Still not built:**
+
+- **Postcode lookup to a full address (PAF).** Knowing a postcode is real is not the
+  same as knowing which houses are on it. That needs a licensed provider and a key.
 - **Evri.** Deliberately not written, and this is the reason rather than a to-do: Evri
   publishes no developer portal, no API reference and no machine-readable specification.
   Credentials come from an account manager, the endpoint and OAuth shapes are not
@@ -793,8 +826,6 @@ still says plainly that it cancels nothing.
   add it: get credentials and the sandbox pack from an Evri account manager, build
   against their OAuth flow, and put test labels through their approval before go-live —
   the contract is ready, the information is what is missing.
-- **Evri, and any carrier with no public surface.** See the note above.
-- **Dimensions**, and an address validated against a postcode lookup rather than typed.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.
 

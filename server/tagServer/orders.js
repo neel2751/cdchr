@@ -8,6 +8,7 @@ import { withAudit, recordAudit } from "@/lib/audit";
 import TagOrderModel from "@/models/tagOrderModel";
 import TagProductModel from "@/models/tagProductModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
+import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { outstandingUnits } from "@/lib/tagOrderStatus";
 import { getServerSideProps } from "../session/session";
 
@@ -129,6 +130,26 @@ export const placeTagOrder = withAudit(
           message: "The street and town are needed separately for the postage label",
         };
       }
+      // Format only, and only for the UK. Decided offline against the
+      // government's own pattern, so it needs nobody's permission and cannot
+      // fail because a third party is down. Whether the postcode *exists* is a
+      // warning on the form, never a refusal — see server/addressServer.
+      const country = (shipTo.countryCode || "GB").trim().toUpperCase();
+      if (country === "GB") {
+        const typed = (shipTo.postcode || "").trim();
+        if (!typed) {
+          return {
+            success: false,
+            message: "A postcode is needed — nothing can be delivered without one.",
+          };
+        }
+        if (!isValidUkPostcode(typed)) {
+          return {
+            success: false,
+            message: `"${typed}" is not a valid UK postcode.`,
+          };
+        }
+      }
 
       await connect();
 
@@ -188,7 +209,10 @@ export const placeTagOrder = withAudit(
           line1: shipTo.line1.trim(),
           line2: (shipTo.line2 || "").trim(),
           city: shipTo.city.trim(),
-          postcode: (shipTo.postcode || "").trim().toUpperCase(),
+          // Canonical form on the way in: carriers vary in how forgiving they
+          // are about "sw1a1aa", and one postcode stored three ways cannot be
+          // grouped or compared.
+          postcode: normalisePostcode(shipTo.postcode),
           countryCode: (shipTo.countryCode || "GB").trim().toUpperCase(),
         },
         notes: notes?.trim(),

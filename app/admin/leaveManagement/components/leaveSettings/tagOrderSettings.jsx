@@ -28,6 +28,8 @@ import { formatCurrency } from "@/utils/time";
 import { getTagOrders, getTagProducts, placeTagOrder } from "@/server/tagServer/orders";
 import { markShipmentDelivered } from "@/server/tagServer/provisioning";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
+import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
+import { lookupPostcode } from "@/server/addressServer/postcode";
 
 /**
  * Ordering NFC tags.
@@ -85,6 +87,33 @@ export default function TagOrderSettings() {
   });
   const setPart = (key) => (e) =>
     setShipTo((s) => ({ ...s, [key]: e.target.value }));
+
+  // What the national list says about the postcode typed. Checked on blur
+  // rather than on every keystroke: a half-typed postcode is not wrong yet,
+  // and saying so while somebody is still typing is just noise.
+  const [postcodeCheck, setPostcodeCheck] = React.useState(null);
+  const checkPostcode = async () => {
+    if (!shipTo.postcode.trim()) {
+      setPostcodeCheck(null);
+      return;
+    }
+    const tidy = normalisePostcode(shipTo.postcode);
+    setShipTo((s) => ({ ...s, postcode: tidy }));
+    try {
+      const res = await lookupPostcode({ postcode: tidy, town: shipTo.city });
+      setPostcodeCheck(res?.success ? JSON.parse(res.data) : null);
+    } catch {
+      // The checker is a convenience. Its absence must not break the form.
+      setPostcodeCheck(null);
+    }
+  };
+
+  // Only the format blocks. Whether it is in the national list is a warning,
+  // because ONS data lags new building by months and a real new-build address
+  // would otherwise be unorderable.
+  const postcodeUsable =
+    (shipTo.countryCode || "GB").toUpperCase() !== "GB" ||
+    isValidUkPostcode(shipTo.postcode);
 
   const suitable = products.filter((p) => (onMetal ? p.onMetal : true));
   const chosen = products.find((p) => p.sku === sku) || null;
@@ -229,6 +258,8 @@ export default function TagOrderSettings() {
                   placeholder="Postcode"
                   value={shipTo.postcode}
                   onChange={setPart("postcode")}
+                  onBlur={checkPostcode}
+                  aria-invalid={!postcodeUsable}
                 />
                 <Input
                   placeholder="Country code (GB)"
@@ -237,6 +268,22 @@ export default function TagOrderSettings() {
                   onChange={setPart("countryCode")}
                 />
               </div>
+
+              {!postcodeUsable && shipTo.postcode.trim() ? (
+                <p className="text-xs text-red-600">
+                  That is not a valid UK postcode. No carrier will accept it.
+                </p>
+              ) : postcodeCheck?.message ? (
+                <p
+                  className={`text-xs ${
+                    postcodeCheck.known && postcodeCheck.townMatches !== false
+                      ? "text-neutral-500"
+                      : "text-amber-700"
+                  }`}
+                >
+                  {postcodeCheck.message}
+                </p>
+              ) : null}
             </div>
 
             {total > 0 ? (
@@ -257,7 +304,8 @@ export default function TagOrderSettings() {
                 !Number(quantity) ||
                 !address.trim() ||
                 !shipTo.line1.trim() ||
-                !shipTo.city.trim()
+                !shipTo.city.trim() ||
+                !postcodeUsable
               }
               onClick={() => order()}
             >
