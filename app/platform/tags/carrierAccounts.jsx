@@ -183,8 +183,13 @@ export default function CarrierAccounts() {
                     // A header name or a base URL is not a secret, and masking
                     // it makes it impossible to check for a typo — which is
                     // exactly what these fields exist to let somebody fix.
+                    // A header name, a base URL, a path or a box size is not a
+                    // secret, and masking it makes a typo impossible to spot
+                    // — which defeats the point of making it editable.
                     type={
-                      /header|Base$/i.test(field.name) ? "text" : "password"
+                      /header|Base$|Path$|SizeCm$/i.test(field.name)
+                        ? "text"
+                        : "password"
                     }
                     autoComplete="off"
                     placeholder={

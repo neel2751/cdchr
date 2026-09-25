@@ -911,6 +911,239 @@ await check("Yodel is flagged provisional", async () => {
   );
 });
 
+/* ------------------------------------------------------ the DHL adapter */
+
+const dhl = findProvider("dhl");
+
+const dhlCreds = {
+  apiKey: "dkey",
+  apiSecret: "dsecret",
+  accountNumber: "D9999",
+  productCode: "N",
+  environment: "test",
+};
+
+function dhlFetch({ ship } = {}) {
+  const calls = [];
+  const impl = async (url, options) => {
+    calls.push({ url, options });
+    return (
+      ship ||
+      jsonResponse(200, {
+        shipmentTrackingNumber: "1234567890",
+        documents: [
+          { typeCode: "label", imageFormat: "PDF", content: "JVBERi0=" },
+        ],
+      })
+    );
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+await check("DHL ships in one call, with pre-emptive Basic auth", async () => {
+  const impl = dhlFetch();
+  const res = await withFetch(impl, () => dhl.buy(dpdCtx, dhlCreds));
+
+  assert.equal(res.trackingNumber, "1234567890");
+  assert.equal(res.labelBase64, "JVBERi0=");
+  assert.equal(res.labelFormat, "pdf");
+  assert.equal(impl.calls.length, 1);
+
+  const expected = Buffer.from("dkey:dsecret").toString("base64");
+  assert.equal(impl.calls[0].options.headers.Authorization, `Basic ${expected}`);
+  assert.match(impl.calls[0].url, /\/mydhlapi\/test\/shipments$/);
+});
+
+await check("DHL's sandbox is the default host", async () => {
+  const test = dhlFetch();
+  await withFetch(test, () => dhl.buy(dpdCtx, dhlCreds));
+  assert.ok(impliesTest(test.calls[0].url), test.calls[0].url);
+
+  const live = dhlFetch();
+  await withFetch(live, () =>
+    dhl.buy(dpdCtx, { ...dhlCreds, environment: "production" }),
+  );
+  assert.equal(
+    live.calls[0].url,
+    "https://express.api.dhl.com/mydhlapi/shipments",
+  );
+});
+
+function impliesTest(url) {
+  return url.startsWith("https://express.api.dhl.com/mydhlapi/test");
+}
+
+await check("the shipment path is configurable", async () => {
+  // DHL does not publish it outside their login, so a wrong default must be
+  // fixable without a deploy.
+  const impl = dhlFetch();
+  await withFetch(impl, () =>
+    dhl.buy(dpdCtx, { ...dhlCreds, shipmentPath: "/shipment" }),
+  );
+  assert.match(impl.calls[0].url, /\/mydhlapi\/test\/shipment$/);
+});
+
+await check("THE SHIPPING DATE IS DHL'S FORMAT, NOT ISO 8601", async () => {
+  // A plain toISOString() is rejected, and the message does not make the
+  // reason obvious — which is a long afternoon.
+  const impl = dhlFetch();
+  await withFetch(impl, () => dhl.buy(dpdCtx, dhlCreds));
+  const when = JSON.parse(impl.calls[0].options.body).plannedShippingDateAndTime;
+  assert.match(when, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2} GMT\+00:00$/, when);
+  assert.ok(!when.endsWith("Z"), "it sent an ISO timestamp");
+});
+
+await check("weight is per parcel, in kilos, and never zero", async () => {
+  const impl = dhlFetch();
+  await withFetch(impl, () =>
+    dhl.buy({ ...dpdCtx, weightGrams: 1000, parcelCount: 2 }, dhlCreds),
+  );
+  const packages = JSON.parse(impl.calls[0].options.body).content.packages;
+  assert.equal(packages.length, 2);
+  assert.equal(packages[0].weight, 0.5);
+
+  const light = dhlFetch();
+  await withFetch(light, () => dhl.buy({ ...dpdCtx, weightGrams: 1 }, dhlCreds));
+  assert.ok(
+    JSON.parse(light.calls[0].options.body).content.packages[0].weight > 0,
+    "a weightless package",
+  );
+});
+
+await check("a box size is declared, and is configurable", async () => {
+  // DHL Express prices on size as well as weight. Ours are uniform, so the
+  // box is declared on the account rather than measured per shipment.
+  const dflt = dhlFetch();
+  await withFetch(dflt, () => dhl.buy(dpdCtx, dhlCreds));
+  assert.deepEqual(
+    JSON.parse(dflt.calls[0].options.body).content.packages[0].dimensions,
+    { length: 20, width: 15, height: 10 },
+  );
+
+  const custom = dhlFetch();
+  await withFetch(custom, () =>
+    dhl.buy(dpdCtx, { ...dhlCreds, parcelSizeCm: "30 x 20 x 5" }),
+  );
+  assert.deepEqual(
+    JSON.parse(custom.calls[0].options.body).content.packages[0].dimensions,
+    { length: 30, width: 20, height: 5 },
+  );
+
+  // Rubbish falls back rather than sending NaN, which DHL would reject with
+  // a message about a field nobody typed.
+  const bad = dhlFetch();
+  await withFetch(bad, () =>
+    dhl.buy(dpdCtx, { ...dhlCreds, parcelSizeCm: "big" }),
+  );
+  assert.deepEqual(
+    JSON.parse(bad.calls[0].options.body).content.packages[0].dimensions,
+    { length: 20, width: 15, height: 10 },
+  );
+});
+
+await check("a domestic shipment is not customs-declarable", async () => {
+  // Declaring a GB-to-GB parcel customs-declarable asks for an invoice DHL
+  // then refuses the shipment for not having.
+  const home = dhlFetch();
+  await withFetch(home, () => dhl.buy(dpdCtx, dhlCreds));
+  assert.equal(
+    JSON.parse(home.calls[0].options.body).content.isCustomsDeclarable,
+    false,
+  );
+
+  const abroad = dhlFetch();
+  await withFetch(abroad, () =>
+    dhl.buy(
+      { ...dpdCtx, address: { ...dpdCtx.address, countryCode: "IE" } },
+      dhlCreds,
+    ),
+  );
+  assert.equal(
+    JSON.parse(abroad.calls[0].options.body).content.isCustomsDeclarable,
+    true,
+  );
+});
+
+await check("THE LABEL IS PICKED BY TYPE, NOT BY POSITION", async () => {
+  // `documents` carries invoices and customs papers too. [0] is only the
+  // label until a shipment needs an invoice as well.
+  const impl = dhlFetch({
+    ship: jsonResponse(200, {
+      shipmentTrackingNumber: "1234567890",
+      documents: [
+        { typeCode: "invoice", imageFormat: "PDF", content: "INVOICE" },
+        { typeCode: "label", imageFormat: "PDF", content: "THELABEL" },
+      ],
+    }),
+  });
+  const res = await withFetch(impl, () => dhl.buy(dpdCtx, dhlCreds));
+  assert.equal(res.labelBase64, "THELABEL", "it grabbed the invoice");
+});
+
+await check("an unknown image format falls back to pdf", async () => {
+  const impl = dhlFetch({
+    ship: jsonResponse(200, {
+      shipmentTrackingNumber: "1",
+      documents: [{ typeCode: "label", imageFormat: "EPL2", content: "X" }],
+    }),
+  });
+  const res = await withFetch(impl, () => dhl.buy(dpdCtx, dhlCreds));
+  assert.equal(res.labelFormat, "pdf");
+});
+
+await check("DHL's own error reaches the operator", async () => {
+  // additionalDetails is where MyDHL puts the field name; detail is generic.
+  const impl = dhlFetch({
+    ship: jsonResponse(400, {
+      detail: "Validation error",
+      additionalDetails: ["receiverDetails.postalAddress.postalCode is required"],
+    }),
+  });
+  await assert.rejects(
+    () => withFetch(impl, () => dhl.buy(dpdCtx, dhlCreds)),
+    /postalCode is required/,
+  );
+});
+
+await check("a missing DHL credential makes no call at all", async () => {
+  for (const field of ["apiKey", "apiSecret", "accountNumber", "productCode"]) {
+    const creds = { ...dhlCreds };
+    delete creds[field];
+    const impl = dhlFetch();
+    await assert.rejects(
+      () => withFetch(impl, () => dhl.buy(dpdCtx, creds)),
+      new RegExp(`No ${field} is stored`),
+    );
+    assert.equal(impl.calls.length, 0, `it called DHL without ${field}`);
+  }
+});
+
+await check("an incomplete DHL shipment is refused", async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        dhlFetch({
+          ship: jsonResponse(200, { shipmentTrackingNumber: "1", documents: [] }),
+        }),
+        () => dhl.buy(dpdCtx, dhlCreds),
+      ),
+    /incomplete/i,
+  );
+});
+
+await check("testing DHL creates nothing", async () => {
+  const impl = dhlFetch();
+  await withFetch(impl, () => dhl.test(dhlCreds));
+  assert.equal(impl.calls.length, 1);
+  assert.equal(impl.calls[0].options.method, "GET");
+});
+
+await check("DHL is flagged provisional", async () => {
+  assert.equal(dhl.provisional, true);
+  assert.ok(dhl.provisionalNote?.length > 40);
+});
+
 await check("EVRI IS ABSENT ON PURPOSE", async () => {
   // Evri publishes no API reference and no machine-readable specification;
   // access is arranged through an account manager and the endpoint shapes are

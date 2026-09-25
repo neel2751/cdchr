@@ -705,7 +705,18 @@ it is the only one where the environment toggle does anything — and given that
 here has been run for real, it defaults to test, and a label bought there says on the
 screen that it is not real postage.
 
-**Yodel** is the one adapter marked `provisional`, and the split is worth stating:
+**DHL Express** (MyDHL API) is `provisional` on the same split as Yodel. Verified
+publicly: both base URLs — `https://express.api.dhl.com/mydhlapi` and
+`.../mydhlapi/test` — and that authentication is HTTP Basic sent pre-emptively. Behind
+DHL's login: the endpoint path (so `/shipments` is a default, not a fact) and every
+field name. Two traps encoded up front: `plannedShippingDateAndTime` wants DHL's own
+format (`2026-09-25T12:00:00 GMT+00:00`), not ISO 8601; and the label is picked out of
+`documents` **by type**, because that array also carries invoices and customs papers —
+`[0]` is only the label until a shipment needs an invoice too. DHL Express prices on
+size as well as weight, so a standard box is declared on the account rather than
+measured per shipment.
+
+**Yodel** is `provisional`, and the split is worth stating:
 verified from their public portal are the sandbox base `https://api-sb.yodel.co.uk`,
 the path `/shipping/v1.0/orders`, and the create → confirm → download-label flow. Not
 verified, because the reference sits behind portal registration and the product list
@@ -766,8 +777,7 @@ live and still charged would be a lie that costs money.
   add it: get credentials and the sandbox pack from an Evri account manager, build
   against their OAuth flow, and put test labels through their approval before go-live —
   the contract is ready, the information is what is missing.
-- **Other carriers.** DHL and the rest are `manual` until somebody writes their adapter;
-  the contract is there for it.
+- **Evri, and any carrier with no public surface.** See the note above.
 - **Dimensions**, and an address validated against a postcode lookup rather than typed.
 - **Payments and invoicing.** Deliberately outside the app — the order carries a total
   for reference and the invoice happens separately.

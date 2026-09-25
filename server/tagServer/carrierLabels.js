@@ -79,9 +79,9 @@ export async function getCarrierAccounts() {
         // applies to, rather than in a comment nobody opens.
         provisional: Boolean(p.provisional),
         provisionalNote: p.provisionalNote || "",
-        // UPS and Yodel both publish a sandbox. Saying which do stops the
-        // toggle reading as a promise the other carriers keep.
-        hasTestHost: p.key === "ups" || p.key === "yodel",
+        // Which carriers publish a sandbox. Saying so stops the toggle
+        // reading as a promise the others keep — Royal Mail and DPD do not.
+        hasTestHost: ["ups", "yodel", "dhl"].includes(p.key),
         isEnabled: Boolean(account?.isEnabled),
         lastTestedAt: account?.lastTestedAt || null,
         lastTestOk: account?.lastTestOk ?? null,
