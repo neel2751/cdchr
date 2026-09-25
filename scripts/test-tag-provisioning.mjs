@@ -1546,6 +1546,154 @@ async function main() {
     assert.equal(after.status, "paid");
   });
 
+  /* ------------------------------------------------------- the period lock */
+
+  await check("THE BOOKS CLOSE, AND STAY CLOSED", async () => {
+    // Once a VAT return is filed the figures behind it must stop moving.
+    // Voiding an old invoice would silently restate a submitted period.
+    const { lockLedgerUpTo } = await import("@/server/billingServer/ledger");
+    const { voidInvoice, draftInvoiceForOrder, issueInvoice } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    await TagOrder.collection.insertOne({
+      tenantId,
+      orderNumber: `${orderNumber}-L`,
+      status: "placed",
+      items: [
+        { productSku: "RND-30-424", productName: "Disc", quantity: 1, unitPrice: 5 },
+      ],
+      units: [],
+      currency: "GBP",
+    });
+    await draftInvoiceForOrder({ orderNumber: `${orderNumber}-L` });
+    const draft = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-L` }).lean(),
+    );
+    await issueInvoice({ id: String(draft._id) });
+
+    // Close the books as of today, which includes the invoice just issued.
+    const locked = await lockLedgerUpTo({ date: new Date() });
+    assert.equal(locked.success, true, locked.message);
+
+    const res = await voidInvoice({ id: String(draft._id), reason: "oops" });
+    assert.equal(res.success, false, "a closed period was changed");
+    assert.match(res.message, /books are closed/i);
+  });
+
+  await check("a backdated payment cannot sneak into a closed period", async () => {
+    // The move the lock exists to stop: the change is dated in the past even
+    // though it is being made now.
+    const { recordInvoicePayment } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const invoice = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-L` }).lean(),
+    );
+
+    const res = await recordInvoicePayment({
+      id: String(invoice._id),
+      amountPence: 100,
+      receivedAt: new Date(Date.now() - 30 * 86400000),
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /books are closed/i);
+  });
+
+  await check("a payment dated today is still fine", async () => {
+    // The lock closes the past, not the business.
+    const { recordInvoicePayment } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const { lockLedgerUpTo } = await import("@/server/billingServer/ledger");
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    // Lock to yesterday so today is open.
+    await lockLedgerUpTo({ date: new Date(Date.now() - 86400000) });
+
+    const invoice = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-L` }).lean(),
+    );
+    const res = await recordInvoicePayment({
+      id: String(invoice._id),
+      amountPence: 100,
+    });
+    assert.equal(res.success, true, res.message);
+  });
+
+  await check("a lock cannot be set in the future", async () => {
+    // It would freeze invoices nobody has raised yet.
+    const { lockLedgerUpTo } = await import("@/server/billingServer/ledger");
+    const res = await lockLedgerUpTo({
+      date: new Date(Date.now() + 30 * 86400000),
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /before it has happened/i);
+  });
+
+  await check("re-opening a closed period says so out loud", async () => {
+    // Moving a lock backwards re-opens something already filed, which is a
+    // thing to be told rather than a thing to do quietly.
+    const { lockLedgerUpTo } = await import("@/server/billingServer/ledger");
+    const res = await lockLedgerUpTo({
+      date: new Date(Date.now() - 400 * 86400000),
+    });
+    assert.equal(res.success, true);
+    assert.match(res.message, /re-opens/i);
+
+    const off = await lockLedgerUpTo({ date: null });
+    assert.match(off.message, /already filed/i);
+  });
+
+  await check("the aged debtors report sees what is owed", async () => {
+    const { getAgedDebtors } = await import("@/server/billingServer/ledger");
+    const report = JSON.parse((await getAgedDebtors()).data);
+    assert.ok(report.totalPence > 0, "nothing was owed by anybody");
+    assert.ok(report.rows.length, "no companies in the report");
+    assert.ok(report.buckets.every((b) => typeof b.totalPence === "number"));
+  });
+
+  await check("a CSV export escapes a name with a comma in it", async () => {
+    // Ordinary in real company names, and it splits a row.
+    const { exportLedger } = await import("@/server/billingServer/ledger");
+    const Company = (await import("@/models/companyModel")).default;
+    await Company.updateOne(
+      { _id: tenantId },
+      { $set: { name: 'Acme, "The" Ltd' } },
+    );
+
+    const res = await exportLedger({
+      from: new Date(Date.now() - 86400000 * 365),
+      to: new Date(),
+      shape: "invoices",
+    });
+    assert.equal(res.success, true, res.message);
+    const { csv } = JSON.parse(res.data);
+    assert.ok(csv.includes('"Acme, ""The"" Ltd"'), "the name was not escaped");
+    // Every row has the same number of cells as the header.
+    const rows = csv.split("\r\n").filter(Boolean);
+    const cells = (line) => line.match(/("([^"]|"")*"|[^,]*)(,|$)/g).length;
+    for (const row of rows.slice(1)) {
+      assert.equal(cells(row), cells(rows[0]), `ragged row: ${row}`);
+    }
+  });
+
+  await check("A JOURNAL EXPORT BALANCES BEFORE IT LEAVES", async () => {
+    // Checked here rather than discovered by whoever imports it.
+    const { exportLedger } = await import("@/server/billingServer/ledger");
+    const res = await exportLedger({
+      from: new Date(Date.now() - 86400000 * 365),
+      to: new Date(),
+      shape: "journal",
+    });
+    assert.equal(res.success, true, res.message);
+    const { balanced } = JSON.parse(res.data);
+    assert.equal(balanced, true, res.message);
+    assert.match(res.message, /balanced/);
+  });
+
   await mongoose.connection.db.dropDatabase();
   await mongoose.disconnect();
 

@@ -55,6 +55,18 @@ const platformSettingSchema = new mongoose.Schema(
     // first deploy after writing it started chasing people, which is not a
     // thing to discover from a reply.
     dunningEnabled: { type: Boolean, default: false },
+
+    // Which date a sale's VAT belongs to. A decision made with HMRC, recorded
+    // here — see lib/ledger.js. Accrual is the standard and the default.
+    vatBasis: {
+      type: String,
+      enum: ["accrual", "cash"],
+      default: "accrual",
+    },
+    // Nothing dated on or before this can be changed. Once a VAT return has
+    // been filed the figures behind it must stop moving, or the next return
+    // silently fails to reconcile against the last.
+    ledgerLockedUpTo: { type: Date, default: null },
   },
   { timestamps: true },
 );

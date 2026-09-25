@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getServerSideProps } from "@/server/session/session";
 import BillingConsole from "./billingConsole";
+import LedgerPanel from "./ledgerPanel";
 
 export const metadata = { title: "Billing" };
 
@@ -23,8 +24,9 @@ export default async function BillingPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-6">
+    <main className="mx-auto w-full max-w-5xl space-y-4 px-4 py-6">
       <BillingConsole />
+      <LedgerPanel />
     </main>
   );
 }

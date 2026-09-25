@@ -66,6 +66,39 @@ async function allocateNumber() {
   return `INV-${year}-${String(counter.lastNumber).padStart(4, "0")}`;
 }
 
+/**
+ * Refuse to change anything inside a closed period.
+ *
+ * Once a VAT return has been filed the figures behind it must stop moving.
+ * Voiding an old invoice, crediting one, or backdating a payment into a closed
+ * quarter silently restates a period that has already been submitted — and the
+ * discrepancy surfaces months later with nobody able to say what caused it.
+ *
+ * Checked against the date the CHANGE belongs to, not today: backdating a
+ * payment into last quarter is exactly the move this exists to stop.
+ *
+ * @returns a refusal message, or null when the change is allowed.
+ */
+async function periodLock(date) {
+  const settings = await escapeTenant("invoicing: ledger lock", () =>
+    PlatformSettingModel.findOne({ singleton: "only" })
+      .select("ledgerLockedUpTo")
+      .lean(),
+  );
+  const lockedUpTo = settings?.ledgerLockedUpTo;
+  if (!lockedUpTo || !date) return null;
+
+  if (new Date(date) <= new Date(lockedUpTo)) {
+    const day = new Date(lockedUpTo).toISOString().slice(0, 10);
+    return (
+      `The books are closed up to ${day}, so this cannot be changed. ` +
+      "If it genuinely has to be, unlock that period first — and check the " +
+      "result against whatever was filed for it."
+    );
+  }
+  return null;
+}
+
 /** Our billing identity as it stands right now, to be frozen onto an invoice. */
 async function sellerDetails() {
   const settings = await escapeTenant("invoicing: our details", () =>
@@ -440,6 +473,10 @@ export async function recordInvoicePayment({
       return { success: false, message: `${invoice.number} is void` };
     }
 
+    const when = receivedAt ? new Date(receivedAt) : new Date();
+    const locked = await periodLock(when);
+    if (locked) return { success: false, message: locked };
+
     const owed = outstanding(invoice.grossPence, invoice.payments);
     if (amount > owed) {
       // Refused rather than absorbed. An overpayment is a real thing that
@@ -463,7 +500,7 @@ export async function recordInvoicePayment({
               amountPence: amount,
               method,
               reference: (reference || "").trim(),
-              receivedAt: receivedAt ? new Date(receivedAt) : new Date(),
+              receivedAt: when,
               recordedByName: auth.user.name,
             },
           },
@@ -526,6 +563,9 @@ export async function voidInvoice({ id, reason } = {}) {
           "than voiding it — voiding would lose the payment record.",
       };
     }
+
+    const locked = await periodLock(invoice.issuedAt);
+    if (locked) return { success: false, message: locked };
 
     await escapeTenant("invoicing: void", () =>
       InvoiceModel.updateOne(
@@ -592,6 +632,12 @@ export async function createCreditNote({ id, reason } = {}) {
         message: "A draft has not been sent to anybody — change it instead.",
       };
     }
+
+    // A credit note falls in the period it is ISSUED, not the one it corrects,
+    // so the lock that matters is today's — crediting an old invoice is a
+    // legitimate thing to do in an open period.
+    const lockedNow = await periodLock(new Date());
+    if (lockedNow) return { success: false, message: lockedNow };
 
     const existing = await escapeTenant("invoicing: existing credit", () =>
       InvoiceModel.findOne({ creditsInvoiceId: invoice._id })

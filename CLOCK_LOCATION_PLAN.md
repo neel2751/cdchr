@@ -1231,8 +1231,46 @@ The templates escalate in tone and **threaten nothing**. Software should not inv
 consequences — interest, legal action, suspended accounts — that a person has not
 decided on.
 
-### Still not built
+### Bookkeeping figures
 
-- **Anything resembling bookkeeping.** This issues invoices for tag orders and records
-  what was paid. VAT returns, the ledger and the accounts live where they already live;
-  this feeds them.
+The last item on this list, and the one where the scope needed drawing rather than
+filling. What is built is what this system is genuinely the authority on:
+
+**Aged debtors.** Who owes what, bucketed by how far past its **due** date each invoice
+is — not its issue date, which would age everything by the payment terms and make a
+punctual customer on 30-day terms look a month late the day the invoice arrives.
+
+**A VAT summary**, box 1 and box 6, on either basis. The basis is not a detail: accrual
+puts the tax in the period the invoice was *issued*, cash accounting in the period the
+money *arrived*, and the same invoices produce different returns. Picking one silently
+is how a business files the wrong one, so it is a setting with accrual as the default
+and both offered. Under cash accounting a part payment declares *part* of the VAT,
+apportioned — declaring the whole invoice's tax on half the money is tax paid on money
+not yet received.
+
+A credit note reduces the period it was **issued** in, not the one it corrects. You do
+not restate a filed return; you adjust the current one.
+
+**Exports**, in two shapes because two different people ask: one row per invoice for
+reconciling a sales ledger, and double-entry journal lines for posting into real
+accounting software. The journal is checked for balance **before it leaves** — double
+entry that does not balance is an import that gets rejected, or worse, accepted. CSV
+cells are escaped, because a company name with a comma in it is ordinary and it splits
+a row.
+
+**A period lock.** Once a return is filed the figures behind it must stop moving, so
+any change dated on or before the lock is refused: voiding an old invoice, crediting
+one, backdating a payment. Re-opening a closed period says so out loud rather than
+doing it quietly.
+
+### Deliberately not built, and these are the reasons
+
+- **A general ledger or trial balance.** This application sees one revenue stream and
+  knows nothing about the bank, payroll, purchases or rent. A trial balance built from
+  that would balance perfectly and describe a company that does not exist — and anyone
+  reconciling against it would be reconciling against a subset presented as a whole.
+  That is worse than having nothing, because it looks right.
+- **Submitting a VAT return to HMRC.** Making Tax Digital needs vendor registration, an
+  OAuth grant, and fraud-prevention headers HMRC validates. A VAT return is a legal
+  filing: an unverified implementation is not a bug waiting to happen, it is a penalty
+  waiting to happen. The figures are produced here and filed by whoever files them.
