@@ -1045,6 +1045,265 @@ async function main() {
     assert.equal(res.success, false);
   });
 
+  /* ------------------------------------------------------------ invoicing */
+
+  await check("an invoice is drafted from the order, priced from it", async () => {
+    const { draftInvoiceForOrder } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const res = await draftInvoiceForOrder({ orderNumber });
+    assert.equal(res.success, true, res.message);
+
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const draft = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber }).lean(),
+    );
+    assert.equal(draft.status, "draft");
+    assert.equal(draft.number, null, "a draft consumed an invoice number");
+    assert.ok(draft.lines.length);
+    assert.ok(draft.grossPence > draft.netPence, "no VAT was added");
+  });
+
+  await check("issuing needs our billing details on file", async () => {
+    // A UK VAT invoice has to carry the supplier's name and address, and they
+    // are frozen onto it — so there has to be something to freeze.
+    const { issueInvoice } = await import("@/server/billingServer/invoices");
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const draft = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber }).lean(),
+    );
+
+    const res = await issueInvoice({ id: String(draft._id) });
+    assert.equal(res.success, false);
+    assert.match(res.message, /billing name and address/i);
+  });
+
+  await check("NUMBERS ARE SEQUENTIAL AND ALLOCATED AT ISSUE", async () => {
+    const { issueInvoice, draftInvoiceForOrder } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const { saveDispatchSettings } = await import("@/server/tagServer/labels");
+    const PlatformSetting = (await import("@/models/platformSettingModel")).default;
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    await saveDispatchSettings({
+      dispatchFromName: "Us Ltd",
+      dispatchFromAddress: "Unit 4\nManchester\nM1 1AA",
+    });
+    await PlatformSetting.updateOne(
+      { singleton: "only" },
+      { $set: { billingName: "Us Ltd", billingAddress: "Unit 4, Manchester" } },
+    );
+
+    const first = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber }).lean(),
+    );
+    const res = await issueInvoice({ id: String(first._id) });
+    assert.equal(res.success, true, res.message);
+
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(first._id).lean(),
+    );
+    const year = new Date().getUTCFullYear();
+    assert.equal(issued.number, `INV-${year}-0001`);
+    assert.equal(issued.status, "issued");
+    assert.ok(issued.issuedAt && issued.dueAt, "no dates were frozen");
+    assert.equal(issued.seller.name, "Us Ltd", "the seller was not frozen on");
+
+    // A second invoice takes the next number, not the same one.
+    await TagOrder.collection.insertOne({
+      tenantId,
+      orderNumber: `${orderNumber}-B`,
+      status: "placed",
+      items: [{ productSku: "RND-30-424", productName: "Disc", quantity: 1, unitPrice: 4.5 }],
+      units: [],
+      currency: "GBP",
+    });
+    await draftInvoiceForOrder({ orderNumber: `${orderNumber}-B` });
+    const second = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-B` }).lean(),
+    );
+    await issueInvoice({ id: String(second._id) });
+    const secondIssued = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(second._id).lean(),
+    );
+    assert.equal(secondIssued.number, `INV-${year}-0002`);
+  });
+
+  await check("AN ISSUED INVOICE CANNOT BE EDITED", async () => {
+    // The customer has a copy. Changing ours makes two documents with one
+    // number saying different things.
+    const { updateDraftInvoice } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber, status: "issued" }).lean(),
+    );
+
+    const res = await updateDraftInvoice({
+      id: String(issued._id),
+      lines: [{ description: "Something else", quantity: 1, unitPricePence: 1 }],
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /credit note/i);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(issued._id).lean(),
+    );
+    assert.equal(after.lines[0].description, issued.lines[0].description);
+  });
+
+  await check("a part payment leaves it part-paid", async () => {
+    const { recordInvoicePayment } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber, status: "issued" }).lean(),
+    );
+
+    const res = await recordInvoicePayment({
+      id: String(issued._id),
+      amountPence: 100,
+      reference: "FT123",
+    });
+    assert.equal(res.success, true, res.message);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(issued._id).lean(),
+    );
+    assert.equal(after.status, "part-paid");
+    assert.equal(after.payments.length, 1);
+  });
+
+  await check("AN OVERPAYMENT IS REFUSED, NOT ABSORBED", async () => {
+    // Silently recording it as settled loses the difference, which is real
+    // money somebody is owed back.
+    const { recordInvoicePayment } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber }).lean(),
+    );
+
+    const res = await recordInvoicePayment({
+      id: String(issued._id),
+      amountPence: issued.grossPence * 10,
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /more than the/i);
+  });
+
+  await check("paying the rest settles it", async () => {
+    const { recordInvoicePayment } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const { outstanding } = await import("@/lib/money");
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber }).lean(),
+    );
+
+    const owed = outstanding(issued.grossPence, issued.payments);
+    const res = await recordInvoicePayment({
+      id: String(issued._id),
+      amountPence: owed,
+    });
+    assert.equal(res.success, true, res.message);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(issued._id).lean(),
+    );
+    assert.equal(after.status, "paid");
+  });
+
+  await check("a paid invoice cannot be voided", async () => {
+    // Voiding would lose the payment record. That is what credit notes are.
+    const { voidInvoice } = await import("@/server/billingServer/invoices");
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const paid = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber, status: "paid" }).lean(),
+    );
+
+    const res = await voidInvoice({ id: String(paid._id), reason: "oops" });
+    assert.equal(res.success, false);
+    assert.match(res.message, /credit note/i);
+  });
+
+  await check("a credit note negates the original and keeps the trail", async () => {
+    const { createCreditNote } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const original = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber, kind: "invoice" }).lean(),
+    );
+
+    const res = await createCreditNote({
+      id: String(original._id),
+      reason: "Wrong quantity",
+    });
+    assert.equal(res.success, true, res.message);
+
+    const credit = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ creditsInvoiceId: original._id }).lean(),
+    );
+    assert.ok(credit, "no credit note was created");
+    assert.match(credit.number, /^CRN-/);
+    assert.equal(credit.grossPence, -original.grossPence, "it did not negate");
+    assert.ok(credit.lines.every((l) => l.quantity < 0));
+
+    // The original is untouched — the pair tells the story.
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(original._id).lean(),
+    );
+    assert.equal(after.status, "paid");
+    assert.equal(after.grossPence, original.grossPence);
+  });
+
+  await check("an invoice is not credited twice", async () => {
+    const { createCreditNote } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const original = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber, kind: "invoice" }).lean(),
+    );
+    const res = await createCreditNote({ id: String(original._id) });
+    assert.equal(res.success, false);
+    assert.match(res.message, /already credited/i);
+  });
+
+  await check("a customer never sees a draft", async () => {
+    // Drafts are ours until issued.
+    const { getMyInvoices, draftInvoiceForOrder } = await import(
+      "@/server/billingServer/invoices"
+    );
+    await TagOrder.collection.insertOne({
+      tenantId,
+      orderNumber: `${orderNumber}-C`,
+      status: "placed",
+      items: [{ productSku: "RND-30-424", productName: "Disc", quantity: 1, unitPrice: 4.5 }],
+      units: [],
+      currency: "GBP",
+    });
+    await draftInvoiceForOrder({ orderNumber: `${orderNumber}-C` });
+
+    asCustomer();
+    const mine = JSON.parse(
+      (await runWithTenant(String(tenantId), () => getMyInvoices())).data,
+    );
+    assert.ok(
+      mine.every((i) => i.status !== "draft"),
+      "a draft was shown to the customer",
+    );
+    assert.ok(mine.length, "the issued ones are missing too");
+
+    asPlatform();
+  });
+
   await mongoose.connection.db.dropDatabase();
   await mongoose.disconnect();
 

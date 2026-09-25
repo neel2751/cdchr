@@ -853,8 +853,7 @@ licence rather than trust that sentence.
   add it: get credentials and the sandbox pack from an Evri account manager, build
   against their OAuth flow, and put test labels through their approval before go-live —
   the contract is ready, the information is what is missing.
-- **Payments and invoicing.** Deliberately outside the app — the order carries a total
-  for reference and the invoice happens separately.
+*(Payments and invoicing were on this list three times. They are now built — see §6.10.)*
 
 ---
 
@@ -1099,3 +1098,74 @@ is nothing to get wrong.
 2. §10.3 — default office. Self-contained, small.
 3. §10.2 — name uniqueness. Needs §10.1 done so both duplicates are visible.
 4. §10.4 — QR office binding. Largest, and the only one needing a decision first.
+
+---
+
+## 6.10 Payments and invoicing — BUILT
+
+This section said three times that billing was deliberately outside the app. The
+reasons were real rather than lazy: card handling drags an application into PCI scope,
+and invoicing drags in accounting rules that software gets wrong quietly. Both are now
+met head on instead of avoided.
+
+### Money is whole pence, everywhere
+
+`lib/money.js`. `0.1 + 0.2` is `0.30000000000000004`, and a float a hundredth of a penny
+out is invisible until somebody sums a year of invoices against a bank statement.
+
+Two decisions in there earned their tests immediately:
+
+- **The decimal shift rewrites the exponent in a string rather than multiplying.**
+  `1.005 * 100` is `100.49999999999999`, which rounds to 100 — a penny lost on an amount
+  somebody typed exactly. `Number("1.005e2")` is `100.5`, which rounds to 101.
+- **VAT is rounded once, on the line total.** Rounding each unit and multiplying gives a
+  different answer, and "which of us rounded differently" is a genuinely awful
+  afternoon. Rates are basis points (2000 = 20%) because 0.2 is not representable
+  either.
+
+### Three rules the invoice model exists to enforce
+
+1. **An issued invoice cannot be edited.** Not "should not" — the action refuses. The
+   customer has a copy, and changing ours makes two documents with one number saying
+   different things. A mistake is corrected with a credit note, which is what they are
+   for.
+2. **Numbers are sequential, atomic and never reused.** A single `findOneAndUpdate` with
+   `$inc`; reading the highest and adding one is a race, and two invoices sharing a
+   number cannot be fixed after the copies are out. A number is consumed at *issue*, so
+   an abandoned draft leaves no gap. Nothing is ever deleted — a void invoice keeps its
+   number and says it is void.
+3. **Figures and addresses are frozen at issue.** Prices change, VAT rates change, we
+   might move office. Last year's invoice has to keep saying what it said, so both
+   parties' details are copied on rather than looked up on read.
+
+Payments are recorded rather than processed — bank transfer, cheque, card, whatever
+arrived — and the status follows the arithmetic. An **overpayment is refused rather than
+absorbed**: silently calling it settled loses money somebody is owed back.
+
+### Cards: Stripe hosted checkout, and nothing else
+
+**No card number reaches this application.** The customer is sent to Stripe's own page,
+on Stripe's domain; what comes back is a session id and a payment intent id —
+references, not instruments. A card form of our own would put this codebase in PCI scope
+for the sake of a nicer page, and that is not reversible once cards have flowed through
+a system. There are no card fields anywhere and nothing here that could start collecting
+them.
+
+Verified against the live API as far as an unkeyed request allows: the endpoint, Bearer
+auth, and the `{error:{message,type}}` refusal shape. The success path is from Stripe's
+documentation. A publishable key (`pk_…`) is rejected on the way in — it seals fine and
+fails only when somebody tries to pay.
+
+Reconciliation **pulls** from Stripe rather than accepting a webhook. A webhook is the
+right long-term answer, but it is an unauthenticated public endpoint that writes payment
+records, so it needs signature verification done properly — and half a webhook is worse
+than none.
+
+### Still not built
+
+- **The Stripe webhook**, per above — today a payment is confirmed by asking Stripe.
+- **Dunning**: nothing chases an overdue invoice. `overdue` is computed and shown; no
+  email is sent.
+- **Anything resembling bookkeeping.** This issues invoices for tag orders and records
+  what was paid. VAT returns, the ledger and the accounts live where they already live;
+  this feeds them.

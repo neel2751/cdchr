@@ -34,6 +34,19 @@ const platformSettingSchema = new mongoose.Schema(
     // Printed under "if undelivered, return to" — the thing that gets a lost
     // box back rather than binned.
     dispatchReturnNote: { type: String, default: "" },
+
+    // Billing identity. Separate from the dispatch fields above because an
+    // invoice is a legal document and a parcel label is not: a UK VAT invoice
+    // has to carry the supplier's name, address and VAT number, and those are
+    // copied onto each invoice at issue so old ones keep saying what they said.
+    billingName: { type: String, default: "" },
+    billingAddress: { type: String, default: "" },
+    vatNumber: { type: String, default: "" },
+    companyNumber: { type: String, default: "" },
+    // Days from issue. Turned into a concrete date on each invoice, so
+    // changing this never moves an existing invoice's due date.
+    paymentTermsDays: { type: Number, default: 30, min: 0 },
+    bankDetails: { type: String, default: "" },
   },
   { timestamps: true },
 );

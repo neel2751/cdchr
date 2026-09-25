@@ -54,10 +54,14 @@ export default function WorkHoursSettings() {
     draft?.observes ?? settings?.observesBankHolidays === true;
   const region =
     draft?.region ?? settings?.bankHolidayRegion ?? "england-and-wales";
-  const setHours = (v) => setDraft({ hours: v, days, observes, region });
-  const setDays = (v) => setDraft({ hours, days: v, observes, region });
-  const setObserves = (v) => setDraft({ hours, days, observes: v, region });
-  const setRegion = (v) => setDraft({ hours, days, observes, region: v });
+  // One merging setter rather than one per field: with a setter per field each
+  // has to restate every other field, and the day one of them is forgotten it
+  // silently resets on save.
+  const set = (key) => (value) => setDraft((d) => ({ ...(d ?? {}), [key]: value }));
+  const setHours = set("hours");
+  const setDays = set("days");
+  const setObserves = set("observes");
+  const setRegion = set("region");
 
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
