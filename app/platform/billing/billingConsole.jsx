@@ -61,6 +61,7 @@ export default function BillingConsole() {
 
   const [orderNumber, setOrderNumber] = React.useState("");
   const [stripeKey, setStripeKey] = React.useState("");
+  const [whsec, setWhsec] = React.useState("");
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["allInvoices"] });
@@ -87,7 +88,10 @@ export default function BillingConsole() {
       if (kind === "credit") return run(createCreditNote(args));
       if (kind === "reconcile") return run(reconcileInvoicePayment(args));
       if (kind === "stripe")
-        return run(saveStripeAccount(args)).then(() => setStripeKey(""));
+        return run(saveStripeAccount(args)).then(() => {
+          setStripeKey("");
+          setWhsec("");
+        });
       return Promise.resolve();
     },
   });
@@ -127,11 +131,41 @@ export default function BillingConsole() {
                 onChange={(e) => setStripeKey(e.target.value)}
               />
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="whsec" className="text-xs">
+                Webhook signing secret{" "}
+                {stripe?.webhookHint ? (
+                  <span className="ml-1 font-mono text-muted-foreground">
+                    {stripe.webhookHint}
+                  </span>
+                ) : null}
+              </Label>
+              <Input
+                id="whsec"
+                type="password"
+                autoComplete="off"
+                className="w-72"
+                placeholder={
+                  stripe?.webhookConfigured
+                    ? "Leave blank to keep the stored secret"
+                    : "whsec_…"
+                }
+                value={whsec}
+                disabled={isPending || !stripe?.sealingReady}
+                onChange={(e) => setWhsec(e.target.value)}
+              />
+            </div>
             <Button
               disabled={isPending || !stripe?.sealingReady}
-              onClick={() => act({ kind: "stripe", secretKey: stripeKey })}
+              onClick={() =>
+                act({
+                  kind: "stripe",
+                  secretKey: stripeKey,
+                  webhookSecret: whsec,
+                })
+              }
             >
-              Save key
+              Save keys
             </Button>
             <div className="flex items-center gap-2 pb-2">
               <Label className="text-xs" htmlFor="stripe-on">
@@ -150,6 +184,15 @@ export default function BillingConsole() {
               TAG_KEY_MASTER is not set, so the key cannot be sealed.
             </p>
           ) : null}
+          <p className="text-xs text-muted-foreground">
+            Point a Stripe webhook at{" "}
+            <code>/api/webhooks/stripe</code> for{" "}
+            <code>checkout.session.completed</code>,{" "}
+            <code>checkout.session.async_payment_succeeded</code> and{" "}
+            <code>payment_intent.succeeded</code>. Without the signing secret
+            the endpoint rejects everything — which is the correct failure, but
+            it looks like Stripe is broken rather than unconfigured.
+          </p>
         </CardContent>
       </Card>
 

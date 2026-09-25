@@ -128,7 +128,11 @@ export async function stripeAvailable() {
 }
 
 /** Store the secret key. Never returned afterwards — only a four-character hint. */
-export async function saveStripeAccount({ secretKey: key, isEnabled } = {}) {
+export async function saveStripeAccount({
+  secretKey: key,
+  webhookSecret: whsec,
+  isEnabled,
+} = {}) {
   try {
     const auth = await requirePlatformAdmin();
     if (!auth.ok) return { success: false, message: auth.message };
@@ -169,6 +173,24 @@ export async function saveStripeAccount({ secretKey: key, isEnabled } = {}) {
       hints.set("secretKey", secretHint(trimmed));
     } else if (!existing) {
       return { success: false, message: "Enter a secret key first" };
+    }
+
+    const whsecTrimmed = (whsec || "").trim();
+    if (whsecTrimmed) {
+      // The endpoint's signing secret, which is not the API key and is easy
+      // to paste in the wrong box. A wrong one here means every genuine
+      // webhook is rejected as a forgery, which is a confusing thing to
+      // debug from the other end.
+      if (!whsecTrimmed.startsWith("whsec_")) {
+        return {
+          success: false,
+          message:
+            "A webhook signing secret starts with whsec_. It is shown when " +
+            "you create the endpoint in Stripe, not with your API keys.",
+        };
+      }
+      sealed.set("webhookSecret", sealSecret(whsecTrimmed));
+      hints.set("webhookSecret", secretHint(whsecTrimmed));
     }
 
     await escapeTenant("stripe: save", () =>
@@ -221,6 +243,8 @@ export async function getStripeAccount() {
       data: JSON.stringify({
         configured: Boolean(hints.secretKey),
         hint: hints.secretKey || "",
+        webhookConfigured: Boolean(hints.webhookSecret),
+        webhookHint: hints.webhookSecret || "",
         isEnabled: Boolean(account?.isEnabled),
         sealingReady: secretsConfigured(),
       }),

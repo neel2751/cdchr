@@ -1304,6 +1304,248 @@ async function main() {
     asPlatform();
   });
 
+  /* ----------------------------------------------------- the Stripe webhook */
+
+  await check("a card payment arrives by webhook and settles the invoice", async () => {
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const { draftInvoiceForOrder, issueInvoice } = await import(
+      "@/server/billingServer/invoices"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    await TagOrder.collection.insertOne({
+      tenantId,
+      orderNumber: `${orderNumber}-W`,
+      status: "placed",
+      items: [
+        { productSku: "RND-30-424", productName: "Disc", quantity: 2, unitPrice: 5 },
+      ],
+      units: [],
+      currency: "GBP",
+    });
+    await draftInvoiceForOrder({ orderNumber: `${orderNumber}-W` });
+    const draft = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-W` }).lean(),
+    );
+    await issueInvoice({ id: String(draft._id) });
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(draft._id).lean(),
+    );
+
+    const res = await handleStripeEvent({
+      id: "evt_paid_1",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_1",
+          payment_status: "paid",
+          amount_total: issued.grossPence,
+          payment_intent: "pi_1",
+          metadata: { invoiceId: String(issued._id) },
+        },
+      },
+    });
+    assert.equal(res.ok, true);
+    assert.match(res.outcome, /recorded/);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(issued._id).lean(),
+    );
+    assert.equal(after.status, "paid");
+    assert.equal(after.payments.length, 1);
+    assert.equal(after.payments[0].method, "card");
+    assert.equal(after.payments[0].reference, "pi_1");
+  });
+
+  await check("A RETRY OF THE SAME EVENT IS NOT A SECOND PAYMENT", async () => {
+    // Stripe retries for up to three days until it gets a 2xx. Without the
+    // event-id guard, one retry is one duplicate payment — and the second
+    // looks exactly as real as the first.
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    const res = await handleStripeEvent({
+      id: "evt_paid_1",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_1",
+          payment_status: "paid",
+          amount_total: 99999,
+          payment_intent: "pi_1",
+          metadata: {},
+        },
+      },
+    });
+    assert.equal(res.ok, true, "a duplicate must still get a 2xx");
+    assert.match(res.outcome, /duplicate/i);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-W` }).lean(),
+    );
+    assert.equal(after.payments.length, 1, "the retry was recorded again");
+  });
+
+  await check("a DIFFERENT event for the same payment is not double counted", async () => {
+    // Stripe sends payment_intent.succeeded alongside
+    // checkout.session.completed for one payment. The event ids differ, so
+    // only the reference guard stops this being counted twice.
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const invoice = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-W` }).lean(),
+    );
+
+    const res = await handleStripeEvent({
+      id: "evt_paid_2",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: "pi_1",
+          amount_received: invoice.grossPence,
+          metadata: { invoiceId: String(invoice._id) },
+        },
+      },
+    });
+    assert.equal(res.ok, true);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(invoice._id).lean(),
+    );
+    assert.equal(after.payments.length, 1, "one payment became two");
+  });
+
+  await check("a completed but unpaid session records nothing", async () => {
+    // A delayed payment method completes the session and settles days later.
+    // Treating that as money received is a parcel shipped against nothing.
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const Invoice = (await import("@/models/invoiceModel")).default;
+    const invoice = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-W` }).lean(),
+    );
+
+    const res = await handleStripeEvent({
+      id: "evt_unpaid",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_2",
+          payment_status: "unpaid",
+          amount_total: 1000,
+          metadata: { invoiceId: String(invoice._id) },
+        },
+      },
+    });
+    assert.match(res.outcome, /payment_status/);
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(invoice._id).lean(),
+    );
+    assert.equal(after.payments.length, 1);
+  });
+
+  await check("an event for an unknown invoice is shrugged off", async () => {
+    // It must not throw: a 500 makes Stripe retry an event that will fail
+    // identically for three days.
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const res = await handleStripeEvent({
+      id: "evt_orphan",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_3",
+          payment_status: "paid",
+          amount_total: 500,
+          payment_intent: "pi_orphan",
+          metadata: { invoiceId: String(new mongoose.Types.ObjectId()) },
+        },
+      },
+    });
+    assert.equal(res.ok, true);
+    assert.match(res.outcome, /not found/i);
+  });
+
+  await check("an event type we do not handle is accepted quietly", async () => {
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const res = await handleStripeEvent({
+      id: "evt_other",
+      type: "customer.created",
+      data: { object: {} },
+    });
+    assert.equal(res.ok, true);
+    assert.match(res.outcome, /no handler/);
+  });
+
+  await check("a webhook never overpays an invoice", async () => {
+    // If a bank transfer landed between checkout and callback, the card
+    // amount would otherwise take the invoice past its total.
+    const { handleStripeEvent } = await import(
+      "@/server/billingServer/stripeWebhook"
+    );
+    const { draftInvoiceForOrder, issueInvoice, recordInvoicePayment } =
+      await import("@/server/billingServer/invoices");
+    const Invoice = (await import("@/models/invoiceModel")).default;
+
+    await TagOrder.collection.insertOne({
+      tenantId,
+      orderNumber: `${orderNumber}-X`,
+      status: "placed",
+      items: [
+        { productSku: "RND-30-424", productName: "Disc", quantity: 2, unitPrice: 5 },
+      ],
+      units: [],
+      currency: "GBP",
+    });
+    await draftInvoiceForOrder({ orderNumber: `${orderNumber}-X` });
+    const draft = await runWithTenant(String(tenantId), () =>
+      Invoice.findOne({ orderNumber: `${orderNumber}-X` }).lean(),
+    );
+    await issueInvoice({ id: String(draft._id) });
+    const issued = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(draft._id).lean(),
+    );
+
+    // Half paid by transfer first.
+    await recordInvoicePayment({
+      id: String(issued._id),
+      amountPence: Math.floor(issued.grossPence / 2),
+      reference: "BANK-1",
+    });
+
+    await handleStripeEvent({
+      id: "evt_over",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_4",
+          payment_status: "paid",
+          amount_total: issued.grossPence,
+          payment_intent: "pi_over",
+          metadata: { invoiceId: String(issued._id) },
+        },
+      },
+    });
+
+    const after = await runWithTenant(String(tenantId), () =>
+      Invoice.findById(issued._id).lean(),
+    );
+    const paid = after.payments.reduce((t, p) => t + p.amountPence, 0);
+    assert.equal(paid, issued.grossPence, `paid ${paid} of ${issued.grossPence}`);
+    assert.equal(after.status, "paid");
+  });
+
   await mongoose.connection.db.dropDatabase();
   await mongoose.disconnect();
 
