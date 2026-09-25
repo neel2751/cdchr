@@ -1156,14 +1156,47 @@ auth, and the `{error:{message,type}}` refusal shape. The success path is from S
 documentation. A publishable key (`pk_…`) is rejected on the way in — it seals fine and
 fails only when somebody tries to pay.
 
-Reconciliation **pulls** from Stripe rather than accepting a webhook. A webhook is the
-right long-term answer, but it is an unauthenticated public endpoint that writes payment
-records, so it needs signature verification done properly — and half a webhook is worse
-than none.
+### The webhook
+
+Built, with the verification done properly rather than skipped. `POST
+/api/webhooks/stripe` is public and unauthenticated by necessity — Stripe cannot log in —
+so the signature is the *only* thing between a stranger and marking any invoice paid.
+That is why `lib/stripeSignature.js` is a separate tested file rather than a few lines
+inside a route.
+
+Four things in it are load-bearing, and each is a real attack if skipped:
+
+- **Only `v1` is accepted.** Stripe also sends a `v0`, which is deliberately fake.
+  Accepting any scheme that verifies is a downgrade attack with the door held open.
+- **The raw body, byte for byte** — `request.text()`, never `request.json()`. Parsing and
+  re-serialising changes key order and whitespace, and the signature is over bytes.
+- **Constant-time comparison**, with the length checked first, because
+  `timingSafeEqual` throws on a mismatch and would turn a clumsy forgery into a 500.
+- **A five-minute timestamp tolerance**, Stripe's own default. Without it a captured
+  request is valid for ever. The timestamp is inside the signed payload, so moving it
+  forward to defeat the check invalidates the signature it was trying to sneak past.
+
+Multiple `v1` signatures are accepted, because during a secret roll Stripe signs with
+the old and the new secret for up to a day.
+
+**Idempotency is two guards, not one.** Stripe retries for up to three days and does not
+promise to send an event once. The event id is a unique index, so a retry is refused by
+the database rather than by a read-then-write two deliveries could both pass. Separately
+the payment reference is checked — because `payment_intent.succeeded` and
+`checkout.session.completed` are *different events describing one payment*, where the
+event-id guard does nothing and only the reference stops double counting.
+
+The handler never throws: a 500 makes Stripe retry an event that will fail identically
+for three days. A `checkout.session.completed` whose `payment_status` is not `paid`
+records nothing, since a delayed payment method completes the session and settles later.
+And a webhook can never take an invoice past its total, in case a bank transfer landed
+while the customer was on Stripe's page.
+
+Reconciliation by **pulling** from Stripe is kept alongside it, for an invoice whose
+webhook never arrived.
 
 ### Still not built
 
-- **The Stripe webhook**, per above — today a payment is confirmed by asking Stripe.
 - **Dunning**: nothing chases an overdue invoice. `overdue` is computed and shown; no
   email is sent.
 - **Anything resembling bookkeeping.** This issues invoices for tag orders and records
