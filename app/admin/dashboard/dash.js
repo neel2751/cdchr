@@ -8,9 +8,8 @@ import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 import AnnouncementsCard from "./components/announcementsCard";
 import AttendanceToday from "./components/attendanceToday";
 import DashCount from "./components/dashCard";
-import Overview from "./components/overview";
-import RecentData from "./components/recentData";
-import TodayCard from "./components/todayCard";
+import HoursTrend from "./components/hoursTrend";
+import WhereTheyAre from "./components/whereTheyAre";
 
 /**
  * The admin dashboard.
@@ -22,14 +21,22 @@ import TodayCard from "./components/todayCard";
  * Reordered around what changes. A dashboard's first screenful should be the
  * things that are different from yesterday:
  *
- *   1. WHO IS IN, and anything needing attention. The question an attendance
- *      system exists to answer, and the one nobody could ask here.
- *   2. TODAY'S HOURS AND PAY, which is the day in two numbers.
- *   3. WHO CLOCKED IN, so a name can be checked rather than a total.
- *   4. THE TREND, over ninety days.
- *   5. THE STANDING TOTALS last — how many people the company employs is a
+ *   1. WHO IS IN, and anything needing attention.
+ *   2. WHERE THEY ARE — the breakdown by location, which is the thing
+ *      per-location clock records made possible and nothing surfaced.
+ *   3. HOURS, over a fortnight.
+ *   4. THE STANDING TOTALS last — how many people the company employs is a
  *      fact about the payroll, and it does not change between Tuesday and
  *      Wednesday. It opened the page before.
+ *
+ * NO PAY ON THIS SCREEN. It used to show today's total pay in a card and plot
+ * it on the same axis as hours — two different units on one scale, which draws
+ * a flat line and a spiky one and describes neither. Beyond being wrong it is
+ * the wrong place: payroll figures belong behind the payroll screens, not on a
+ * dashboard somebody leaves open while a colleague walks past.
+ *
+ * The table of who clocked in went too. A list of names and times is a thing
+ * to read; the same people counted by place is a thing to notice.
  *
  * Spacing lives here rather than inside each card, which is why the old page
  * drifted: every block carried its own `px-4 md:px-8 py-4` and no two agreed.
@@ -69,20 +76,6 @@ const Dash = () => {
     }
   }, [data, has]);
 
-  const today = useMemo(() => {
-    if (!data?.CurrentDayTotalPay) return null;
-    try {
-      return {
-        ...data.CurrentDayTotalPay,
-        employees: JSON.parse(data.CurrentDayTotalPay?.employees ?? "null"),
-      };
-    } catch {
-      // A malformed payload should cost the page one card, not the whole
-      // dashboard.
-      return null;
-    }
-  }, [data]);
-
   const chartData = useMemo(
     () => data?.last90DaysDataForChartData || [],
     [data],
@@ -92,25 +85,10 @@ const Dash = () => {
     <main className="space-y-6 p-4 md:p-6">
       <AttendanceToday />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TodayCard
-              title="Total Hours"
-              value={today?.totalHours || 0}
-              supportText="today"
-            />
-            <TodayCard
-              title="Total Pay"
-              value={today?.totalPay || 0}
-              supportText="today"
-            />
-          </div>
-          <Overview dayData={chartData} />
-        </div>
-
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <WhereTheyAre />
         <div className="space-y-4">
-          <RecentData data={today?.employees} />
+          <HoursTrend dayData={chartData} />
           {/* Renders nothing when there are no announcements, so it costs the
               dashboard no space until a company starts using the feature. */}
           <AnnouncementsCard />

@@ -817,6 +817,70 @@ async function main() {
     });
   });
 
+  await check("the dashboard breaks today down by place", async () => {
+    // The report this codebase could not produce until locations existed:
+    // every office record was siteId:null, so two offices were one
+    // indistinguishable blur.
+    as("superAdmin", "superAdmin");
+    const { getAttendancePulse } = await import(
+      "@/server/dashboardServer/attendancePulse"
+    );
+    const ClockRecord = (await import("@/models/clockInModel")).default;
+    const ClockLocation = (await import("@/models/clockLocationModel")).default;
+    const { getWorkingDate } = await import("@/lib/clockTime");
+    const today = getWorkingDate();
+
+    await withTenant(async () => {
+      await ClockRecord.deleteMany({});
+      const head = await ClockLocation.create({
+        name: "Head Office",
+        kind: "office",
+      });
+      const elm = await ClockLocation.create({
+        name: "Elm Street",
+        kind: "site",
+        projectSiteId: new mongoose.Types.ObjectId(),
+      });
+
+      const at = (locationId, status, over = {}) =>
+        ClockRecord.create({
+          employeeId: new mongoose.Types.ObjectId(),
+          employeeType: "OfficeEmployee",
+          date: today,
+          locationId,
+          clockIn: "09:00",
+          status,
+          breaks: [],
+          isDeleted: false,
+          ...over,
+        });
+
+      await at(head._id, "checked-in");
+      await at(head._id, "checked-in");
+      await at(head._id, "on-break", { breaks: [{ breakIn: "12:00" }] });
+      await at(elm._id, "checked-in");
+      // Finished for the day — no longer AT anywhere, so not counted.
+      await at(elm._id, "clocked-out", { clockOut: "14:00" });
+
+      const pulse = JSON.parse((await getAttendancePulse()).data);
+      assert.equal(pulse.locations.length, 2);
+
+      // Busiest first, so a glance lands on the place with most people.
+      assert.equal(pulse.locations[0].name, "Head Office");
+      assert.equal(pulse.locations[0].working, 2);
+      assert.equal(pulse.locations[0].onBreak, 1);
+      assert.equal(pulse.locations[0].kind, "office");
+
+      assert.equal(pulse.locations[1].name, "Elm Street");
+      assert.equal(pulse.locations[1].kind, "site");
+      assert.equal(
+        pulse.locations[1].total,
+        1,
+        "somebody who had gone home was counted as being there",
+      );
+    });
+  });
+
   await check("NOT-IN-YET IS NEVER NEGATIVE", async () => {
     // A company mid-migration can have more records today than active staff —
     // somebody clocked in and was then deactivated — and "-2 not in yet" is a
