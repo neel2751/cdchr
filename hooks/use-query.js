@@ -47,6 +47,10 @@ export const useFetchQuery = ({
   fetchFn,
   queryKey,
   enabled = true,
+  // Opt-in polling, for the handful of views that show a live figure. Off by
+  // default: nothing here should start making requests on a timer because a
+  // shared hook decided to.
+  refetchInterval,
 }) => {
   if (!queryKey) {
     throw new Error("queryKey is required");
@@ -62,6 +66,7 @@ export const useFetchQuery = ({
     },
     enabled,
     keepPreviousData: true,
+    ...(refetchInterval ? { refetchInterval } : {}),
     staleTime: 1000 * 60 * 10, // 10 minutes
     cacheTime: 10 * 60 * 30, // 30 minutes
     refetchOnWindowFocus: false,

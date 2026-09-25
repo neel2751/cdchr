@@ -760,6 +760,132 @@ async function main() {
     assert.equal(enabled[0].key, "getaddress-io");
   });
 
+  /* ------------------------------------------------- the dashboard pulse */
+
+  await check("the dashboard counts who is in right now", async () => {
+    // The question an attendance system exists to answer, and the one the
+    // dashboard could not ask.
+    as("superAdmin", "superAdmin");
+    const { getAttendancePulse } = await import(
+      "@/server/dashboardServer/attendancePulse"
+    );
+    const ClockRecord = (await import("@/models/clockInModel")).default;
+    const OfficeEmployee = (await import("@/models/officeEmployeeModel")).default;
+    const { getWorkingDate } = await import("@/lib/clockTime");
+    const today = getWorkingDate();
+
+    await withTenant(async () => {
+      await ClockRecord.deleteMany({});
+      // OfficeEmploye requires a handful of fields this test does not care
+      // about. Inserted through the driver rather than the model: the point
+      // here is the COUNT, and filling in a joining date and a department to
+      // satisfy validation would say nothing about whether the aggregation
+      // is right.
+      await OfficeEmployee.collection.insertMany(
+        Array.from({ length: 4 }, (_, i) => ({
+          tenantId,
+          name: `Pulse ${i}`,
+          email: `pulse-${i}-${Date.now()}@example.com`,
+          isActive: true,
+          delete: false,
+        })),
+      );
+
+      const make = (status, over = {}) =>
+        ClockRecord.create({
+          employeeId: new mongoose.Types.ObjectId(),
+          employeeType: "OfficeEmployee",
+          date: today,
+          locationId: new mongoose.Types.ObjectId(),
+          clockIn: "09:00",
+          status,
+          breaks: [],
+          isDeleted: false,
+          ...over,
+        });
+
+      await make("checked-in");
+      await make("checked-in");
+      await make("on-break", { breaks: [{ breakIn: "12:00" }] });
+      await make("clocked-out", { clockOut: "17:00" });
+
+      const pulse = JSON.parse((await getAttendancePulse()).data);
+      assert.equal(pulse.working, 2);
+      assert.equal(pulse.onBreak, 1);
+      assert.equal(pulse.finished, 1);
+      assert.equal(pulse.staff >= 4, true, "active staff were not counted");
+    });
+  });
+
+  await check("NOT-IN-YET IS NEVER NEGATIVE", async () => {
+    // A company mid-migration can have more records today than active staff —
+    // somebody clocked in and was then deactivated — and "-2 not in yet" is a
+    // number nobody can act on.
+    as("superAdmin", "superAdmin");
+    const { getAttendancePulse } = await import(
+      "@/server/dashboardServer/attendancePulse"
+    );
+    const ClockRecord = (await import("@/models/clockInModel")).default;
+    const { getWorkingDate } = await import("@/lib/clockTime");
+    const today = getWorkingDate();
+
+    await withTenant(async () => {
+      for (let i = 0; i < 20; i++) {
+        await ClockRecord.create({
+          employeeId: new mongoose.Types.ObjectId(),
+          employeeType: "OfficeEmployee",
+          date: today,
+          locationId: new mongoose.Types.ObjectId(),
+          clockIn: "09:00",
+          status: "checked-in",
+          breaks: [],
+          isDeleted: false,
+        });
+      }
+
+      const pulse = JSON.parse((await getAttendancePulse()).data);
+      assert.ok(pulse.notIn >= 0, `notIn was ${pulse.notIn}`);
+    });
+  });
+
+  await check("an unfinished shift from an earlier day is surfaced", async () => {
+    // The nightly job flags these; showing the count is what turns a flag
+    // into something somebody acts on.
+    as("superAdmin", "superAdmin");
+    const { getAttendancePulse } = await import(
+      "@/server/dashboardServer/attendancePulse"
+    );
+    const ClockRecord = (await import("@/models/clockInModel")).default;
+    const { getWorkingDate } = await import("@/lib/clockTime");
+    const yesterday = new Date(getWorkingDate().getTime() - 86400000);
+
+    await withTenant(async () => {
+      await ClockRecord.create({
+        employeeId: new mongoose.Types.ObjectId(),
+        employeeType: "OfficeEmployee",
+        date: yesterday,
+        locationId: new mongoose.Types.ObjectId(),
+        clockIn: "09:00",
+        status: "checked-in",
+        breaks: [],
+        isDeleted: false,
+      });
+
+      const pulse = JSON.parse((await getAttendancePulse()).data);
+      assert.ok(pulse.stillOpen >= 1, "the open shift was not counted");
+    });
+  });
+
+  await check("the pulse is not readable by an employee", async () => {
+    as("siteEmployee", "employee");
+    const { getAttendancePulse } = await import(
+      "@/server/dashboardServer/attendancePulse"
+    );
+    const res = await withTenant(() => getAttendancePulse());
+    assert.equal(res.success, false);
+    assert.match(res.message, /not authorized/i);
+  });
+
   await mongoose.connection.db.dropDatabase();
   await mongoose.disconnect();
 

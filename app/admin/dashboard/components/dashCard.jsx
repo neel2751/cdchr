@@ -7,13 +7,14 @@ const DashCount = ({ memoizedEmployeeData }) => {
     <>
       {memoizedEmployeeData &&
         memoizedEmployeeData?.map((item, index) => (
-          <main
-            key={index}
-            className="flex flex-1 flex-col gap-4 px-4 md:gap-x-8 md:px-8 py-4"
-          >
-            <h1 className="text-lg font-semibold md:text-md text-neutral-700 ms-2">
+          // Spacing belongs to the page, not to each block. Every section
+          // used to carry its own `px-4 md:px-8 py-4`, and no two agreed —
+          // which is most of why the dashboard read as assembled rather than
+          // designed. Also a <main> per group, of which a page may have one.
+          <section key={index} className="flex flex-1 flex-col gap-3">
+            <h2 className="text-sm font-semibold text-neutral-700">
               {item?.label}
-            </h1>
+            </h2>
             <div className="grid gap-4 md:grid-cols-2 md:gap-8 lg:grid-cols-4">
               {item?.value &&
                 item?.value?.map((cardItem, index) => {
@@ -45,7 +46,7 @@ const DashCount = ({ memoizedEmployeeData }) => {
                   );
                 })}
             </div>
-          </main>
+          </section>
         ))}
     </>
   );
