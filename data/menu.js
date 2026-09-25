@@ -51,6 +51,16 @@ export const MENU = [
     role: ["superAdmin", "admin"], // admin, manager, user
     icon: "CalendarClock",
   },
+  // Everything about clocking in: the scanner's rules, the places people scan
+  // at, the tags they scan with, and the reports. These cards used to sit under
+  // Leave Management -> Settings, which is where they ended up one at a time
+  // rather than where anybody would look for them.
+  {
+    name: "Clock In Settings",
+    path: "/admin/clockSettings",
+    role: ["superAdmin", "admin"],
+    icon: "ScanQrCode",
+  },
   // Same gap the Expenses entry below describes: the page, the actions and the
   // device management had all existed for a while and nothing linked to them,
   // so only a super admin who already knew the URL could reach it. That is
