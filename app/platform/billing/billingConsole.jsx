@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Ban, Check, FileText, Loader2, Receipt, Send } from "lucide-react";
+import { Ban, Check, FileText, Loader2, Mail, Receipt, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,11 +19,16 @@ import { Switch } from "@/components/ui/switch";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import { toPence } from "@/lib/money";
 import {
+  chaseInvoiceNow,
   createCreditNote,
   draftInvoiceForOrder,
   getAllInvoices,
+  getDunningState,
   issueInvoice,
   recordInvoicePayment,
+  setDunningEnabled,
+  setInvoiceBillingEmail,
+  setInvoiceChasing,
   voidInvoice,
 } from "@/server/billingServer/invoices";
 import {
@@ -58,6 +63,10 @@ export default function BillingConsole() {
     queryKey: ["stripeAccount"],
     fetchFn: getStripeAccount,
   });
+  const { data: dunning } = useFetchSelectQuery({
+    queryKey: ["dunningState"],
+    fetchFn: getDunningState,
+  });
 
   const [orderNumber, setOrderNumber] = React.useState("");
   const [stripeKey, setStripeKey] = React.useState("");
@@ -66,6 +75,7 @@ export default function BillingConsole() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["allInvoices"] });
     queryClient.invalidateQueries({ queryKey: ["stripeAccount"] });
+    queryClient.invalidateQueries({ queryKey: ["dunningState"] });
   };
 
   const run = (promise) =>
@@ -87,6 +97,10 @@ export default function BillingConsole() {
       if (kind === "void") return run(voidInvoice(args));
       if (kind === "credit") return run(createCreditNote(args));
       if (kind === "reconcile") return run(reconcileInvoicePayment(args));
+      if (kind === "chase") return run(chaseInvoiceNow(args));
+      if (kind === "chasing") return run(setInvoiceChasing(args));
+      if (kind === "billingEmail") return run(setInvoiceBillingEmail(args));
+      if (kind === "dunning") return run(setDunningEnabled(args));
       if (kind === "stripe")
         return run(saveStripeAccount(args)).then(() => {
           setStripeKey("");
@@ -193,6 +207,43 @@ export default function BillingConsole() {
             the endpoint rejects everything — which is the correct failure, but
             it looks like Stripe is broken rather than unconfigured.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Chasing overdue invoices</CardTitle>
+          <CardDescription>
+            This sends email to customers with nobody in the loop, so it is off
+            until somebody turns it on. Each stage sends once and the ladder
+            ends — a courtesy note before the due date, then at a week, two
+            weeks, and a final reminder at thirty days.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs" htmlFor="dunning-on">
+              Send reminders automatically, daily at 09:00
+            </Label>
+            <Switch
+              id="dunning-on"
+              checked={Boolean(dunning?.enabled)}
+              disabled={isPending || !dunning?.mailboxConfigured}
+              onCheckedChange={(v) => act({ kind: "dunning", enabled: v })}
+            />
+          </div>
+          {!dunning?.mailboxConfigured ? (
+            <p className="text-xs text-red-600">
+              No platform mailbox is configured (EMAIL_HOST / EMAIL_USERNAME),
+              so nothing can be sent.
+            </p>
+          ) : null}
+          {!dunning?.hasBankDetails ? (
+            <p className="text-xs text-amber-700">
+              No bank details are set, so reminders will not say how to pay by
+              transfer.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -306,6 +357,92 @@ export default function BillingConsole() {
                         <Check className="mr-1 size-3.5" />
                         Record payment
                       </Button>
+                    ) : null}
+
+                    {inv.dunning && inv.outstandingPence > 0 && inv.kind === "invoice" ? (
+                      <span
+                        className={`text-[11px] ${
+                          inv.dunning.chaseable
+                            ? "text-muted-foreground"
+                            : "text-amber-700"
+                        }`}
+                        title={
+                          inv.dunning.sent?.length
+                            ? `Sent: ${inv.dunning.sent.join(", ")}`
+                            : "Nothing sent yet"
+                        }
+                      >
+                        {inv.dunning.chaseable
+                          ? inv.dunning.message
+                          : `Not chased — ${inv.dunning.reason}`}
+                      </span>
+                    ) : null}
+
+                    {inv.outstandingPence > 0 &&
+                    inv.kind === "invoice" &&
+                    inv.status !== "void" ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7"
+                          disabled={isPending}
+                          title={
+                            inv.buyer?.email
+                              ? `Reminders go to ${inv.buyer.email}`
+                              : "No billing email — this invoice cannot be chased"
+                          }
+                          onClick={() => {
+                            const typed = window.prompt(
+                              "Where should reminders for this invoice go?",
+                              inv.buyer?.email || "",
+                            );
+                            if (typed === null) return;
+                            act({
+                              kind: "billingEmail",
+                              id: inv._id,
+                              email: typed,
+                            });
+                          }}
+                        >
+                          <Mail className="size-3.5" />
+                        </Button>
+                        {inv.dunning?.chaseable ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7"
+                            disabled={isPending}
+                            onClick={() => act({ kind: "chase", id: inv._id })}
+                          >
+                            Chase now
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7"
+                          disabled={isPending}
+                          onClick={() => {
+                            if (inv.chaseDisabled) {
+                              act({ kind: "chasing", id: inv._id, chaseDisabled: false });
+                              return;
+                            }
+                            const reason = window.prompt(
+                              "Why should this invoice not be chased? (payment plan, dispute, handled by phone)",
+                            );
+                            if (reason === null) return;
+                            act({
+                              kind: "chasing",
+                              id: inv._id,
+                              chaseDisabled: true,
+                              reason,
+                            });
+                          }}
+                        >
+                          {inv.chaseDisabled ? "Resume chasing" : "Hold"}
+                        </Button>
+                      </>
                     ) : null}
 
                     {inv.stripeSessionId && inv.outstandingPence > 0 ? (

@@ -66,6 +66,10 @@ const partySchema = new mongoose.Schema(
   {
     name: String,
     address: String,
+    // Where a reminder goes. Snapshotted with the rest: chasing an invoice
+    // should reach whoever was billed, not whoever happens to hold the
+    // account now.
+    email: String,
     vatNumber: String,
     companyNumber: String,
     _id: false,
@@ -121,6 +125,27 @@ const invoiceSchema = new mongoose.Schema(
     voidedAt: Date,
     voidReason: String,
     voidedByName: String,
+
+    // ---- chasing (lib/dunning.js) ----
+    //
+    // One entry per stage, ever. The ladder decides what is due; this records
+    // what has gone, and it is what stops a daily job sending the same
+    // reminder thirty times to somebody who is simply late.
+    reminders: [
+      {
+        stage: { type: String, required: true },
+        sentAt: { type: Date, default: Date.now },
+        to: String,
+        // "cron" or the name of whoever pressed send.
+        by: String,
+        _id: false,
+      },
+    ],
+    // A stop switch for one invoice: a customer in a payment plan, a disputed
+    // amount, an account somebody is handling by phone. Chasing those
+    // automatically is worse than not chasing at all.
+    chaseDisabled: { type: Boolean, default: false },
+    chaseDisabledReason: String,
 
     // Stripe, when the customer pays by card. Only identifiers — no card
     // data ever reaches this application. See server/billingServer/stripe.js.

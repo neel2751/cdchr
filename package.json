@@ -46,7 +46,8 @@
     "tag:test:postcode": "node --import ./scripts/lib/alias-loader.mjs scripts/test-postcode.mjs",
     "tag:test:address": "node --import ./scripts/lib/alias-loader.mjs scripts/test-address-lookup.mjs",
     "tag:test:money": "node --import ./scripts/lib/alias-loader.mjs scripts/test-money.mjs",
-    "tag:test:webhook": "node --import ./scripts/lib/alias-loader.mjs scripts/test-stripe-webhook.mjs"
+    "tag:test:webhook": "node --import ./scripts/lib/alias-loader.mjs scripts/test-stripe-webhook.mjs",
+    "tag:test:dunning": "node --import ./scripts/lib/alias-loader.mjs scripts/test-dunning.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

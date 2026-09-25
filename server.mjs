@@ -3,8 +3,6 @@ dotenv.config();
 import { createServer } from "http";
 import next from "next";
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
-import QRCode from "qrcode";
 import { makeSocketAuth, tenantRoom } from "./lib/socketAuth.js";
 import { registerSocketServer } from "./lib/realtime.js";
 const dev = process.env.NODE_ENV !== "production";
@@ -14,25 +12,8 @@ const port = 3000;
 const app = next({ dev, hostname, port });
 const handler = app.getRequestHandler();
 
-const SECRET = process.env.NEXTAUTH_SECRET || "";
 // Auth.js v5 reads AUTH_SECRET first; NEXTAUTH_SECRET stays as the fallback.
 const AUTH_SECRET = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "";
-
-const qrRenderOptions = {
-  errorCorrectionLevel: "M",
-  margin: 1,
-  width: 220,
-};
-
-async function buildQrPayload(token) {
-  try {
-    const qrDataUrl = await QRCode.toDataURL(token, qrRenderOptions);
-    return { token, qrDataUrl };
-  } catch (err) {
-    console.error("Failed to pre-render QR payload:", err);
-    return { token };
-  }
-}
 
 // Restrict real-time (Socket.IO) connections to known origins instead of a
 // wildcard. Origins are configured via SOCKET_CORS_ORIGINS (comma-separated)
@@ -74,15 +55,6 @@ app.prepare().then(() => {
   // lets a server action (publishing an announcement, say) push to clients.
   registerSocketServer(io);
 
-  const activeEmployees = new Map(); // employeeId -> { count, interval, socketId }
-  const completedEmployees = new Set(); // employeeIds that reached the limit
-
-  const tokenLimit = 2; // max tokens per employee
-  const tokenInterval = 60000; // 30 seconds
-  const tokenExpiration = 60; // token lifetime
-
-  const officeTokens = new Map(); // token -> { action, siteId, expiresAt, usedEmployees: Set() }
-
   io.on("connection", (socket) => {
     // Confined to their own company's room: every broadcast below goes to this
     // room rather than to every connected client.
@@ -92,172 +64,27 @@ app.prepare().then(() => {
     console.log(`Employee connected ${socket.id} (${room})`);
 
     /** ============================
-     * Office device generates QR
-     * ============================ */
-    socket.on("generate-office-qr", async ({ action, siteId }) => {
-      const { tenantId } = socket.data.user;
-      const token = jwt.sign({ action, siteId, tenantId }, SECRET, {
-        expiresIn: "30s",
-      });
-      const expiresAt = Date.now() + 30000;
-
-      officeTokens.set(token, { action, siteId, expiresAt, tenantId });
-
-      socket.emit("new-office-qr", await buildQrPayload(token));
-
-      // Automatically delete token after expiration
-      setTimeout(() => {
-        officeTokens.delete(token);
-        toTenant("office-qr-expired", token); // Notify this company's office UI
-        console.log(`Token expired: ${token}`);
-      }, 30000);
-    });
-
-    /** ============================
-     * Employee scans QR
+     * Employee scanned a QR
+     *
+     * Notification only. Clock-in codes used to be minted here and held in a
+     * Map in this process, which is why nothing else could tell whether one
+     * had been spent: a server action cannot reach into the socket server's
+     * memory, so the code it redeemed stayed valid for its full lifetime. The
+     * codes now live in the database — issued by server/clockServer/clockToken.js
+     * and burned by the same action that writes the attendance record — so by
+     * the time this event arrives the decision has already been made and
+     * recorded.
+     *
+     * What is left is telling the room: take this code off the reception
+     * screen, and refresh the attendance tables.
      * ============================ */
     socket.on("employee-scan-qr", ({ token, employeeId }) => {
-      const data = officeTokens.get(token);
-
-      if (!data || data.expiresAt < Date.now()) {
-        socket.emit("scan-error", "Token expired or invalid");
-        return;
-      }
-
-      // A code minted for one company must not be redeemable from another,
-      // even if it leaks — the token alone is not authority.
-      if (data.tenantId !== socket.data.user.tenantId) {
-        socket.emit("scan-error", "Token expired or invalid");
-        return;
-      }
-
-      // Remove token immediately after first successful scan
-      officeTokens.delete(token);
-
-      // 🔹 Broadcast to all office UIs → remove QR
-      toTenant("office-qr-used", token);
-
-      // Record attendance
-      console.log(
-        `Employee ${employeeId} performed ${data.action} at site ${data.siteId}`,
-      );
-
-      socket.emit("scan-success", { action: data.action });
+      if (token) toTenant("office-qr-used", token);
       toTenant("refresh-clock-table", employeeId);
     });
 
-    /** ============================
-     * Employee scans QR successfully
-     * ============================ */
     socket.on("office-qr-used", (token) => {
-      // 🔹 Delete the token so it can’t be reusedf
-      officeTokens.delete(token);
-      // 🔹 Tell this company's office devices to hide this QR
       toTenant("office-qr-used", token);
-      console.log(`QR token used and removed: ${token}`);
-    });
-
-    // ============================ OLD CODE ============================
-
-    socket.on("start-token-generation", (employeeId) => {
-      if (completedEmployees.has(employeeId)) {
-        console.log(
-          `Employee ${employeeId} already completed token generation.`,
-        );
-        socket.emit("token-limit-reached"); // Inform client about the limit
-        return;
-      }
-
-      if (activeEmployees.has(employeeId)) {
-        activeEmployees.get(employeeId).socketId = socket.id;
-        console.log(`Employee ${employeeId} reconnected, updated socket ID.`);
-        return;
-      }
-
-      let count = 0;
-
-      const sendToken = async () => {
-        if (count >= tokenLimit) {
-          clearInterval(interval);
-          activeEmployees.delete(employeeId);
-          completedEmployees.add(employeeId); // Mark employee as completed
-          console.log(`Token limit reached for ${employeeId}`);
-          socket.emit("token-limit-reached"); // Inform client about the limit
-          console.log(`Emitting token-limit-reached to socket: ${socket.id}`);
-          return;
-        }
-
-        const token = jwt.sign(
-          { employeeId, tenantId: socket.data.user.tenantId },
-          SECRET,
-          { expiresIn: `${tokenExpiration}s` }
-        );
-        socket.emit("new-qr-token", await buildQrPayload(token));
-        count++;
-        console.log(`Token ${count}/${tokenLimit} sent to ${employeeId}`);
-      };
-
-      void sendToken(); // Immediate first token
-      const interval = setInterval(() => {
-        void sendToken();
-      }, tokenInterval);
-      activeEmployees.set(employeeId, { count, interval, socketId: socket.id });
-    });
-
-    socket.on("manual-request", ({ employeeId, action, siteId }) => {
-      console.log(`Manual request received from ${employeeId}`);
-
-      // If they're in completed, reset them
-      completedEmployees.delete(employeeId);
-
-      // If already active, stop old interval first
-      if (activeEmployees.has(employeeId)) {
-        clearInterval(activeEmployees.get(employeeId).interval);
-        activeEmployees.delete(employeeId);
-      }
-
-      let count = 0;
-
-      const sendToken = async () => {
-        if (count >= tokenLimit) {
-          clearInterval(interval);
-          activeEmployees.delete(employeeId);
-          completedEmployees.add(employeeId);
-          console.log(`Token limit reached for ${employeeId} (via manual)`);
-          socket.emit("token-limit-reached");
-          return;
-        }
-
-        const token = jwt.sign(
-          { employeeId, action, siteId, tenantId: socket.data.user.tenantId },
-          SECRET,
-          { expiresIn: `${tokenExpiration}s` }
-        );
-        socket.emit("new-qr-token", await buildQrPayload(token));
-        count++;
-        console.log(
-          `Manual token ${count}/${tokenLimit} sent to ${employeeId}`,
-        );
-      };
-
-      // Send first token immediately
-      void sendToken();
-
-      // Start interval for rest
-      const interval = setInterval(() => {
-        void sendToken();
-      }, tokenInterval);
-      activeEmployees.set(employeeId, { count, interval, socketId: socket.id });
-    });
-
-    socket.on("token-used", (employeeId) => {
-      const emp = activeEmployees.get(employeeId);
-      if (emp) {
-        clearInterval(emp.interval);
-        activeEmployees.delete(employeeId);
-        completedEmployees.add(employeeId); // Mark as completed
-        console.log(`Early scan stopped token stream for ${employeeId}`);
-      }
     });
 
     socket.on("admin-clock-update", (employeeId) => {
@@ -265,35 +92,7 @@ app.prepare().then(() => {
       toTenant("refresh-clock-table", employeeId);
     });
 
-    socket.on("stop-qr", async (employeeId) => {
-      console.log("Received stop-qr for:", employeeId); // <--- THIS SHOULD PRINT
-      if (!completedEmployees.has(employeeId)) {
-        const emp = activeEmployees.get(employeeId);
-        if (emp) {
-          clearInterval(emp.interval);
-          activeEmployees.delete(employeeId);
-          completedEmployees.add(employeeId);
-          console.log(`Admin Stopped QR for ${employeeId}`);
 
-          const employeeSocket = io.sockets.sockets.get(emp.socketId);
-          if (employeeSocket) {
-            employeeSocket.emit("token-limit-reached");
-          }
-          toTenant("refresh-clock-table", employeeId); // send full data
-        }
-      }
-    });
-
-    socket.on("disconnect", () => {
-      for (const [empId, data] of activeEmployees.entries()) {
-        if (data.socketId === socket.id) {
-          clearInterval(data.interval);
-          activeEmployees.delete(empId);
-          console.log(`Disconnected: Cleaned up ${empId}`);
-          break;
-        }
-      }
-    });
   });
 
   server.listen(port, () => {
@@ -301,6 +100,8 @@ app.prepare().then(() => {
     warmDatabaseConnection(port);
     scheduleVisaReminders(port);
     scheduleAnnouncements(port);
+    scheduleShiftClose(port);
+    scheduleDunning(port);
   });
 });
 
@@ -378,6 +179,100 @@ function scheduleVisaReminders(serverPort) {
 
   console.log(
     `[visa-cron] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// Flags yesterday's unclosed shifts and works out overtime on the ones that did
+// close. Same shape as the visa job: once a day, early, after the working day
+// it is looking at has definitely ended. Requires CRON_SECRET.
+function scheduleShiftClose(serverPort) {
+  const RUN_HOUR = 3;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[shift-close] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/close-shifts`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      // Quiet on a night when there was nothing to do.
+      if (json?.results?.flagged || json?.results?.priced) {
+        console.log("[shift-close] run complete:", JSON.stringify(json));
+      }
+    } catch (err) {
+      console.error("[shift-close] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[shift-close] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// Chases overdue invoices. Same shape as the others, but at a civilised hour:
+// a payment reminder timestamped 03:00 reads as automated nagging, and 09:00 is
+// when somebody might actually act on it.
+//
+// The job itself is off unless a platform admin has enabled it — see
+// server/billingServer/dunningJob.js. Scheduling it here costs nothing while
+// it is off, and means turning it on does not also need a deploy.
+function scheduleDunning(serverPort) {
+  const RUN_HOUR = 9;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[dunning] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/dunning`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      // Quiet when it is switched off or had nothing to chase.
+      if (json?.results?.sent || json?.results?.failed) {
+        console.log("[dunning] run complete:", JSON.stringify(json));
+      }
+    } catch (err) {
+      console.error("[dunning] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[dunning] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
 }
 

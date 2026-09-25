@@ -47,6 +47,14 @@ const platformSettingSchema = new mongoose.Schema(
     // changing this never moves an existing invoice's due date.
     paymentTermsDays: { type: Number, default: 30, min: 0 },
     bankDetails: { type: String, default: "" },
+
+    // Automatic chasing of overdue invoices.
+    //
+    // OFF BY DEFAULT, and that default is the point: this sends email to real
+    // customers with no human in the loop. Shipping it on would mean the
+    // first deploy after writing it started chasing people, which is not a
+    // thing to discover from a reply.
+    dunningEnabled: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

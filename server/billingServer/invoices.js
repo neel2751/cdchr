@@ -5,6 +5,7 @@ import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { formatMoney, outstanding, totalLines } from "@/lib/money";
+import { chaseability, dunningSummary } from "@/lib/dunning";
 import CompanyModel from "@/models/companyModel";
 import InvoiceCounterModel from "@/models/invoiceCounterModel";
 import InvoiceModel from "@/models/invoiceModel";
@@ -100,6 +101,9 @@ function present(invoice) {
       invoice.status !== "draft" &&
       Boolean(invoice.dueAt) &&
       new Date(invoice.dueAt) < new Date(),
+    // What chasing will or will not do, so a screen can explain the silence
+    // rather than leaving somebody wondering why nothing has gone out.
+    dunning: dunningSummary(invoice),
   };
 }
 
@@ -206,7 +210,9 @@ export async function draftInvoiceForOrder({ orderNumber, vatRateBasisPoints = 2
 
     const totals = totalLines(lines);
     const company = await escapeTenant("invoicing: the customer", () =>
-      CompanyModel.findById(order.tenantId).select("name").lean(),
+      CompanyModel.findById(order.tenantId)
+        .select("name branding.supportEmail")
+        .lean(),
     );
     const { seller } = await sellerDetails();
 
@@ -223,6 +229,11 @@ export async function draftInvoiceForOrder({ orderNumber, vatRateBasisPoints = 2
         buyer: {
           name: company?.name || "",
           address: order.shippingAddress || "",
+          // Where a reminder will go. Taken from the company's support
+          // address, which is the only contact we reliably hold — and left
+          // editable, because the person who reads support mail is often not
+          // the person who pays invoices.
+          email: company?.branding?.supportEmail || "",
         },
       }),
     );
@@ -644,5 +655,199 @@ export async function createCreditNote({ id, reason } = {}) {
   } catch (error) {
     console.log("Error raising a credit note:", error?.message);
     return { success: false, message: "Could not raise that credit note" };
+  }
+}
+
+/** Who a reminder goes to. Editable, because support mail is rarely accounts. */
+export async function setInvoiceBillingEmail({ id, email } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+    if (!id || !isValidObjectId(id)) {
+      return { success: false, message: "Invalid invoice" };
+    }
+
+    const trimmed = (email || "").trim();
+    // Loose on purpose. A real address this rejects is worse than a wrong one
+    // it accepts, because the wrong one bounces visibly and the rejection
+    // just stops somebody working.
+    if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      return { success: false, message: "That does not look like an email address" };
+    }
+
+    await connect();
+    const res = await escapeTenant("invoicing: set the billing email", () =>
+      InvoiceModel.updateOne(
+        { _id: createObjectId(id) },
+        { $set: { "buyer.email": trimmed } },
+      ),
+    );
+    if (!res.matchedCount) return { success: false, message: "Invoice not found" };
+
+    return {
+      success: true,
+      message: trimmed
+        ? `Reminders will go to ${trimmed}`
+        : "Billing email cleared — this invoice will not be chased",
+    };
+  } catch (error) {
+    console.log("Error setting a billing email:", error?.message);
+    return { success: false, message: "Could not save that" };
+  }
+}
+
+/**
+ * Stop chasing one invoice, or start again.
+ *
+ * For a customer in a payment plan, a disputed amount, an account somebody is
+ * handling by phone. Chasing those automatically is worse than not chasing.
+ */
+export async function setInvoiceChasing({ id, chaseDisabled, reason } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+    if (!id || !isValidObjectId(id)) {
+      return { success: false, message: "Invalid invoice" };
+    }
+
+    await connect();
+    const invoice = await escapeTenant("invoicing: find", () =>
+      InvoiceModel.findById(createObjectId(id)).lean(),
+    );
+    if (!invoice) return { success: false, message: "Invoice not found" };
+
+    await escapeTenant("invoicing: set chasing", () =>
+      InvoiceModel.updateOne(
+        { _id: invoice._id },
+        {
+          $set: {
+            chaseDisabled: Boolean(chaseDisabled),
+            chaseDisabledReason: chaseDisabled ? (reason || "").trim() : "",
+          },
+        },
+      ),
+    );
+
+    await logAuditDirect({
+      action: "Invoice.chasing",
+      module: "Invoice",
+      entityId: String(invoice._id),
+      tenantId: invoice.tenantId,
+      description: chaseDisabled
+        ? `Chasing switched off for ${invoice.number}: ${(reason || "").trim() || "no reason given"}`
+        : `Chasing switched back on for ${invoice.number}`,
+      actor: auth.user,
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: chaseDisabled
+        ? `${invoice.number} will not be chased`
+        : `${invoice.number} will be chased again`,
+    };
+  } catch (error) {
+    console.log("Error setting chasing:", error?.message);
+    return { success: false, message: "Could not change that" };
+  }
+}
+
+/** Chase one invoice now, because a person decided to rather than a clock. */
+export async function chaseInvoiceNow({ id, stage } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+    if (!id || !isValidObjectId(id)) {
+      return { success: false, message: "Invalid invoice" };
+    }
+
+    await connect();
+    const invoice = await escapeTenant("invoicing: find", () =>
+      InvoiceModel.findById(createObjectId(id)).lean(),
+    );
+    if (!invoice) return { success: false, message: "Invoice not found" };
+
+    const allowed = chaseability(invoice);
+    if (!allowed.chaseable) {
+      return { success: false, message: `Not chaseable: ${allowed.reason}` };
+    }
+
+    const { sendReminderNow } = await import("./dunningJob");
+    const outcome = await sendReminderNow({
+      invoice,
+      stageKey: stage,
+      by: auth.user.name,
+    });
+
+    return outcome.sent
+      ? { success: true, message: `Reminder sent to ${outcome.to}` }
+      : { success: false, message: outcome.reason || "Nothing was sent" };
+  } catch (error) {
+    console.log("Error chasing an invoice:", error?.message);
+    return { success: false, message: "Could not send that reminder" };
+  }
+}
+
+/** Turn automatic chasing on or off for everybody. */
+export async function setDunningEnabled({ enabled } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+
+    await connect();
+    await escapeTenant("invoicing: set dunning", () =>
+      PlatformSettingModel.updateOne(
+        { singleton: "only" },
+        {
+          $set: { dunningEnabled: Boolean(enabled) },
+          $setOnInsert: { singleton: "only" },
+        },
+        { upsert: true },
+      ),
+    );
+
+    await logAuditDirect({
+      action: "Invoice.dunningSwitch",
+      module: "Invoice",
+      description: `Automatic invoice chasing turned ${enabled ? "on" : "off"}`,
+      actor: auth.user,
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: enabled
+        ? "Automatic chasing is on. Reminders go out daily at 09:00."
+        : "Automatic chasing is off. Nothing will be sent without somebody pressing send.",
+    };
+  } catch (error) {
+    console.log("Error setting dunning:", error?.message);
+    return { success: false, message: "Could not change that" };
+  }
+}
+
+/** Is automatic chasing on? For the screen that offers the switch. */
+export async function getDunningState() {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+
+    await connect();
+    const settings = await escapeTenant("invoicing: dunning state", () =>
+      PlatformSettingModel.findOne({ singleton: "only" })
+        .select("dunningEnabled bankDetails")
+        .lean(),
+    );
+    return {
+      success: true,
+      data: JSON.stringify({
+        enabled: Boolean(settings?.dunningEnabled),
+        hasBankDetails: Boolean(settings?.bankDetails),
+        mailboxConfigured: Boolean(
+          process.env.EMAIL_HOST && process.env.EMAIL_USERNAME,
+        ),
+      }),
+    };
+  } catch (error) {
+    console.log("Error reading dunning state:", error?.message);
+    return { success: false, message: "Could not read that" };
   }
 }

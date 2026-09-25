@@ -1195,10 +1195,44 @@ while the customer was on Stripe's page.
 Reconciliation by **pulling** from Stripe is kept alongside it, for an invoice whose
 webhook never arrived.
 
+### Chasing overdue invoices
+
+A daily job at 09:00 — a civilised hour on purpose, since a payment reminder timestamped
+03:00 reads as automated nagging. The ladder is a courtesy note three days before the
+due date, then at the due date, a week, two weeks, and a final reminder at thirty days.
+
+**Off until somebody turns it on.** This sends email to real customers with nobody in
+the loop, so shipping it enabled would mean the first deploy after writing it started
+chasing people — not a thing to find out from a reply.
+
+Two rules carry the whole feature, and the second one had a bug the tests caught:
+
+- **One email per stage, ever** — not one per run. A daily job against an invoice that
+  stays overdue must send once and then be quiet.
+- **The stage is chosen by the invoice's AGE**, then sent only if unsent. The obvious
+  implementation — "the latest stage that is due *and* unsent" — is wrong in a way that
+  is invisible until it is live: an invoice a week overdue whose seven-day note had gone
+  would fall back to the "due today" stage, send that, then the courtesy note the next
+  morning, working *backwards* down the ladder a different email at a time. Choosing by
+  age also means an invoice neglected for five weeks gets one final reminder rather than
+  five in a row catching up.
+
+**The ladder ends.** After the final reminder nothing more is sent: a debt unpaid after
+that needs a person, and software that keeps emailing is software somebody blocks.
+
+Nothing that is not owed is chased — drafts, void, settled, credit notes — and a
+per-invoice hold covers a payment plan, a dispute, or an account somebody is handling by
+phone. An invoice with no billing address says so rather than being silently skipped.
+The reminder record is written *before* the send and guarded on that stage being absent,
+so two overlapping runs produce one email; the worst case is a recorded reminder that
+failed to send, which is visible and fixable, rather than a customer with two copies.
+
+The templates escalate in tone and **threaten nothing**. Software should not invent
+consequences — interest, legal action, suspended accounts — that a person has not
+decided on.
+
 ### Still not built
 
-- **Dunning**: nothing chases an overdue invoice. `overdue` is computed and shown; no
-  email is sent.
 - **Anything resembling bookkeeping.** This issues invoices for tag orders and records
   what was paid. VAT returns, the ledger and the accounts live where they already live;
   this feeds them.
