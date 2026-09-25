@@ -293,6 +293,181 @@ async function main() {
     assert.equal(await ClockLocation.countDocuments({ name: "Nowhere" }), 0);
   });
 
+  /* -------------------------------------------------- a shift that moved */
+
+  await check("THE OFFICE WORKER WHO FINISHES ON A SITE", async () => {
+    // Clock in on the office QR code, drive to a site, tap its tag on the way
+    // home. The record is at the OFFICE, so a lookup keyed on the site found
+    // nothing and the tap was refused with "You must clock in first" —
+    // leaving an open shift the employee had no way to close.
+    const { performClockAction } = await import(
+      "@/server/clockServer/clockActions"
+    );
+
+    const office = await ensureDefaultLocation();
+    const site = await ClockLocation.create({
+      name: "Elm Street",
+      kind: "site",
+      projectSiteId: new mongoose.Types.ObjectId(),
+    });
+
+    const traveller = new mongoose.Types.ObjectId();
+    const day = new Date(Date.UTC(2026, 8, 28));
+
+    const inAtOffice = await performClockAction({
+      employeeId: traveller,
+      employeeType: "OfficeEmployee",
+      location: office,
+      action: "clockIn",
+      date: day,
+      currentTime: "09:00",
+    });
+    assert.equal(inAtOffice.success, true, inAtOffice.message);
+
+    const outAtSite = await performClockAction({
+      employeeId: traveller,
+      employeeType: "OfficeEmployee",
+      location: site,
+      siteId: site.projectSiteId,
+      action: "clockOut",
+      date: day,
+      currentTime: "17:30",
+    });
+    assert.equal(outAtSite.success, true, outAtSite.message);
+
+    // One record, not two: the shift it belongs to is the one it started on.
+    const records = await ClockRecord.find({ employeeId: traveller, date: day }).lean();
+    assert.equal(records.length, 1, "a second record was created at the site");
+    assert.equal(String(records[0].locationId), String(office._id));
+    assert.equal(records[0].clockIn, "09:00");
+    assert.equal(records[0].clockOut, "17:30");
+    // But where they actually finished is recorded, so the report reads as a
+    // fact rather than a bug.
+    assert.equal(
+      String(records[0].clockOutLocationId),
+      String(site._id),
+      "it did not record where the shift ended",
+    );
+  });
+
+  await check("a break can be taken somewhere else too", async () => {
+    const { performClockAction } = await import(
+      "@/server/clockServer/clockActions"
+    );
+    const office = await ensureDefaultLocation();
+    const site = await ClockLocation.findOne({ name: "Elm Street" });
+
+    const walker = new mongoose.Types.ObjectId();
+    const day = new Date(Date.UTC(2026, 8, 29));
+
+    await performClockAction({
+      employeeId: walker,
+      employeeType: "OfficeEmployee",
+      location: office,
+      action: "clockIn",
+      date: day,
+      currentTime: "08:00",
+    });
+    const br = await performClockAction({
+      employeeId: walker,
+      employeeType: "OfficeEmployee",
+      location: site,
+      action: "breakIn",
+      date: day,
+      currentTime: "12:00",
+    });
+    assert.equal(br.success, true, br.message);
+
+    const record = await ClockRecord.findOne({ employeeId: walker, date: day }).lean();
+    assert.equal(record.breaks.length, 1);
+    assert.equal(record.breaks[0].breakIn, "12:00");
+  });
+
+  await check("mid-shift, a tap elsewhere says you are already clocked in", async () => {
+    // Not an error state — it is true, and it is what somebody mid-shift
+    // should be told rather than being given a second open shift.
+    const { performClockAction } = await import(
+      "@/server/clockServer/clockActions"
+    );
+    const office = await ensureDefaultLocation();
+    const site = await ClockLocation.findOne({ name: "Elm Street" });
+
+    const busy = new mongoose.Types.ObjectId();
+    const day = new Date(Date.UTC(2026, 8, 30));
+
+    await performClockAction({
+      employeeId: busy,
+      employeeType: "OfficeEmployee",
+      location: office,
+      action: "clockIn",
+      date: day,
+      currentTime: "09:00",
+    });
+    const again = await performClockAction({
+      employeeId: busy,
+      employeeType: "OfficeEmployee",
+      location: site,
+      action: "clockIn",
+      date: day,
+      currentTime: "13:00",
+    });
+    assert.equal(again.success, false);
+    assert.match(again.message, /already clocked in/i);
+
+    assert.equal(
+      await ClockRecord.countDocuments({ employeeId: busy, date: day }),
+      1,
+      "a second open shift was created",
+    );
+  });
+
+  await check("A FINISHED SHIFT DOES NOT BLOCK A SECOND ONE", async () => {
+    // Clocked out at the office at lunchtime, then genuinely starts again at
+    // a site in the afternoon. Only an OPEN shift elsewhere is adopted, so
+    // this is still two records — which is what per-location reporting needs.
+    const { performClockAction } = await import(
+      "@/server/clockServer/clockActions"
+    );
+    const office = await ensureDefaultLocation();
+    const site = await ClockLocation.findOne({ name: "Elm Street" });
+
+    const doubled = new mongoose.Types.ObjectId();
+    const day = new Date(Date.UTC(2026, 9, 1));
+
+    await performClockAction({
+      employeeId: doubled,
+      employeeType: "OfficeEmployee",
+      location: office,
+      action: "clockIn",
+      date: day,
+      currentTime: "08:00",
+    });
+    await performClockAction({
+      employeeId: doubled,
+      employeeType: "OfficeEmployee",
+      location: office,
+      action: "clockOut",
+      date: day,
+      currentTime: "12:00",
+    });
+
+    const second = await performClockAction({
+      employeeId: doubled,
+      employeeType: "OfficeEmployee",
+      location: site,
+      siteId: site.projectSiteId,
+      action: "clockIn",
+      date: day,
+      currentTime: "13:00",
+    });
+    assert.equal(second.success, true, second.message);
+    assert.equal(
+      await ClockRecord.countDocuments({ employeeId: doubled, date: day }),
+      2,
+      "the afternoon shift was folded into the morning one",
+    );
+  });
+
   /* --------------------------------------------------------- integrity */
 
   await check("two locations in one company cannot share a name", async () => {
