@@ -6,6 +6,7 @@ import { logAuditDirect } from "@/lib/audit";
 import {
   LABEL_PROVIDERS,
   LabelError,
+  canCancel,
   findProvider,
 } from "@/lib/carrierProviders";
 import { openSecret, sealSecret, secretHint, secretsConfigured } from "@/lib/secretBox";
@@ -79,6 +80,7 @@ export async function getCarrierAccounts() {
         // applies to, rather than in a comment nobody opens.
         provisional: Boolean(p.provisional),
         provisionalNote: p.provisionalNote || "",
+        canCancel: canCancel(p.key),
         // Which carriers publish a sandbox. Saying so stops the toggle
         // reading as a promise the others keep — Royal Mail and DPD do not.
         hasTestHost: ["ups", "yodel", "dhl"].includes(p.key),
@@ -465,12 +467,142 @@ export async function buyShipmentLabel({ orderNumber, reference, provider } = {}
 }
 
 /**
- * Forget a label we hold.
+ * Void the postage at the carrier, then forget it here.
  *
- * Does NOT cancel it at the carrier — no adapter here claims to, and saying
- * "voided" about a label that is still live and still charged would be a lie
- * that costs money. This clears our copy so a replacement can be bought, and
- * says plainly that the carrier's side is a separate job.
+ * The order matters and is the whole point: the carrier is asked FIRST, and
+ * the local copy is cleared only once they have confirmed. A cancel that fails
+ * leaves everything exactly as it was — the postage is still live and still
+ * chargeable, and clearing our copy would only mean nobody can find it again
+ * to cancel it properly.
+ *
+ * Both the label and the tracking number go, because both are void. The
+ * shipment itself stays: the parcel still has to get there, so a new label can
+ * be bought against it — which the at-most-once guard allows again precisely
+ * because `labelData` is now absent.
+ */
+export async function cancelShipmentLabel({ orderNumber, reference } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+
+    await connect();
+    const order = await escapeTenant("postage: find the order", () =>
+      TagOrderModel.findOne({ orderNumber }).lean(),
+    );
+    if (!order) return { success: false, message: "Order not found" };
+
+    const shipment = (order.shipments || []).find(
+      (s) => s.reference === reference,
+    );
+    if (!shipment?.labelData) {
+      return { success: false, message: "There is no stored label to cancel" };
+    }
+
+    const spec = findProvider(shipment.labelProvider);
+    if (!spec || !canCancel(shipment.labelProvider)) {
+      return {
+        success: false,
+        message:
+          `${spec?.name || "That carrier"} cannot cancel postage through the ` +
+          "API. Cancel it on their site, then use Discard to clear our copy.",
+      };
+    }
+
+    const found = await credentialsFor(shipment.labelProvider);
+    if (!found) {
+      return {
+        success: false,
+        message: "The account for that carrier is no longer stored",
+      };
+    }
+
+    let outcome;
+    try {
+      outcome = await spec.cancel(
+        {
+          reference: shipment.labelProviderRef,
+          trackingNumber: shipment.trackingRef,
+        },
+        found.credentials,
+      );
+    } catch (error) {
+      const message =
+        error instanceof LabelError
+          ? error.message
+          : "The carrier could not be reached.";
+
+      // Recorded, not just returned — and the label is deliberately left in
+      // place. It is still real postage until the carrier says otherwise.
+      await escapeTenant("postage: record a failed cancel", () =>
+        TagOrderModel.updateOne(
+          { _id: order._id },
+          { $set: { "shipments.$[s].labelError": `Cancel failed: ${message}` } },
+          { arrayFilters: [{ "s.reference": reference }] },
+        ),
+      ).catch(() => {});
+
+      return { success: false, message };
+    }
+
+    await escapeTenant("postage: clear a cancelled label", () =>
+      TagOrderModel.updateOne(
+        { _id: order._id },
+        {
+          $set: {
+            "shipments.$[s].labelData": null,
+            "shipments.$[s].labelFormat": null,
+            "shipments.$[s].labelProvider": null,
+            "shipments.$[s].labelAllocatedAt": null,
+            "shipments.$[s].labelProviderRef": null,
+            // Void too. Leaving it would show the customer a link that
+            // tracks nothing.
+            "shipments.$[s].trackingRef": "",
+            "shipments.$[s].labelError": `Postage cancelled at ${spec.name} on ${new Date()
+              .toISOString()
+              .slice(0, 10)}`,
+          },
+        },
+        { arrayFilters: [{ "s.reference": reference }] },
+      ),
+    );
+
+    await logAuditDirect({
+      action: "TagOrder.postageCancelled",
+      module: "TagOrder",
+      entityId: String(order._id),
+      tenantId: order.tenantId,
+      description:
+        `Postage cancelled at ${spec.name} for ${reference} ` +
+        `(${shipment.trackingRef || "no tracking"})`,
+      actor: auth.user,
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message:
+        `Cancelled at ${spec.name}.` +
+        (outcome?.destroyLabel
+          ? " Destroy any printed copy — it is no longer valid postage."
+          : "") +
+        (outcome?.note ? ` ${outcome.note}` : ""),
+    };
+  } catch (error) {
+    console.log("Error cancelling a label:", error?.message);
+    return { success: false, message: "Could not cancel that label" };
+  }
+}
+
+/**
+ * Forget a label we hold, without touching the carrier.
+ *
+ * Kept alongside cancelShipmentLabel rather than replaced by it, because the
+ * two answer different situations: cancel is "void this postage", discard is
+ * "this is already dealt with, stop showing it to me" — a label cancelled on
+ * the carrier's own site, or one from a carrier whose API cannot cancel.
+ *
+ * It says plainly that it does not cancel anything. Claiming otherwise about
+ * a label that is still live and still charged would be a lie that costs
+ * money.
  */
 export async function discardShipmentLabel({ orderNumber, reference } = {}) {
   try {
@@ -514,9 +646,11 @@ export async function discardShipmentLabel({ orderNumber, reference } = {}) {
 
     return {
       success: true,
-      message:
-        "Discarded here. If that label was already paid for, cancel it with " +
-        "the carrier too — this does not.",
+      message: canCancel(shipment.labelProvider)
+        ? "Discarded here only — that carrier can be cancelled properly with " +
+          "Cancel at carrier, which this did not do."
+        : "Discarded here. If that label was paid for, cancel it with the " +
+          "carrier too — this does not.",
     };
   } catch (error) {
     console.log("Error discarding a label:", error?.message);

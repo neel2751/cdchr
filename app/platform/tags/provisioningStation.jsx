@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   KeyRound,
   Loader2,
+  Ban,
   Package,
   Printer,
   RefreshCw,
@@ -40,6 +41,7 @@ import {
 import { CARRIERS } from "@/data/carriers";
 import {
   buyShipmentLabel,
+  cancelShipmentLabel,
   discardShipmentLabel,
   getCarrierAccounts,
   getShipmentPostage,
@@ -103,6 +105,11 @@ export default function ProvisioningStation() {
   const buyable = (accounts?.providers || []).filter(
     (p) => p.mode === "api" && p.isEnabled,
   );
+  // Which carriers can void postage through their API, as opposed to only
+  // being forgotten here.
+  const cancellable = new Set(
+    (accounts?.providers || []).filter((p) => p.canCancel).map((p) => p.key),
+  );
 
   const run = (promise, onOk) =>
     promise.then((res) => {
@@ -131,6 +138,7 @@ export default function ProvisioningStation() {
         );
       if (kind === "delivered") return run(markShipmentDelivered(args));
       if (kind === "buyLabel") return run(buyShipmentLabel(args));
+      if (kind === "cancelLabel") return run(cancelShipmentLabel(args));
       if (kind === "discardLabel") return run(discardShipmentLabel(args));
       if (kind === "return") return run(recordUnitReturn(args));
       if (kind === "replace") return run(replaceUnit(args));
@@ -486,6 +494,31 @@ export default function ProvisioningStation() {
                               >
                                 Postage
                               </Button>
+                              {cancellable.has(s.labelProvider) ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs"
+                                  disabled={isPending}
+                                  title="Voids the postage at the carrier, then clears our copy"
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        "Cancel this postage at the carrier? The tracking number becomes void and any printed label must be destroyed.",
+                                      )
+                                    )
+                                      return;
+                                    act({
+                                      kind: "cancelLabel",
+                                      orderNumber: order.orderNumber,
+                                      reference: s.reference,
+                                    });
+                                  }}
+                                >
+                                  <Ban className="mr-1 size-3.5" />
+                                  Cancel at carrier
+                                </Button>
+                              ) : null}
                               <Button
                                 size="sm"
                                 variant="ghost"

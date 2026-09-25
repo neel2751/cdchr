@@ -725,6 +725,10 @@ async function main() {
             "shipments.$[s].labelData": "JVBERi0xLjQK",
             "shipments.$[s].labelFormat": "pdf",
             "shipments.$[s].labelAllocatedAt": new Date(),
+            // A real purchase records who sold it and their reference; the
+            // cancel path needs both, so the fixture has to carry them.
+            "shipments.$[s].labelProvider": "royal-mail",
+            "shipments.$[s].labelProviderRef": "99",
           },
         },
         { arrayFilters: [{ "s.reference": `${orderNumber}/1` }] },
@@ -740,18 +744,129 @@ async function main() {
     assert.match(res.message, /already has a label/i);
   });
 
+  await check("A FAILED CANCEL LEAVES THE LABEL ALONE", async () => {
+    // The rule that protects money. The postage is still live and still
+    // chargeable until the carrier says otherwise; clearing our copy would
+    // only mean nobody can find it again to cancel it properly.
+    const { cancelShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ message: "Order already despatched" }),
+    });
+
+    let res;
+    try {
+      res = await cancelShipmentLabel({
+        orderNumber,
+        reference: `${orderNumber}/1`,
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    assert.equal(res.success, false);
+    assert.match(res.message, /already despatched/i);
+
+    const order = await runWithTenant(String(tenantId), () =>
+      TagOrder.findOne({ orderNumber }).lean(),
+    );
+    const shipment = order.shipments.find(
+      (sh) => sh.reference === `${orderNumber}/1`,
+    );
+    assert.ok(shipment.labelData, "a failed cancel cleared the label anyway");
+    assert.ok(shipment.trackingRef, "a failed cancel cleared the tracking");
+    assert.match(shipment.labelError, /Cancel failed/);
+  });
+
+  await check("a successful cancel voids the label and the tracking", async () => {
+    const { cancelShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ deletedOrders: [{ orderIdentifier: 1 }], errors: [] }),
+    });
+
+    let res;
+    try {
+      res = await cancelShipmentLabel({
+        orderNumber,
+        reference: `${orderNumber}/1`,
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    assert.equal(res.success, true, res.message);
+    assert.match(res.message, /destroy any printed copy/i);
+
+    const order = await runWithTenant(String(tenantId), () =>
+      TagOrder.findOne({ orderNumber }).lean(),
+    );
+    const shipment = order.shipments.find(
+      (sh) => sh.reference === `${orderNumber}/1`,
+    );
+    assert.ok(!shipment.labelData, "the label survived a cancel");
+    assert.ok(
+      !shipment.trackingRef,
+      "a void tracking number was left for the customer to click",
+    );
+    assert.match(shipment.labelError, /cancelled at/i);
+  });
+
+  await check("a new label can be bought after a cancel", async () => {
+    // The parcel still has to get there. The at-most-once guard keys on the
+    // stored label, so clearing it is what re-opens the purchase.
+    const { buyShipmentLabel } = await import(
+      "@/server/tagServer/carrierLabels"
+    );
+    const res = await buyShipmentLabel({
+      orderNumber,
+      reference: `${orderNumber}/1`,
+      provider: "royal-mail",
+    });
+    // It gets past the at-most-once guard and fails at the carrier instead,
+    // which is the proof: the refusal is no longer "already has a label".
+    assert.ok(
+      !/already has a label/i.test(res.message),
+      `still blocked by the at-most-once guard: ${res.message}`,
+    );
+  });
+
   await check("discarding says it does not cancel with the carrier", async () => {
     // Saying "voided" about a label that is still live and still charged
     // would be a lie that costs money.
     const { discardShipmentLabel } = await import(
       "@/server/tagServer/carrierLabels"
     );
+    // Put a label back: the cancel above cleared the one this test discards.
+    await runWithTenant(String(tenantId), () =>
+      TagOrder.updateOne(
+        { orderNumber },
+        {
+          $set: {
+            "shipments.$[s].labelData": "JVBERi0xLjQK",
+            "shipments.$[s].labelProvider": "royal-mail",
+            "shipments.$[s].trackingRef": "AB123456789GB",
+          },
+        },
+        { arrayFilters: [{ "s.reference": `${orderNumber}/1` }] },
+      ),
+    );
     const res = await discardShipmentLabel({
       orderNumber,
       reference: `${orderNumber}/1`,
     });
     assert.equal(res.success, true, res.message);
-    assert.match(res.message, /does not/i);
+    assert.match(res.message, /did not do|does not/i);
 
     const order = await runWithTenant(String(tenantId), () =>
       TagOrder.findOne({ orderNumber }).lean(),

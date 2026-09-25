@@ -25,6 +25,7 @@ import {
   API_PROVIDERS,
   LABEL_PROVIDERS,
   LabelError,
+  canCancel,
   findProvider,
 } from "@/lib/carrierProviders";
 
@@ -1142,6 +1143,189 @@ await check("testing DHL creates nothing", async () => {
 await check("DHL is flagged provisional", async () => {
   assert.equal(dhl.provisional, true);
   assert.ok(dhl.provisionalNote?.length > 40);
+});
+
+/* ------------------------------------------------------- cancelling ---- */
+
+await check("every API provider can cancel", () => {
+  // A carrier that can sell postage and not void it leaves money on the
+  // table every time a shipment changes.
+  for (const p of API_PROVIDERS) {
+    assert.equal(canCancel(p.key), true, `${p.key} cannot cancel`);
+  }
+  assert.equal(canCancel("manual"), false, "manual has nothing to cancel");
+  assert.equal(canCancel("nope"), false);
+});
+
+await check("Royal Mail deletes by order identifier", async () => {
+  let seen = null;
+  const res = await withFetch(
+    async (url, options) => {
+      seen = { url, method: options.method };
+      return jsonResponse(200, {
+        deletedOrders: [{ orderIdentifier: 99 }],
+        errors: [],
+      });
+    },
+    () => rm.cancel({ reference: "99", trackingNumber: "AB1" }, { apiKey: "k" }),
+  );
+  assert.equal(seen.method, "DELETE");
+  assert.match(seen.url, /\/orders\/99$/);
+  assert.equal(res.destroyLabel, true);
+  assert.match(res.note, /Revenue Protection/);
+});
+
+await check("ROYAL MAIL'S 200 CAN STILL MEAN NOT DELETED", async () => {
+  // deletedOrders and errors sit side by side. Treating the status alone as
+  // success would clear our copy of a label that is still live.
+  await assert.rejects(
+    () =>
+      withFetch(
+        async () =>
+          jsonResponse(200, {
+            deletedOrders: [],
+            errors: [{ code: "E1", message: "Order already despatched" }],
+          }),
+        () => rm.cancel({ reference: "99" }, { apiKey: "k" }),
+      ),
+    /already despatched/,
+  );
+
+  await assert.rejects(
+    () =>
+      withFetch(
+        async () => jsonResponse(200, { deletedOrders: [], errors: [] }),
+        () => rm.cancel({ reference: "99" }, { apiKey: "k" }),
+      ),
+    /nothing deleted/i,
+  );
+});
+
+await check("a Royal Mail DELETE with no body is still a success", async () => {
+  const res = await withFetch(
+    async () => ({
+      ok: true,
+      status: 204,
+      json: async () => {
+        throw new Error("no body");
+      },
+    }),
+    () => rm.cancel({ reference: "99" }, { apiKey: "k" }),
+  );
+  assert.equal(res.destroyLabel, true);
+});
+
+await check("DPD logs in before deleting the shipment", async () => {
+  const impl = dpdFetch();
+  impl.calls.length = 0;
+  const res = await withFetch(
+    async (url, options) => {
+      impl.calls.push({ url, options });
+      if (url.includes("action=login")) {
+        return jsonResponse(200, { data: { geoSession: "S" } });
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    () => dpd.cancel({ reference: "4242" }, dpdCreds),
+  );
+  assert.equal(res.destroyLabel, true);
+  assert.equal(impl.calls.length, 2);
+  assert.equal(impl.calls[1].options.method, "DELETE");
+  assert.match(impl.calls[1].url, /\/shipping\/shipment\/4242$/);
+  assert.equal(impl.calls[1].options.headers.GEOSession, "S");
+});
+
+await check("UPS voids by tracking number, and reads the status", async () => {
+  let seen = null;
+  const res = await withFetch(
+    async (url, options) => {
+      if (url.includes("/oauth/token")) {
+        return jsonResponse(200, { access_token: "T" });
+      }
+      seen = { url, method: options.method };
+      return jsonResponse(200, {
+        VoidShipmentResponse: {
+          SummaryResult: { Status: { Code: "1", Description: "Voided" } },
+        },
+      });
+    },
+    () => ups.cancel({ trackingNumber: "1Z999" }, upsCreds),
+  );
+  assert.equal(seen.method, "DELETE");
+  assert.match(seen.url, /\/void\/cancel\/1Z999$/);
+  assert.equal(res.destroyLabel, true);
+});
+
+await check("A UPS 200 THAT DID NOT VOID IS A FAILURE", async () => {
+  // The outcome is in SummaryResult.Status, not in the status code.
+  await assert.rejects(
+    () =>
+      withFetch(
+        async (url) =>
+          url.includes("/oauth/token")
+            ? jsonResponse(200, { access_token: "T" })
+            : jsonResponse(200, {
+                VoidShipmentResponse: {
+                  SummaryResult: {
+                    Status: { Code: "0", Description: "Not Voided" },
+                  },
+                },
+              }),
+        () => ups.cancel({ trackingNumber: "1Z999" }, upsCreds),
+      ),
+    /Not Voided/,
+  );
+});
+
+await check("Yodel and DHL delete by their own identifier", async () => {
+  let yodelSeen = null;
+  await withFetch(
+    async (url, options) => {
+      yodelSeen = { url, method: options.method };
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    () => yodel.cancel({ reference: "ORD-77" }, yodelCreds),
+  );
+  assert.equal(yodelSeen.method, "DELETE");
+  assert.match(yodelSeen.url, /\/orders\/ORD-77$/);
+
+  let dhlSeen = null;
+  await withFetch(
+    async (url, options) => {
+      dhlSeen = { url, method: options.method };
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    () => dhl.cancel({ trackingNumber: "1234567890" }, dhlCreds),
+  );
+  assert.equal(dhlSeen.method, "DELETE");
+  assert.match(dhlSeen.url, /\/shipments\/1234567890$/);
+});
+
+await check("DHL explains that collected parcels cannot be cancelled", async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        async () => jsonResponse(409, { detail: "Shipment already collected" }),
+        () => dhl.cancel({ trackingNumber: "123" }, dhlCreds),
+      ),
+    /not yet collected/,
+  );
+});
+
+await check("cancelling with nothing to identify it is refused", async () => {
+  // Rather than sending "undefined" down the URL and deleting whatever that
+  // happens to match.
+  let called = false;
+  const watch = async () => {
+    called = true;
+    return jsonResponse(200, {});
+  };
+  await assert.rejects(() => withFetch(watch, () => rm.cancel({}, { apiKey: "k" })));
+  await assert.rejects(() => withFetch(watch, () => dpd.cancel({}, dpdCreds)));
+  await assert.rejects(() => withFetch(watch, () => ups.cancel({}, upsCreds)));
+  await assert.rejects(() => withFetch(watch, () => yodel.cancel({}, yodelCreds)));
+  await assert.rejects(() => withFetch(watch, () => dhl.cancel({}, dhlCreds)));
+  assert.equal(called, false, "a cancel went out with no identifier");
 });
 
 await check("EVRI IS ABSENT ON PURPOSE", async () => {

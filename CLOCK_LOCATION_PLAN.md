@@ -761,13 +761,29 @@ re-entering carrier tokens as well as re-provisioning hardware). Only a four-cha
 hint ever reaches a screen.
 
 A label is bought **at most once per shipment**, guarded on the stored label still being
-absent so two operators cannot both buy. Discarding a stored label says plainly that it
-does **not** cancel it at the carrier — claiming otherwise about a label that is still
-live and still charged would be a lie that costs money.
+absent so two operators cannot both buy.
+
+**Cancelling** voids the postage at the carrier and then clears our copy — in that
+order, and the order is the point: the carrier is asked first and nothing local changes
+until they confirm. A cancel that fails leaves the label and the tracking number exactly
+as they were, because the postage is still live and still chargeable, and clearing our
+copy would only mean nobody can find it again to cancel it properly. On success both go,
+since both are void, and the shipment stays so a replacement can be bought.
+
+Every API provider can cancel: Royal Mail `DELETE /orders/{id}`, DPD
+`DELETE /shipping/shipment/{id}`, UPS `DELETE /api/shipments/{v}/void/cancel/{tracking}`,
+Yodel and DHL by delete on their own resource. Two of those report failure inside a 200
+and are checked accordingly — Royal Mail returns `deletedOrders` and `errors` side by
+side, and UPS puts the outcome in `SummaryResult.Status` rather than the status code.
+Royal Mail's own warning is passed on to whoever pressed the button: a cancelled label
+must be destroyed, cancellations are shared with their Revenue Protection team, and a
+cancelled label found in their network is charged for with a handling fee.
+
+**Discard** survives alongside it, for the different situation it answers: a label
+already cancelled on the carrier's own site, or one from a carrier whose API cannot. It
+still says plainly that it cancels nothing.
 
 **Still not built:**
-
-- **Cancelling postage at the carrier.** Discard removes our copy only.
 - **Evri.** Deliberately not written, and this is the reason rather than a to-do: Evri
   publishes no developer portal, no API reference and no machine-readable specification.
   Credentials come from an account manager, the endpoint and OAuth shapes are not
