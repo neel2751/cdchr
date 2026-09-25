@@ -705,6 +705,20 @@ it is the only one where the environment toggle does anything — and given that
 here has been run for real, it defaults to test, and a label bought there says on the
 screen that it is not real postage.
 
+**Yodel** is the one adapter marked `provisional`, and the split is worth stating:
+verified from their public portal are the sandbox base `https://api-sb.yodel.co.uk`,
+the path `/shipping/v1.0/orders`, and the create → confirm → download-label flow. Not
+verified, because the reference sits behind portal registration and the product list
+renders empty to anonymous visitors, are the auth scheme, the HTTP method per
+operation, every field name, and the production host.
+
+So the unknowns are **configured, not invented**: the API key header name and the
+production base are fields on the account, and the request body is a starting point.
+What makes that defensible where it was not for Evri is that Yodel publishes a working
+sandbox and this adapter passes their error text through verbatim — a first sandbox call
+names the field that is wrong, and the fix is one file. `provisional: true` puts that
+caveat on the account screen rather than leaving it in a comment.
+
 **DPD UK** takes three: `POST /user/?action=login` (Basic auth, returns
 `data.geoSession`), `POST /shipping/shipment` with `GEOClient`/`GEOSession`, then
 `GET /shipping/shipment/{id}/label/` with `Accept: application/pdf`. The session is
@@ -752,12 +766,6 @@ live and still charged would be a lie that costs money.
   add it: get credentials and the sandbox pack from an Evri account manager, build
   against their OAuth flow, and put test labels through their approval before go-live —
   the contract is ready, the information is what is missing.
-- **Yodel.** Unlike Evri, Yodel *does* publish a developer portal with an Orders API
-  that creates orders and downloads labels as PDF — so an adapter is writable, but not
-  from the outside: the endpoint paths, auth scheme and field names sit behind the
-  portal and were not read. Writing it from the shape alone would be the same guesswork
-  refused for Evri. Sign in at `developer.yodel.co.uk`, hand over the Orders API
-  reference, and it is a short job.
 - **Other carriers.** DHL and the rest are `manual` until somebody writes their adapter;
   the contract is there for it.
 - **Dimensions**, and an address validated against a postcode lookup rather than typed.

@@ -162,6 +162,12 @@ export default function CarrierAccounts() {
                 </div>
               </div>
 
+              {p.provisional ? (
+                <p className="rounded border border-orange-300 bg-orange-50 p-2 text-[11px] text-orange-900">
+                  <strong>Provisional adapter.</strong> {p.provisionalNote}
+                </p>
+              ) : null}
+
               {p.needs.map((field) => (
                 <div key={field.name} className="space-y-1">
                   <Label htmlFor={`${p.key}-${field.name}`} className="text-xs">
@@ -174,7 +180,12 @@ export default function CarrierAccounts() {
                   </Label>
                   <Input
                     id={`${p.key}-${field.name}`}
-                    type="password"
+                    // A header name or a base URL is not a secret, and masking
+                    // it makes it impossible to check for a typo — which is
+                    // exactly what these fields exist to let somebody fix.
+                    type={
+                      /header|Base$/i.test(field.name) ? "text" : "password"
+                    }
                     autoComplete="off"
                     placeholder={
                       p.configured ? "Leave blank to keep the stored key" : ""

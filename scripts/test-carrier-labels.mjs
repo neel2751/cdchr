@@ -744,15 +744,170 @@ await check("testing UPS only fetches a token", async () => {
   assert.equal(impl.calls.length, 1, "the test shipped something");
 });
 
-await check("YODEL IS ABSENT UNTIL SOMEBODY READS THEIR PORTAL", async () => {
-  // Yodel does publish a developer portal with an Orders API that can download
-  // labels — unlike Evri — but the endpoint paths, auth scheme and field names
-  // behind it were not available to read here. Writing it from the shape alone
-  // would be the same guesswork refused for Evri.
-  assert.equal(
-    findProvider("yodel"),
-    null,
-    "a Yodel adapter appeared — check it was written from the real portal docs",
+/* ---------------------------------------------------- the Yodel adapter */
+
+const yodel = findProvider("yodel");
+
+const yodelCreds = {
+  apiKey: "ykey",
+  authHeader: "X-Apikey",
+  accountNumber: "Y1234",
+  serviceCode: "STD",
+  environment: "test",
+};
+
+function yodelFetch({ create, confirm, label } = {}) {
+  const calls = [];
+  const impl = async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith("/confirm")) {
+      return confirm || jsonResponse(200, { trackingNumber: "JD0002222333" });
+    }
+    if (url.includes("/label")) return label || pdfBytes();
+    return create || jsonResponse(200, { orderId: "ORD-77" });
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+await check("Yodel creates, confirms, then fetches the label", async () => {
+  const impl = yodelFetch();
+  const res = await withFetch(impl, () => yodel.buy(dpdCtx, yodelCreds));
+
+  assert.equal(res.trackingNumber, "JD0002222333");
+  assert.equal(res.labelFormat, "pdf");
+  assert.equal(res.reference, "ORD-77");
+  assert.equal(impl.calls.length, 3, "expected create, confirm, label");
+
+  assert.match(impl.calls[0].url, /\/shipping\/v1\.0\/orders$/);
+  assert.match(impl.calls[1].url, /\/orders\/ORD-77\/confirm$/);
+  assert.match(impl.calls[2].url, /\/orders\/ORD-77\/label\?format=pdf$/);
+});
+
+await check("the sandbox is used unless a production base is stored", async () => {
+  // Yodel does not publish a live host, so there is nothing to guess at. A
+  // guessed production hostname either does not resolve or is somebody else's.
+  const sandbox = yodelFetch();
+  await withFetch(sandbox, () =>
+    yodel.buy(dpdCtx, { ...yodelCreds, environment: "production" }),
+  );
+  assert.ok(
+    sandbox.calls.every((c) => c.url.startsWith("https://api-sb.yodel.co.uk")),
+    "it invented a production host",
+  );
+
+  const live = yodelFetch();
+  await withFetch(live, () =>
+    yodel.buy(dpdCtx, {
+      ...yodelCreds,
+      environment: "production",
+      productionBase: "https://api.yodel.example/",
+    }),
+  );
+  assert.ok(
+    live.calls.every((c) => c.url.startsWith("https://api.yodel.example/shipping")),
+    "a stored production base was ignored, or the trailing slash doubled",
+  );
+});
+
+await check("the API key header name is configurable", async () => {
+  // Which header Yodel wants is not published. Hard-coding a guess would make
+  // a wrong one unfixable without a deploy.
+  const impl = yodelFetch();
+  await withFetch(impl, () =>
+    yodel.buy(dpdCtx, { ...yodelCreds, authHeader: "apikey" }),
+  );
+  assert.equal(impl.calls[0].options.headers.apikey, "ykey");
+  assert.equal(impl.calls[0].options.headers["X-Apikey"], undefined);
+
+  const dflt = yodelFetch();
+  await withFetch(dflt, () =>
+    yodel.buy(dpdCtx, { ...yodelCreds, authHeader: "" }),
+  );
+  assert.equal(dflt.calls[0].options.headers["X-Apikey"], "ykey");
+});
+
+await check("YODEL'S OWN ERROR IS PASSED THROUGH VERBATIM", async () => {
+  // The whole reason this adapter is worth shipping provisional: the body
+  // shape is inferred, and Yodel's message names the field that is wrong.
+  for (const payload of [
+    { message: "deliveryAddress.town is required" },
+    { errors: [{ message: "deliveryAddress.town is required" }] },
+    { fault: { faultstring: "deliveryAddress.town is required" } },
+  ]) {
+    await assert.rejects(
+      () =>
+        withFetch(yodelFetch({ create: jsonResponse(400, payload) }), () =>
+          yodel.buy(dpdCtx, yodelCreds),
+        ),
+      /deliveryAddress\.town is required/,
+      `the message was lost from ${JSON.stringify(payload)}`,
+    );
+  }
+});
+
+await check("a rejected key names the header as a suspect", async () => {
+  // A 401 here is as likely to be the wrong header name as the wrong key,
+  // because the header is not published. Saying so saves an hour.
+  await assert.rejects(
+    () =>
+      withFetch(yodelFetch({ create: jsonResponse(401, {}) }), () =>
+        yodel.buy(dpdCtx, yodelCreds),
+      ),
+    /header name/,
+  );
+});
+
+await check("an unconfirmed order is not treated as shipped", async () => {
+  // A draft has no label and was never collected. It exists at Yodel, so the
+  // message sends somebody there rather than implying nothing happened.
+  await assert.rejects(
+    () =>
+      withFetch(
+        yodelFetch({ confirm: jsonResponse(500, {}) }),
+        () => yodel.buy(dpdCtx, yodelCreds),
+      ),
+    /ORD-77.*Yodel/s,
+  );
+});
+
+await check("an unrecognised order id fails loudly", async () => {
+  // Rather than carrying `undefined` into the next URL and 404ing somewhere
+  // confusing.
+  await assert.rejects(
+    () =>
+      withFetch(yodelFetch({ create: jsonResponse(200, { weird: 1 }) }), () =>
+        yodel.buy(dpdCtx, yodelCreds),
+      ),
+    /order id this adapter recognises/,
+  );
+});
+
+await check("a label with no tracking number is refused", async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        yodelFetch({ confirm: jsonResponse(200, {}), create: jsonResponse(200, { orderId: "ORD-77" }) }),
+        () => yodel.buy(dpdCtx, yodelCreds),
+      ),
+    /no tracking number/,
+  );
+});
+
+await check("testing Yodel creates nothing", async () => {
+  const impl = yodelFetch();
+  await withFetch(impl, () => yodel.test(yodelCreds));
+  assert.equal(impl.calls.length, 1);
+  assert.equal(impl.calls[0].options.method, "GET", "the test created an order");
+});
+
+await check("Yodel is flagged provisional", async () => {
+  // Half verified, half inferred. That belongs on the screen, not only here.
+  assert.equal(yodel.provisional, true);
+  assert.ok(yodel.provisionalNote?.length > 40, "no note to show an operator");
+  assert.ok(
+    LABEL_PROVIDERS.filter((p) => p.mode === "api" && !p.provisional).length >= 3,
+    "the verified adapters should not be flagged provisional",
   );
 });
 

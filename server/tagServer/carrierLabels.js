@@ -75,9 +75,13 @@ export async function getCarrierAccounts() {
         hints: asObject(account?.hints),
         configured: Object.keys(asObject(account?.credentials)).length > 0,
         environment: account?.environment || "test",
-        // Only UPS publishes a separate test host. Saying so on the screen
-        // stops the toggle reading as a promise the other carriers keep.
-        hasTestHost: p.key === "ups",
+        // Carried to the screen so the caveat sits next to the fields it
+        // applies to, rather than in a comment nobody opens.
+        provisional: Boolean(p.provisional),
+        provisionalNote: p.provisionalNote || "",
+        // UPS and Yodel both publish a sandbox. Saying which do stops the
+        // toggle reading as a promise the other carriers keep.
+        hasTestHost: p.key === "ups" || p.key === "yodel",
         isEnabled: Boolean(account?.isEnabled),
         lastTestedAt: account?.lastTestedAt || null,
         lastTestOk: account?.lastTestOk ?? null,
