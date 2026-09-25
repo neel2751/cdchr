@@ -13,7 +13,7 @@ const TodayCard = ({ title, value, supportText }) => {
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription className="sm:block hidden">
-          Today's attendance total{" "}
+          Today&apos;s attendance total{" "}
           {title.toLowerCase().split(" ").join("") === "totalhours"
             ? "Hours"
             : "Pays"}{" "}
