@@ -43,7 +43,8 @@
     "site:backfill-delete-flag": "node scripts/backfill-site-delete-flag.mjs",
     "tag:test:delivery": "node --import ./scripts/lib/alias-loader.mjs scripts/test-tag-delivery.mjs",
     "tag:test:postage": "node --import ./scripts/lib/alias-loader.mjs scripts/test-carrier-labels.mjs",
-    "tag:test:postcode": "node --import ./scripts/lib/alias-loader.mjs scripts/test-postcode.mjs"
+    "tag:test:postcode": "node --import ./scripts/lib/alias-loader.mjs scripts/test-postcode.mjs",
+    "tag:test:address": "node --import ./scripts/lib/alias-loader.mjs scripts/test-address-lookup.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",

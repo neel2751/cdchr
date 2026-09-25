@@ -813,10 +813,37 @@ apart: run against the live service, **DN55 1PT, W1A 0AX and PL1 1AA all pass th
 check and all 404**. They are the examples the government's own validation documentation
 uses, and they are not real postcodes.
 
+**PAF address lookup** completes the pair. postcodes.io knows a postcode exists;
+PAF — Royal Mail's licensed address file — knows which houses are on it. There is no
+free source, so `lib/addressProviders.js` holds one adapter per licensed reseller:
+**Ideal Postcodes** (`GET /v1/postcodes/{postcode}?api_key=…`, verified live as far as a
+key allows — the base URL, the parameter name, the `{code, message, result}` wrapper and
+`4010` for a bad key; the success body is from their docs) and **getAddress.io**
+(`GET /find/{postcode}?api-key=…&expand=true`, from documentation only, since their
+endpoint refuses an unkeyed request).
+
+What makes this different from every other integration here: **the key is ours, the
+invoice is ours, and the people pressing the button are customers.** So the guards are
+about cost rather than correctness —
+
+- a malformed postcode never reaches the provider; it cannot have an answer, and asking
+  costs the same as asking a real question;
+- a per-company daily ceiling, because one customer holding down a button must not run
+  up our bill;
+- identical lookups inside ten minutes are answered from memory, so a double click is
+  one charge;
+- only one licence may be enabled at a time — two would bill twice for one question;
+- and the feature **disappears** when no licence is on. The order form goes back to a
+  typed address with the free postcodes.io warning, because a licensed extra must never
+  become something you cannot order without.
+
+PAF licences restrict retaining address data, so lookups are held for minutes in memory
+and the only address written to the database is the one the customer actually picks —
+their own address, on their own order. Anyone enabling this should read their own
+licence rather than trust that sentence.
+
 **Still not built:**
 
-- **Postcode lookup to a full address (PAF).** Knowing a postcode is real is not the
-  same as knowing which houses are on it. That needs a licensed provider and a key.
 - **Evri.** Deliberately not written, and this is the reason rather than a to-do: Evri
   publishes no developer portal, no API reference and no machine-readable specification.
   Credentials come from an account manager, the endpoint and OAuth shapes are not

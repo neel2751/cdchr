@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getServerSideProps } from "@/server/session/session";
+import AddressAccounts from "./addressAccounts";
 import CarrierAccounts from "./carrierAccounts";
 import DispatchSettings from "./dispatchSettings";
 import ProvisioningStation from "./provisioningStation";
@@ -28,6 +29,7 @@ export default async function TagProvisioningPage() {
     <main className="mx-auto w-full max-w-5xl space-y-4 px-4 py-6">
       <DispatchSettings />
       <CarrierAccounts />
+      <AddressAccounts />
       <ProvisioningStation />
     </main>
   );

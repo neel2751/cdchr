@@ -613,6 +613,153 @@ async function main() {
     assert.match(res.message, /unauthor/i);
   });
 
+  /* ------------------------------------------- PAF lookup, which costs us */
+
+  await check("a malformed postcode never costs a lookup", async () => {
+    // The whole guard: PAF is billed per call, the key is ours, and the
+    // person pressing the button works for somebody else. A postcode that
+    // cannot have an answer must not be asked about.
+    as("superAdmin", "superAdmin");
+    const { findAddresses, saveAddressAccount } = await import(
+      "@/server/addressServer/paf"
+    );
+
+    // Configure and enable a licence, through the real action.
+    actAs({ _id: String(ids.superAdmin), role: "platformAdmin", tenantId: String(tenantId) });
+    const saved = await saveAddressAccount({
+      provider: "ideal-postcodes",
+      credentials: { apiKey: "test-key" },
+      isEnabled: true,
+    });
+    assert.equal(saved.success, true, saved.message);
+
+    as("superAdmin", "superAdmin");
+    let called = false;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      called = true;
+      return { ok: true, status: 200, json: async () => ({ code: 2000, result: [] }) };
+    };
+    try {
+      const res = await withTenant(() =>
+        findAddresses({ postcode: "NOT A POSTCODE" }),
+      );
+      assert.equal(res.success, false);
+      assert.match(res.message, /not a valid UK postcode/i);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(called, false, "a billable lookup went out for rubbish");
+  });
+
+  await check("only someone who can order may look up", async () => {
+    // Not platform-only — the point is that a customer uses our licence —
+    // but not open either.
+    as("siteEmployee", "employee");
+    const { findAddresses } = await import("@/server/addressServer/paf");
+    const res = await withTenant(() =>
+      findAddresses({ postcode: "SW1A 1AA" }),
+    );
+    assert.equal(res.success, false);
+    assert.match(res.message, /not authorized/i);
+  });
+
+  await check("the same postcode twice is one charge", async () => {
+    // A double click should not be two invoices.
+    as("superAdmin", "superAdmin");
+    const { findAddresses } = await import("@/server/addressServer/paf");
+
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      calls++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          code: 2000,
+          result: [
+            { line_1: "10 Downing Street", post_town: "LONDON", postcode: "SW1A 2AA" },
+          ],
+        }),
+      };
+    };
+    try {
+      const first = await withTenant(() =>
+        findAddresses({ postcode: "SW1A 2AA" }),
+      );
+      assert.equal(first.success, true, first.message);
+      assert.equal(JSON.parse(first.data).cached, false);
+
+      const second = await withTenant(() =>
+        findAddresses({ postcode: "sw1a2aa" }),
+      );
+      assert.equal(JSON.parse(second.data).cached, true, "it asked twice");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.equal(calls, 1, `${calls} billable calls for one postcode`);
+  });
+
+  await check("no licence means the form falls back, not breaks", async () => {
+    // A licensed extra must never become something you cannot order without.
+    actAs({ _id: String(ids.superAdmin), role: "platformAdmin", tenantId: String(tenantId) });
+    const { saveAddressAccount, addressLookupAvailable, findAddresses } =
+      await import("@/server/addressServer/paf");
+    await saveAddressAccount({ provider: "ideal-postcodes", isEnabled: false });
+
+    as("superAdmin", "superAdmin");
+    const available = JSON.parse(
+      (await withTenant(() => addressLookupAvailable())).data,
+    );
+    assert.equal(available.available, false);
+
+    const res = await withTenant(() =>
+      findAddresses({ postcode: "EC1A 1BB" }),
+    );
+    assert.equal(res.success, false);
+    assert.match(res.message, /type the address instead/i);
+  });
+
+  await check("a stored PAF key never comes back out", async () => {
+    actAs({ _id: String(ids.superAdmin), role: "platformAdmin", tenantId: String(tenantId) });
+    const { getAddressAccounts } = await import("@/server/addressServer/paf");
+    const payload = JSON.parse((await getAddressAccounts()).data);
+    const serialised = JSON.stringify(payload);
+
+    assert.ok(!serialised.includes("test-key"), "a plaintext key reached the screen");
+    assert.ok(
+      !/[A-Za-z0-9+/]{16,}={0,2}:[A-Za-z0-9+/]{16,}/.test(serialised),
+      "a sealed key reached the screen",
+    );
+    const ideal = payload.providers.find((p) => p.key === "ideal-postcodes");
+    assert.equal(ideal.hints.apiKey, "····-key");
+  });
+
+  await check("enabling one licence disables the other", async () => {
+    // Two enabled providers would bill us twice for the same question and
+    // which one answered would be a coin toss.
+    actAs({ _id: String(ids.superAdmin), role: "platformAdmin", tenantId: String(tenantId) });
+    const { saveAddressAccount, getAddressAccounts } = await import(
+      "@/server/addressServer/paf"
+    );
+    await saveAddressAccount({
+      provider: "ideal-postcodes",
+      credentials: { apiKey: "one" },
+      isEnabled: true,
+    });
+    await saveAddressAccount({
+      provider: "getaddress-io",
+      credentials: { apiKey: "two" },
+      isEnabled: true,
+    });
+
+    const payload = JSON.parse((await getAddressAccounts()).data);
+    const enabled = payload.providers.filter((p) => p.isEnabled);
+    assert.equal(enabled.length, 1, "two licences were live at once");
+    assert.equal(enabled[0].key, "getaddress-io");
+  });
+
   await mongoose.connection.db.dropDatabase();
   await mongoose.disconnect();
 

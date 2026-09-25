@@ -30,6 +30,10 @@ import { markShipmentDelivered } from "@/server/tagServer/provisioning";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { lookupPostcode } from "@/server/addressServer/postcode";
+import {
+  addressLookupAvailable,
+  findAddresses,
+} from "@/server/addressServer/paf";
 
 /**
  * Ordering NFC tags.
@@ -92,6 +96,53 @@ export default function TagOrderSettings() {
   // rather than on every keystroke: a half-typed postcode is not wrong yet,
   // and saying so while somebody is still typing is just noise.
   const [postcodeCheck, setPostcodeCheck] = React.useState(null);
+
+  // Address lookup is a licensed extra. The button only appears when we have
+  // a licence switched on; without one the form is exactly what it was, and
+  // the address is typed.
+  const { data: lookupState } = useFetchSelectQuery({
+    queryKey: ["addressLookupAvailable"],
+    fetchFn: addressLookupAvailable,
+  });
+  const canLookUp = Boolean(lookupState?.available);
+
+  const [found, setFound] = React.useState(null);
+  const [finding, setFinding] = React.useState(false);
+
+  // Every call is billable, so this is a button and never a keystroke.
+  const findAtPostcode = async () => {
+    setFinding(true);
+    setFound(null);
+    try {
+      const res = await findAddresses({ postcode: shipTo.postcode });
+      if (!res?.success) {
+        toast.error(res?.message || "Could not look that postcode up");
+        return;
+      }
+      const { addresses } = JSON.parse(res.data);
+      if (!addresses.length) {
+        toast.message("No addresses found on that postcode — type it in.");
+        return;
+      }
+      setFound(addresses);
+    } catch {
+      toast.error("Could not look that postcode up");
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  const chooseAddress = (picked) => {
+    setShipTo((s) => ({
+      ...s,
+      line1: picked.line1 || "",
+      line2: picked.line2 || "",
+      city: picked.city || "",
+      postcode: picked.postcode || s.postcode,
+    }));
+    setFound(null);
+    setPostcodeCheck(null);
+  };
   const checkPostcode = async () => {
     if (!shipTo.postcode.trim()) {
       setPostcodeCheck(null);
@@ -254,13 +305,29 @@ export default function TagOrderSettings() {
                   value={shipTo.city}
                   onChange={setPart("city")}
                 />
-                <Input
-                  placeholder="Postcode"
-                  value={shipTo.postcode}
-                  onChange={setPart("postcode")}
-                  onBlur={checkPostcode}
-                  aria-invalid={!postcodeUsable}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Postcode"
+                    value={shipTo.postcode}
+                    onChange={setPart("postcode")}
+                    onBlur={checkPostcode}
+                    aria-invalid={!postcodeUsable}
+                  />
+                  {canLookUp ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={finding || !postcodeUsable || !shipTo.postcode.trim()}
+                      onClick={findAtPostcode}
+                    >
+                      {finding ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        "Find"
+                      )}
+                    </Button>
+                  ) : null}
+                </div>
                 <Input
                   placeholder="Country code (GB)"
                   maxLength={2}
@@ -268,6 +335,26 @@ export default function TagOrderSettings() {
                   onChange={setPart("countryCode")}
                 />
               </div>
+
+              {found?.length ? (
+                <div className="space-y-1 rounded-md border bg-neutral-50 p-2">
+                  <p className="text-xs font-medium">
+                    {found.length} address(es) — pick one
+                  </p>
+                  <div className="max-h-44 overflow-y-auto">
+                    {found.map((a, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-white"
+                        onClick={() => chooseAddress(a)}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               {!postcodeUsable && shipTo.postcode.trim() ? (
                 <p className="text-xs text-red-600">
