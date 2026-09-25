@@ -31,7 +31,7 @@ export default function SettingsTab() {
           href="/admin/clockSettings"
           className="inline-flex items-center gap-0.5 text-indigo-600 underline"
         >
-          Clock In Settings <ArrowUpRight className="size-3" />
+          Attendance Settings <ArrowUpRight className="size-3" />
         </Link>
         , alongside the attendance rules that use the same figure.
       </p>

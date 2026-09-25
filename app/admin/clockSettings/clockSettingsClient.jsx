@@ -79,7 +79,7 @@ export default function ClockSettingsClient() {
   return (
     <Tabs defaultValue="rules" className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Clock In Settings</h1>
+        <h1 className="text-xl font-semibold">Attendance Settings</h1>
         <p className="text-sm text-muted-foreground">
           Rules, places, tags and reports for clocking in and out. Leave rules
           live under Leave Management.

@@ -55,10 +55,20 @@ export const MENU = [
   // at, the tags they scan with, and the reports. These cards used to sit under
   // Leave Management -> Settings, which is where they ended up one at a time
   // rather than where anybody would look for them.
+  //
+  // SUPER ADMIN ONLY, and not as caution — as honesty. Every write behind these
+  // cards already refuses anybody else: createClockLocation, setDefaultLocation,
+  // updateWorkSettings, the tag actions and the ordering actions all check for
+  // super admin themselves. Showing the page to an admin would show them
+  // settings whose save button answers "Not authorized", which is worse than
+  // not showing it at all.
+  //
+  // Named to match Company Settings and Email Settings, which is the family it
+  // belongs to.
   {
-    name: "Clock In Settings",
+    name: "Attendance Settings",
     path: "/admin/clockSettings",
-    role: ["superAdmin", "admin"],
+    role: ["superAdmin"],
     icon: "ScanQrCode",
   },
   // Same gap the Expenses entry below describes: the page, the actions and the
