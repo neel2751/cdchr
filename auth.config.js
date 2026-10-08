@@ -79,6 +79,12 @@ export const authConfig = {
         // be able to tell "false" from "not included".
         session.user.requiresTwoFactor = token.requiresTwoFactor ?? false;
         session.user.mustSetup2FA = token.mustSetup2FA ?? false;
+        // Set by an admin reset; cleared when the person sets their own.
+        session.user.mustChangePassword = token.mustChangePassword ?? false;
+        // When this session was issued, in seconds. proxy.js compares it with
+        // the account's `sessionsValidFrom` to decide whether a password reset
+        // has since invalidated it — the edge has no other way to know.
+        session.user.issuedAt = token.iat ?? null;
       }
       return session;
     },

@@ -8,6 +8,7 @@ import {
   hasRecentTwoFactorVerification,
 } from "@/server/2FAServer/TwoAuthserver";
 import { LoginData, storeSession } from "@/server/authServer/authServer";
+import { passwordSecurityState } from "@/server/authServer/passwordSecurity";
 import { assertCanSwitchTenant } from "@/server/tenantServer/membershipServer";
 import { activeSupportSession } from "@/server/tenantServer/supportServer";
 import {
@@ -155,6 +156,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.impersonation = null;
           token.tenantId = null;
         }
+      }
+
+      // A password reset can end every session and/or demand a new password.
+      // Both are read from the database on each call rather than trusted from
+      // the token: the token was minted before the reset happened, so it is the
+      // one thing that cannot know about it.
+      //
+      // Checked before the `trigger` early-return below, which only runs for
+      // explicit session updates — an ended session has to end on the very next
+      // request, not whenever the browser next happens to ask.
+      if (token?.id) {
+        const state = await passwordSecurityState(token.id);
+
+        // `iat` is seconds; sessionsValidFrom is a Date. A token minted before
+        // the cut-off is refused outright, which is what signs every device
+        // out — returning null here drops the session.
+        if (
+          state?.sessionsValidFrom &&
+          token.iat &&
+          token.iat * 1000 < new Date(state.sessionsValidFrom).getTime()
+        ) {
+          return null;
+        }
+
+        token.mustChangePassword = state?.mustChangePassword === true;
       }
 
       if (trigger !== "update" || !token?.id) return token;

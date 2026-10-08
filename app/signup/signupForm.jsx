@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { passwordScore, STRENGTH } from "@/lib/passwordStrength";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -47,24 +48,6 @@ function slugify(value) {
     .slice(0, 63);
 }
 
-/** Rough password strength, 0-4. Guidance for the person, never a gate. */
-function passwordScore(password) {
-  if (!password) return 0;
-  let score = 0;
-  if (password.length >= MIN_PASSWORD_LENGTH) score += 1;
-  if (password.length >= 12) score += 1;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
-  if (/\d/.test(password) && /[^A-Za-z0-9]/.test(password)) score += 1;
-  return score;
-}
-
-const STRENGTH = [
-  { label: "", bar: "" },
-  { label: "Weak", bar: "bg-rose-500" },
-  { label: "Fair", bar: "bg-amber-500" },
-  { label: "Good", bar: "bg-lime-500" },
-  { label: "Strong", bar: "bg-emerald-500" },
-];
 
 const HIGHLIGHTS = [
   {
