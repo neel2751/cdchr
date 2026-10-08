@@ -18,6 +18,9 @@ import {
   KeyRound,
   Lock,
   ShieldAlert,
+  ShieldCheck,
+  ShieldOff,
+  BadgeCheck,
 } from "lucide-react";
 import React from "react";
 import { useSession } from "next-auth/react";
@@ -35,6 +38,7 @@ import {
   getVisaUrgencyLevel,
   VISA_URGENCY_TEXT,
 } from "@/lib/visaMilestones";
+import { getRightToWorkStatus, RTW_STATUS_TEXT } from "@/lib/rightToWork";
 
 const EmployeTabel = () => {
   const {
@@ -45,6 +49,8 @@ const EmployeTabel = () => {
     isSendingReminder,
     onResetPassword,
     onLockdown,
+    onReset2FA,
+    onRecordRightToWork,
   } = useCommonContext();
 
   const { data: session } = useSession();
@@ -77,6 +83,7 @@ const EmployeTabel = () => {
               "VisaStart",
               "VisaEnd",
               "visa",
+              "Right to work",
               "Actions",
             ].map((item, index) => (
               <TableHead
@@ -101,6 +108,11 @@ const EmployeTabel = () => {
               item?.immigrationType !== "British"
                 ? getVisaUrgencyLevel(item?.visaEndDate)
                 : null;
+            const rtw = getRightToWorkStatus({
+              immigrationType: item?.immigrationType,
+              visaEndDate: item?.visaEndDate,
+              checks: item?.rightToWorkChecks,
+            });
             const visaText = visaUrgency
               ? VISA_URGENCY_TEXT[visaUrgency]
               : "text-neutral-700";
@@ -156,6 +168,24 @@ const EmployeTabel = () => {
                       <Lock className="h-3 w-3" /> Locked
                     </Badge>
                   )}
+                  {/* Shown so the reset action above is an informed one. The
+                      "·0" marks an account with no recovery codes left — one
+                      lost phone away from needing a reset. */}
+                  {item?.twoFactorEnabled && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1"
+                      title={`2FA enabled — ${
+                        item?.twoFactorBackupCodes ?? 0
+                      } unused recovery code(s)`}
+                    >
+                      <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                      2FA
+                      {(item?.twoFactorBackupCodes ?? 0) === 0 && (
+                        <span className="text-rose-600">·0</span>
+                      )}
+                    </Badge>
+                  )}
                 </div>
               </TableCell>
               <TableCell>
@@ -197,6 +227,21 @@ const EmployeTabel = () => {
                   : visaRemaining === "Expired"
                     ? "Visa expired"
                     : visaRemaining}
+              </TableCell>
+              {/* The date of the latest check, plus whether it still covers the
+                  visa currently on file — a check only ever proved what was
+                  true on the day it was made. */}
+              <TableCell>
+                <div className="leading-tight">
+                  <div>
+                    {rtw.lastCheckedAt
+                      ? format(new Date(rtw.lastCheckedAt), "PPP")
+                      : "—"}
+                  </div>
+                  <div className={`text-xs ${RTW_STATUS_TEXT[rtw.level]}`}>
+                    {rtw.label}
+                  </div>
+                </div>
               </TableCell>
               <TableCell>
                 <div className="flex gap-2">
@@ -264,6 +309,36 @@ const EmployeTabel = () => {
                         className="border-rose-300"
                       >
                         <ShieldAlert className="text-rose-600" />
+                      </Button>
+                    )}
+                  {/* Self-reset is refused by the server action — resetting
+                      your own 2FA would leave you running without it until your
+                      next login — so the button is not offered for yourself. */}
+                  {/* Recording a check lives on the row, not in the employee
+                      form: the form could only ever hold the last one. */}
+                  <Button
+                    onClick={() => onRecordRightToWork?.(item)}
+                    variant="outline"
+                    size="icon"
+                    title={`Record right to work check — ${rtw.detail}`}
+                    className={rtw.needsCheck ? "border-rose-300" : ""}
+                  >
+                    <BadgeCheck
+                      className={
+                        rtw.needsCheck ? "text-rose-600" : "text-emerald-600"
+                      }
+                    />
+                  </Button>
+                  {isSuperAdmin &&
+                    item?.twoFactorEnabled &&
+                    String(item?._id) !== String(currentUserId) && (
+                      <Button
+                        onClick={() => onReset2FA?.(item)}
+                        variant="outline"
+                        size="icon"
+                        title="Reset 2FA (user lost their authenticator app and recovery codes)"
+                      >
+                        <ShieldOff className="text-amber-600" />
                       </Button>
                     )}
                   {!item?.isSuperAdmin && (

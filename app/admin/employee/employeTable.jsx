@@ -24,6 +24,7 @@ import {
   MailCheck,
   KeyRound,
   Lock,
+  BadgeCheck,
 } from "lucide-react";
 import React from "react";
 import { useSession } from "next-auth/react";
@@ -43,6 +44,10 @@ import {
   getVisaUrgencyLevel,
   VISA_URGENCY_TEXT,
 } from "@/lib/visaMilestones";
+import {
+  getRightToWorkStatus,
+  RTW_STATUS_TEXT,
+} from "@/lib/rightToWork";
 
 const EmployeTabel = () => {
   const {
@@ -56,6 +61,7 @@ const EmployeTabel = () => {
     onSendVisaReminder,
     isSendingReminder,
     onResetPassword,
+    onRecordRightToWork,
   } = useCommonContext();
 
   const { data: session } = useSession();
@@ -80,6 +86,7 @@ const EmployeTabel = () => {
               "VisaStart",
               "VisaEnd",
               "visa",
+              "Right to work",
               "Actions",
             ].map((item, index) => (
               <TableHead className="uppercase text-xs" key={index}>
@@ -113,6 +120,11 @@ const EmployeTabel = () => {
               .map((r) => r.milestone);
             const alreadySent =
               milestone && sentMilestones.includes(milestone);
+            const rtw = getRightToWorkStatus({
+              immigrationType: item?.immigrationType,
+              visaEndDate: item?.eVisaExp,
+              checks: item?.rightToWorkChecks,
+            });
             return (
             <TableRow key={index}>
               <TableCell>{index + 1}</TableCell>
@@ -178,7 +190,33 @@ const EmployeTabel = () => {
               </TableCell>
 
               <TableCell>
+                <div className="leading-tight">
+                  <div>
+                    {rtw.lastCheckedAt
+                      ? format(new Date(rtw.lastCheckedAt), "PPP")
+                      : "—"}
+                  </div>
+                  <div className={`text-xs ${RTW_STATUS_TEXT[rtw.level]}`}>
+                    {rtw.label}
+                  </div>
+                </div>
+              </TableCell>
+
+              <TableCell>
                 <div className="flex gap-2">
+                  <Button
+                    onClick={() => onRecordRightToWork?.(item)}
+                    variant="outline"
+                    size="icon"
+                    title={`Record right to work check — ${rtw.detail}`}
+                    className={rtw.needsCheck ? "border-rose-300" : ""}
+                  >
+                    <BadgeCheck
+                      className={
+                        rtw.needsCheck ? "text-rose-600" : "text-emerald-600"
+                      }
+                    />
+                  </Button>
                   {milestone && (
                     <Button
                       onClick={() => onSendVisaReminder?.(item)}
@@ -222,7 +260,7 @@ const EmployeTabel = () => {
                       <DialogHeader>
                         <DialogTitle>Edit Employee Details</DialogTitle>
                         <DialogDescription>
-                          Make changes to here. Click update when you're done.
+                          Make changes to here. Click update when you&apos;re done.
                         </DialogDescription>
                       </DialogHeader>
                       <EmployeeForm />

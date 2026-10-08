@@ -33,6 +33,8 @@ import Alert from "@/components/alert/alert";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { sendVisaReminderManually } from "@/server/visaServer/visaServer";
 import VisaReminderDialog from "../_components/visaReminderDialog";
+import RightToWorkDialog from "../_components/rightToWorkDialog";
+import { recordRightToWorkCheck } from "@/server/visaServer/rightToWorkServer";
 import ResetPasswordDialog from "../_components/resetPasswordDialog";
 
 const VISA_STATUS_OPTIONS = [
@@ -223,7 +225,48 @@ const Employee = ({ searchParams, variant = "active" }) => {
       employeeType: "Employe",
       name: `${item?.firstName || ""} ${item?.lastName || ""}`.trim(),
       visaEndDate: item?.eVisaExp,
+      // The reminder dialog also reports when right to work was last checked:
+      // an expiring visa is exactly what prompts the next check.
+      immigrationType: item?.immigrationType,
+      checks: item?.rightToWorkChecks,
     });
+
+  // Right-to-work checks are recorded from a row action rather than the
+  // employee form: each check is a dated event kept alongside the previous
+  // ones, and the visa reminder is what prompts HR to record the next one.
+  const [rightToWorkTarget, setRightToWorkTarget] = useState(null);
+
+  const { mutate: recordRightToWork, isPending: isRecordingRightToWork } =
+    useSubmitMutation({
+      mutationFn: async (payload) => recordRightToWorkCheck(payload),
+      invalidateKey: queryKey,
+      onSuccessMessage: (message) => message || "Right-to-work check recorded",
+      onClose: () => setRightToWorkTarget(null),
+    });
+
+  const onRecordRightToWork = (item) =>
+    setRightToWorkTarget({
+      employeeId: item?._id,
+      employeeType: "Employe",
+      name: `${item?.firstName || ""} ${item?.lastName || ""}`.trim(),
+      email: item?.email,
+      immigrationType: item?.immigrationType,
+      immigrationCategory: item?.immigrationCategory,
+      visaStartDate: item?.visaStartDate,
+      // Site employees store the visa expiry as eVisaExp; the dialog and the
+      // status helper speak in visaEndDate.
+      visaEndDate: item?.eVisaExp,
+      checks: item?.rightToWorkChecks,
+    });
+
+  const confirmRightToWork = (payload) => {
+    if (!rightToWorkTarget?.employeeId) return;
+    recordRightToWork({
+      employeeId: rightToWorkTarget.employeeId,
+      employeeType: rightToWorkTarget.employeeType,
+      ...payload,
+    });
+  };
 
   const confirmVisaReminder = (ccHr) => {
     if (!reminderTarget) return;
@@ -238,8 +281,20 @@ const Employee = ({ searchParams, variant = "active" }) => {
 
   const { mutate: resetPassword, isPending: isResettingPassword } =
     useSubmitMutation({
-      mutationFn: async ({ employeeId, newPassword, reason }) =>
-        resetSiteEmployeePassword({ employeeId, newPassword, reason }),
+      mutationFn: async ({
+        employeeId,
+        newPassword,
+        reason,
+        signOutEverywhere,
+        requirePasswordChange,
+      }) =>
+        resetSiteEmployeePassword({
+          employeeId,
+          newPassword,
+          reason,
+          signOutEverywhere,
+          requirePasswordChange,
+        }),
       invalidateKey: queryKey,
       onSuccessMessage: (message) => message || "Password reset successfully",
       onClose: () => setResetTarget(null),
@@ -247,9 +302,20 @@ const Employee = ({ searchParams, variant = "active" }) => {
 
   const onResetPassword = (item) => setResetTarget(item);
 
-  const confirmResetPassword = ({ newPassword, reason }) => {
+  const confirmResetPassword = ({
+    newPassword,
+    reason,
+    signOutEverywhere,
+    requirePasswordChange,
+  }) => {
     if (!resetTarget?._id) return;
-    resetPassword({ employeeId: resetTarget._id, newPassword, reason });
+    resetPassword({
+      employeeId: resetTarget._id,
+      newPassword,
+      reason,
+      signOutEverywhere,
+      requirePasswordChange,
+    });
   };
 
   const handleOpen = () => {
@@ -278,6 +344,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
           pagePerData,
           totalCount,
           onSendVisaReminder,
+          onRecordRightToWork,
           isSendingReminder,
           onResetPassword,
         }}
@@ -396,6 +463,14 @@ const Employee = ({ searchParams, variant = "active" }) => {
             }}
             onConfirm={confirmVisaReminder}
             isPending={isSendingReminder}
+          />
+          <RightToWorkDialog
+            target={rightToWorkTarget}
+            onOpenChange={(o) => {
+              if (!o) setRightToWorkTarget(null);
+            }}
+            onConfirm={confirmRightToWork}
+            isPending={isRecordingRightToWork}
           />
           <ResetPasswordDialog
             target={resetTarget}
