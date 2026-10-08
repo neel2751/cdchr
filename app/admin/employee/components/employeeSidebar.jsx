@@ -79,7 +79,7 @@ export default function EmployeeSidebar() {
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <MapPinnedIcon className="size-3.5 -mr-1" />
-            <span className="text-sm">City state:</span>
+            <span className="text-sm">Town:</span>
             <span className="text-primary">
               {newData?.eAddress?.city || "-"}
             </span>
