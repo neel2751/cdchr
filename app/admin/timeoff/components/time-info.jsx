@@ -5,8 +5,14 @@ import { format } from "date-fns";
 import { Calendar } from "lucide-react";
 
 export default function TimeInfo() {
+  // null until mounted — the clock only exists in the browser, so there is
+  // nothing to report during the server pass. `format(null, …)` throws, so this
+  // is guarded rather than assumed; the dashes hold the layout for the one frame
+  // before the first reading arrives.
   const currentTime = useTime();
-  const formattedTime = format(currentTime, "hh:mm:ss a"); // 'hh' for 12-hour format, 'a' for AM/PM
+  const formattedTime = currentTime
+    ? format(currentTime, "hh:mm:ss a") // 'hh' for 12-hour, 'a' for AM/PM
+    : "--:--:-- --";
 
   return (
     <Card>
@@ -17,7 +23,7 @@ export default function TimeInfo() {
       <CardContent>
         <div className="text-2xl font-bold">{formattedTime}</div>
         <p className="text-xs text-muted-foreground">
-          {format(currentTime, "PPP")}
+          {currentTime ? format(currentTime, "PPP") : "\u00a0"}
         </p>
         <div className="mt-4">
           <p className="text-sm">Remaining Holiday: </p>
