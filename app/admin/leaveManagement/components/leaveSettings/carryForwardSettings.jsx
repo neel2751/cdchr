@@ -29,6 +29,8 @@ import {
   getLeaveSettingsClient,
   updateLeaveSettings,
 } from "@/server/leaveSettingServer";
+import CarryForwardAudience from "./carryForwardAudience";
+import CarryForwardExceptions from "./carryForwardExceptions";
 
 /**
  * Leave settings.
@@ -228,6 +230,7 @@ export default function CarryForwardSettings() {
                       <th className="p-2 font-medium">Max days</th>
                       <th className="p-2 font-medium">Expires after</th>
                       <th className="p-2 font-medium">Pro-rated</th>
+                      <th className="p-2 font-medium">Applies to</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -304,6 +307,20 @@ export default function CarryForwardSettings() {
                               </span>
                             )}
                           </td>
+                          <td className="p-2">
+                            {on ? (
+                              <CarryForwardAudience
+                                rule={rule}
+                                onChange={(patch) =>
+                                  setRule(type.leaveType, patch)
+                                }
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -313,8 +330,17 @@ export default function CarryForwardSettings() {
             )
           ) : null}
 
+          {/* Outside the per-leave-type table on purpose: an employee's
+              exception is one setting on the person, covering every type that
+              carries forward — not a per-type choice. */}
+          {enabled ? <CarryForwardExceptions /> : null}
+
           {enabled && leaveTypes.length ? (
             <p className="text-xs text-muted-foreground">
+              <strong>Applies to</strong> decides who qualifies — leave it as
+              Everyone unless only some staff carry days over. A single
+              employee&apos;s exception goes on their own record, from
+              Entitlements.{" "}
               <strong>Max days</strong> caps what rolls over, however much is
               left. <strong>Expires after</strong> is how long the carried days
               survive into the new year before they are lost.{" "}

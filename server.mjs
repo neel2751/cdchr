@@ -102,6 +102,7 @@ app.prepare().then(() => {
     scheduleAnnouncements(port);
     scheduleShiftClose(port);
     scheduleDunning(port);
+    scheduleCarryForwardExpiry(port);
   });
 });
 
@@ -179,6 +180,52 @@ function scheduleVisaReminders(serverPort) {
 
   console.log(
     `[visa-cron] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// Takes expired carried-over leave days off the balance. Same shape as the jobs
+// above: once a day, early. Requires CRON_SECRET.
+//
+// The booking path already refuses an expired carried day from the instant it
+// expires, so this job is not what makes expiry correct — it is what makes the
+// stored figures agree with it, which is what an employee's own leave card and
+// every report read. Idempotent, so a missed night costs nothing.
+function scheduleCarryForwardExpiry(serverPort) {
+  const RUN_HOUR = 4;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[carry-expiry] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/leave-carry-expiry`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      console.log("[carry-expiry] run complete:", JSON.stringify(json));
+    } catch (err) {
+      console.error("[carry-expiry] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[carry-expiry] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
 }
 

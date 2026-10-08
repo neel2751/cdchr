@@ -95,6 +95,42 @@ const officeEmployeSchema = new mongoose.Schema(
     emergencyPhoneNumber: { type: Number, required: false },
     emergencyRelation: { type: String, required: false },
     emergencyAddress: { type: String, required: false },
+    // This employee's exceptions to the company's carry-forward rules, one per
+    // leave type.
+    //
+    // PER LEAVE TYPE, because the rules are. A company can carry annual leave
+    // and company sick days under different limits, and "this person never
+    // carries annual leave" says nothing about their sick days. A single setting
+    // covering everything could not express that, and silently applied a
+    // decision about one type to all of them.
+    //
+    // An ABSENT entry means "follow the company rule" — which is a real state
+    // and has to be expressible. A boolean per type could not say it: defaulting
+    // to true would make the rule unable to exclude anybody, defaulting to false
+    // would make the rule pointless because nobody would carry until
+    // individually ticked. So only exceptions are stored, and the list is
+    // normally empty.
+    //
+    // "always" overrides the *eligibility* conditions — employment type,
+    // department, service length, days remaining — and nothing else. It does not
+    // invent a carry-forward rule where the company has none: the rule says how
+    // many days may carry, and without one there is no amount to carry. See
+    // carryForwardEligibility() in lib/carryForward.js.
+    //
+    // Deliberately absent from lib/profileFields.js, so it is not self-editable:
+    // an employee must not be able to grant themselves carry-forward.
+    carryForwardOverrides: {
+      type: [
+        {
+          _id: false,
+          leaveType: { type: String, required: true },
+          mode: { type: String, enum: ["always", "never"], required: true },
+        },
+      ],
+      default: [],
+    },
+
+
     // Set when an admin resets the password with "require a password change"
     // on. Cleared the moment the person sets their own — auth.js routes them to
     // the change-password screen and nowhere else until they do.
