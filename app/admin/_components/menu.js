@@ -18,6 +18,7 @@ import {
   ScanQrCodeIcon,
   SettingsIcon,
   Settings,
+  Wand2,
 } from "lucide-react";
 import Overview from "../leaveManagement/components/overview/overview";
 import LeaveCategoryNew from "../leaveManagement/components/leaveCategory/leave-category";
@@ -44,13 +45,12 @@ import {
 import EmployeeEdit from "@/components/tabs/employee-edit";
 import { AddEmploeeLeave } from "../leaveManagement/components/addEmployeeLeave/addEmplyoeeLeave";
 import EmployeeSiteManagement from "../siteAssignEmployee/test";
-import QRDialog from "../siteAssign/features/siteScan";
-import ScanQrcode from "@/components/2FA/scanQrcode";
 import SiteExpense from "../siteAssign/features/siteExpense";
 import { SiteEmployeeOtherDeatils } from "../employee/components/employeeOtherDeatils";
 import EmployeDocument from "../employee/components/employeDocument";
 import OfficeEmployeeAttendance from "@/components/tabs/employee-attendance";
-import CarryForwardSettings from "../leaveManagement/components/leaveSettings/carryForwardSettings";
+import SettingsTab from "../leaveManagement/components/leaveSettings/settingsTab";
+import LeaveSetup from "../leaveManagement/components/leaveSetup/leaveSetup";
 import LeaveReports from "../report/leaveReport/leaveReport";
 import AttendanceReport from "../report/attendanceReport/attendanceReport";
 
@@ -165,6 +165,23 @@ export const siteEmployeeMenu = [
 ];
 
 export const leaveMenu = [
+  // First, because it is the first thing a new company has to do and because
+  // until it is done every other tab here shows zeroes. The leave landing page
+  // sends a company that has not set leave up straight here — see
+  // app/admin/leaveManagement/page.jsx.
+  {
+    name: "Setup",
+    icon: Wand2,
+    link: "setup",
+    // Super admin only, and not merely as caution: every write behind this tab
+    // refuses anybody else (requireSuperAdmin in leaveSetupServer.js), because
+    // the leave year start month decides what every entitlement and every
+    // booking in the company is measured against. Showing an admin a screen
+    // whose Save button answers "Only a super admin can change leave settings"
+    // is worse than not showing it — the same reasoning as Attendance Settings
+    // in data/menu.js.
+    role: ["superAdmin"],
+  },
   {
     name: "Dashboard",
     icon: HomeIcon,
@@ -323,6 +340,7 @@ export const officeSlugComponentmap = {
 };
 
 export const slugComponentmap = {
+  setup: LeaveSetup,
   overview: Overview,
   category: LeaveCategoryNew,
   request: LeaveRequestForm,
@@ -333,12 +351,11 @@ export const slugComponentmap = {
   holidaycalendar: HolidayPlannerCalendar,
   bankholiday: BankHoliday,
   report: LeaveReport,
-  settings: CarryForwardSettings,
+  settings: SettingsTab,
 };
 
 export const siteSlugComponentmap = {
   overview: EmployeeSiteManagement,
-  scan: QRDialog,
   expense: SiteExpense,
 };
 
