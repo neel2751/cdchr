@@ -1,6 +1,6 @@
 "use client";
 
-import CardName from "../../_components/name";
+import Greeting from "@/components/greeting/greeting";
 import EmployeeClockCard from "./employeeClockCard";
 
 /**
@@ -14,7 +14,7 @@ import EmployeeClockCard from "./employeeClockCard";
 export default function EmployeCard() {
   return (
     <div className="space-y-3">
-      <CardName />
+      <Greeting />
       <EmployeeClockCard />
     </div>
   );

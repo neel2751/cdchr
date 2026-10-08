@@ -1,4 +1,3 @@
-import Gretting from "@/components/gretting/gretting";
 import { reportMenu, reportSlugComponentmap } from "../../_components/menu";
 import Navbar from "../../leaveManagement/components/nav";
 
@@ -13,8 +12,6 @@ export default async function Page({ params, searchParams }) {
       adminMenu={reportMenu}
       slugComponentmap={reportSlugComponentmap}
       basePath={"/admin/report"}
-    >
-      <Gretting />
-    </Navbar>
+    />
   );
 }

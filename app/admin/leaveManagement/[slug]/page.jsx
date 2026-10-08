@@ -1,4 +1,3 @@
-import Gretting from "@/components/gretting/gretting";
 import { leaveMenu, slugComponentmap } from "../../_components/menu";
 import Navbar from "../components/nav";
 
@@ -13,8 +12,6 @@ export default async function Page({ params, searchParams }) {
       adminMenu={leaveMenu}
       slugComponentmap={slugComponentmap}
       basePath={"/admin/leaveManagement"}
-    >
-      <Gretting />
-    </Navbar>
+    />
   );
 }

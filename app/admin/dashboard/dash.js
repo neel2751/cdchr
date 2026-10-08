@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getDashboardDataServer } from "@/utils/dashData";
 import { useTenantFeatures } from "@/hooks/useTenantFeatures";
+import Greeting from "@/components/greeting/greeting";
 import AnnouncementsCard from "./components/announcementsCard";
 import AttendanceToday from "./components/attendanceToday";
 import DashCount from "./components/dashCard";
@@ -83,6 +84,13 @@ const Dash = () => {
 
   return (
     <main className="space-y-6 p-4 md:p-6">
+      {/* The one place the greeting belongs: a landing page, once. It used to
+          appear on every tab of Leave Management, Reports and Attendance and
+          nowhere here — so the people who see this screen never got it and
+          everybody else got it eight times. The date it carries is the right
+          header for a dashboard that is deliberately about today. */}
+      <Greeting />
+
       <AttendanceToday />
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
