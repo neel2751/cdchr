@@ -34,11 +34,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useAvatar } from "@/components/Avatar/AvatarContext";
-import {
-  getCurrentLeaveYearStart,
-  getLeaveYearString,
-  getLeaveYearStringFilter,
-} from "@/lib/getLeaveYear";
+import { useLeaveYear } from "@/hooks/useLeaveYear";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { rejectPastLeaveRequest } from "@/server/leaveServer/getLeaveServer";
 import {
@@ -117,6 +113,12 @@ const EmployeeOtherDeatils = () => {
 
 /** Leave years offered in the filter: three back, the current one, and next. */
 const YEAR_OFFSETS = [-3, -2, -1, 0, 1];
+
+// The leave year the filter opens on, and the years it offers, now come from
+// useLeaveYear() — which reads the month the company's leave year actually
+// starts in. They were built from lib/getLeaveYear.js, where April is
+// hard-coded, so on any other leave year this filter opened on the wrong twelve
+// months and marked the wrong row "(Current)".
 const STATUSES = ["All", "Approved", "Pending", "Rejected"];
 
 const EmployeeLeaveDeatails = () => {
@@ -131,9 +133,14 @@ const EmployeeLeaveDeatails = () => {
   // and no state behind them — the filter opened, the options were all there,
   // and picking one did nothing at all. The leave year was pinned to today's
   // and there was no way to look at any other.
-  const [leaveYear, setLeaveYear] = useState(() =>
-    getLeaveYearString(new Date())
-  );
+  const { currentLeaveYear, options: leaveYearOptions } = useLeaveYear({
+    years: YEAR_OFFSETS,
+  });
+  // Null until the company's leave year is known, then the current one. Not
+  // seeded from a hard-coded April default, which would fetch the wrong year
+  // once and cache it under that key.
+  const [chosenLeaveYear, setLeaveYear] = useState(null);
+  const leaveYear = chosenLeaveYear || currentLeaveYear;
   const [status, setStatus] = useState("All");
 
   // leaveYear belongs in the key: without it React Query answers the new year
@@ -176,8 +183,7 @@ const EmployeeLeaveDeatails = () => {
   };
   const id = useId();
   const { newData } = data || {};
-  const currentLeaveYear = getCurrentLeaveYearStart();
-  const years = YEAR_OFFSETS.map((offset) => currentLeaveYear + offset);
+
 
   // Status is applied here rather than in the query: the server returns one
   // leave year, which is a handful of rows, and filtering them in the browser
@@ -278,17 +284,8 @@ const EmployeeLeaveDeatails = () => {
                             </span>
                           </SelectTrigger>
                           <SelectContent className="max-h-60 overflow-y-auto max-w-max">
-                            {years.map((year) => {
-                              // Named `option` rather than `leaveYear`, which
-                              // is the selected value in scope out here.
-                              const option = getLeaveYearStringFilter(year);
-
-                              // Compared against the leave year's starting
-                              // year, not the calendar year. Between January
-                              // and March those differ, and this marked the
-                              // wrong row "(Current)" for a quarter of the year.
-                              const isCurrent = year === currentLeaveYear;
-                              return (
+                            {leaveYearOptions.map(
+                              ({ value: option, isCurrent }) => (
                                 <SelectItem
                                   key={option}
                                   value={option}
@@ -296,8 +293,8 @@ const EmployeeLeaveDeatails = () => {
                                 >
                                   {isCurrent ? `${option} (Current)` : option}
                                 </SelectItem>
-                              );
-                            })}
+                              )
+                            )}
                           </SelectContent>
                         </Select>
                       </div>

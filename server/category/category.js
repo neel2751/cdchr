@@ -1,7 +1,7 @@
 "use server";
 import Leave from "@/class/leaveClass";
 import { connect } from "@/db/db";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { currentLeaveYear } from "@/lib/leaveYear";
 import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
@@ -82,9 +82,14 @@ export async function handleLeaveCategory(data, id) {
       // };
       // await CommonLeaveModel.updateMany( updateQuery, updatePayload, { multi: true } );
 
+      // The company's leave year, not April's. Read from lib/getLeaveYear.js this
+      // was always April, so on any other leave year this updateMany matched no
+      // documents: renaming or re-costing a leave category appeared to work and
+      // changed nobody's entitlement.
+      const leaveYear = await currentLeaveYear();
       await CommonLeaveModel.updateMany(
         {
-          leaveYear: getLeaveYearString(new Date()),
+          leaveYear,
           "leaveData.leaveType": existingCategory?.leaveType,
         },
         [

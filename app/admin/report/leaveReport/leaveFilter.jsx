@@ -2,10 +2,10 @@
 import { DateRangeFilter } from "@/components/filters/filterDate/filterDateRange";
 import { SelectFilter } from "@/components/filters/selectFilter/selectFilter";
 import {
-  getLeaveYearString,
   getNextLeaveYearString,
   getPreviousLeaveYearString,
 } from "@/helper/getLeaveYearString";
+import { useLeaveYear } from "@/hooks/useLeaveYear";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import {
   getSelectEmployee,
@@ -45,7 +45,8 @@ function FilterLeaveType() {
 }
 
 function FilterLeaveYear() {
-  const currentLeaveYear = getLeaveYearString(new Date());
+  // The company's leave year, not April's — see hooks/useLeaveYear.js.
+  const { currentLeaveYear } = useLeaveYear();
   const previousLeaveYear = getPreviousLeaveYearString(currentLeaveYear);
   const nextLeaveYear = getNextLeaveYearString(currentLeaveYear);
 

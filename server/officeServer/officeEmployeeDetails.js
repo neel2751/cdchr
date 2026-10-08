@@ -9,7 +9,7 @@ import { createObjectId } from "@/lib/mongodb";
 import DocumentModel from "@/models/document/documentModel";
 import { deleteFileFromS3 } from "../aws/upload";
 import EmployeModel from "@/models/employeModel";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { resolveLeaveYear } from "@/lib/leaveYear";
 import RoleBasedModel from "@/models/rolebasedModel";
 import {
   getEmployeeManageAccess,
@@ -132,7 +132,10 @@ export async function employeeLeaveDetailsNew(data) {
     const leaveYear = data?.leaveYear;
     if (!employeeId) return { success: false, message: "User not found" };
     await connect();
-    const checkLeaveYear = leaveYear || getLeaveYearString(new Date());
+    // resolveLeaveYear also shape-checks what the screen passed: this value
+    // arrives from a query string, and a malformed year matched nothing and
+    // read as "no leave this year".
+    const checkLeaveYear = await resolveLeaveYear(leaveYear);
     const match = {
       leaveYear: checkLeaveYear,
       employeeId: createObjectId(employeeId),

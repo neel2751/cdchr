@@ -3,20 +3,11 @@
 import { connect } from "@/db/db";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
-import {
-  addDays,
-  addMonths,
-  addWeeks,
-  differenceInWeeks,
-  getYear,
-} from "date-fns";
 import mongoose from "mongoose";
 import { getServerSideProps } from "../session/session";
 import LeaveRequestModel from "@/models/leaveRequestModel";
-import { fetchLeaveCategory } from "../category/category";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { currentLeaveYear, resolveLeaveYear } from "@/lib/leaveYear";
 import { createObjectId } from "@/lib/mongodb";
-import { getLeaveSettings } from "../leaveSettingServer";
 import { decrypt } from "@/lib/algo";
 import { resolveEmployeeTarget } from "@/lib/employeeAccess";
 
@@ -30,30 +21,27 @@ function safeDecryptId(value) {
   }
 }
 
-export async function storeLeave(employeeId, data) {
-  try {
-    await connect();
-    //check the employeeId is valid or not
-    const monggoseId = mongoose.Types.ObjectId.isValid(employeeId)
-      ? new mongoose.Types.ObjectId(employeeId)
-      : null;
-    if (!monggoseId) return { success: false, message: "Invalid employeeId" };
-    // first we have to count a leave data
-    const leaveData = await countLeave(monggoseId, data);
-    if (!leaveData?.success)
-      return { success: false, message: "Failed to count leave data" };
-    const storeData = await CommonLeaveModel(leaveData?.data);
-    const result = await storeData.save();
-    return {
-      success: true,
-      message: "Leave data stored successfully",
-      data: JSON.stringify(result),
-    };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: "Failed to store leave data" };
-  }
-}
+// Removed here: storeLeave and countLeave.
+//
+// The same dead-and-broken pair as the five described further down, and broken
+// the same way. CommonLeave.leaveYear is a String like "2026-27", written by
+// getLeaveYearString(); countLeave built its document with
+// `leaveYear: getYear(new Date())` — a number, which Mongoose casts to "2026".
+// That matches nothing, ever, so the row storeLeave wrote could never be read
+// back by any screen; it was landfill that also duplicated the employee's real
+// entitlement document.
+//
+// countLeave was also a third, independent implementation of the entitlement
+// arithmetic — 28 days flat for full-time, `partTimeDays * 5.6` for part-time,
+// no leave year, no pro-rata, and an `accrued` figure computed from weeks since
+// the join date that nothing consumed. The one that is actually used is
+// generateDefaultLeaves() in countLeaveServer.js, which goes through
+// lib/leaveEntitlement.js.
+//
+// storeLeave had no caller anywhere in the app and countLeave had exactly one:
+// storeLeave. Deleted rather than repaired for the reason the note below gives —
+// both were exported "use server" functions, which are addressable endpoints
+// whether or not a button points at them, and this one wrote to the database.
 
 // give an option to update the leave data particaluallry
 
@@ -72,11 +60,14 @@ export async function fetchCommonLeave(filterData) {
   // employees only — the two disagreed while leavers were still listed here.
   const query = { delete: false, isActive: true };
 
-  const settings = await getLeaveSettings();
-  const currentLeaveYear = getLeaveYearString(
-    new Date(),
-    settings?.data?.leaveYearStartMonth
-  );
+  // The company's own leave year. This read used to be
+  // `getLeaveYearString(new Date(), settings?.data?.leaveYearStartMonth)` against
+  // the helper in lib/getLeaveYear.js, whose second parameter is `short`, not a
+  // start month — so the month was read as a truthy boolean and thrown away, and
+  // the table looked up April's leave year whatever the company had chosen. On a
+  // January–December company that meant the $lookup below matched nothing and
+  // every employee was listed as having no entitlement.
+  const leaveYear = await currentLeaveYear();
 
   const roleTypeFilterQuery = roleTypeFilter
     ? { "departments._id": createObjectId(roleTypeFilter) } // Field for department filter
@@ -115,7 +106,7 @@ export async function fetchCommonLeave(filterData) {
                 $expr: {
                   $and: [
                     { $eq: ["$employeeId", "$$empId"] },
-                    { $eq: ["$leaveYear", currentLeaveYear] },
+                    { $eq: ["$leaveYear", leaveYear] },
                   ],
                 },
               },
@@ -158,8 +149,18 @@ export async function fetchCommonLeave(filterData) {
           _id: 1,
           name: 1,
           joinDate: 1,
+          // Needed alongside joinDate and dayPerWeek so the screen can work out
+          // the same statutory annual-leave floor the server enforces, and warn
+          // *before* a save rather than after. Without endDate the browser would
+          // compute a leaver's floor as a full year and warn about a correction
+          // that is in fact exactly right — see statutoryFloorFor().
+          endDate: 1,
           employeType: 1,
           dayPerWeek: 1,
+          // The employee's personal carry-forward exception, so the quick-edit
+          // on this table can show its current value instead of opening blank
+          // and resetting it on save.
+          carryForwardOverrides: 1,
           hasCommonLeave: 1,
           leaveData: 1,
           roleType: 1,
@@ -187,8 +188,13 @@ export async function fetchCommonLeave(filterData) {
     ];
 
     const employeeWithLeave = await OfficeEmployeeModel.aggregate(pipeline);
-    const totalCount = employeeWithLeave[0].totalCount[0].count;
-    const result = employeeWithLeave[0].result;
+    // A $facet with no matches gives `totalCount: []`, so reading `[0].count`
+    // off it threw a TypeError — which the catch below turned into "Failed to
+    // fetch common leave data". Searching for a name nobody has, or filtering to
+    // a department with no staff, reported a server error instead of an empty
+    // table.
+    const totalCount = employeeWithLeave?.[0]?.totalCount?.[0]?.count ?? 0;
+    const result = employeeWithLeave?.[0]?.result ?? [];
     return { success: true, data: JSON.stringify(result), totalCount };
   } catch (error) {
     console.log(" Error in fetchCommonLeave", error);
@@ -196,149 +202,6 @@ export async function fetchCommonLeave(filterData) {
   }
 }
 
-export async function countLeave(employeeId, data) {
-  try {
-    const allCategory = await fetchLeaveCategory();
-    if (!allCategory.success) return allCategory;
-    const leaveCategories = JSON.parse(allCategory?.data);
-
-    const STATUTORY_ANNUAL_LEAVE_DAYS = 28;
-    const STATUTORY_SICK_WEEKS = 28; // Maximum SSP weeks
-    const MATERNITY_WEEKS = 52;
-    const MATERNITY_PAID_WEEKS = 39;
-    const PATERNITY_WEEKS = 2;
-
-    const startDateObj = new Date(data?.joinDate);
-    const weeksWorked = differenceInWeeks(new Date(), startDateObj);
-    const fullYearRatio = Math.min(weeksWorked / 52, 1);
-    let sspEligibleWeeks = STATUTORY_SICK_WEEKS;
-    //count 4 week after date of the startDateObj
-    const fourWeeksAfter = addWeeks(new Date(startDateObj), 4);
-    // count 26 week after date of the startDateObj
-    const twentySixWeeksAfter = addWeeks(new Date(startDateObj), 26);
-
-    // Calculate SSP eligibility and weeks
-    const isEligibleForSSP = weeksWorked >= 4; // Need 4 weeks of employment
-    if (!isEligibleForSSP) {
-      sspEligibleWeeks = 0;
-    }
-
-    // Calculate maternity leave eligibility and weeks(26 weeks continous employment)
-    const isEligibleForParental = weeksWorked >= 26;
-    const sickLeave = {
-      leaveType: "Sick Leave",
-      total: 7,
-      used: 0,
-      remaining: STATUTORY_SICK_WEEKS,
-      accrued: Math.round(STATUTORY_SICK_WEEKS * fullYearRatio),
-      isEligible: isEligibleForSSP,
-      eligibleDate: fourWeeksAfter,
-      paid: sspEligibleWeeks,
-      requireFitNote: true,
-      type: "weeks",
-    };
-    const maternityLeave = {
-      leaveType: "Maternity Leave",
-      total: MATERNITY_WEEKS,
-      used: 0,
-      remaining: MATERNITY_WEEKS,
-      accrued: Math.round(MATERNITY_WEEKS * fullYearRatio),
-      isEligible: isEligibleForParental,
-      eligibleDate: twentySixWeeksAfter,
-      paid: MATERNITY_PAID_WEEKS,
-      compulsory: 2,
-      type: "weeks",
-    };
-    const paternityLeave = {
-      // leaveType: 'Statutory Sick Pay',
-      leaveType: "Paternity Leave",
-      total: PATERNITY_WEEKS,
-      used: 0,
-      remaining: PATERNITY_WEEKS,
-      accrued: Math.round(PATERNITY_WEEKS * fullYearRatio),
-      isEligible: isEligibleForParental,
-      paid: PATERNITY_WEEKS,
-      type: "weeks",
-    };
-    // first count Full-Time
-    const employmentType = data?.employeType;
-    if (employmentType === "Full-Time") {
-      console.log("-----Full Time------");
-      const result = {
-        employeeId: employeeId,
-        leaveYear: getYear(new Date()),
-        leaveData: [
-          {
-            leaveType: "Annual Leave",
-            total: STATUTORY_ANNUAL_LEAVE_DAYS,
-            used: 0,
-            remaining: STATUTORY_ANNUAL_LEAVE_DAYS,
-            accrued: Math.round(STATUTORY_ANNUAL_LEAVE_DAYS * fullYearRatio),
-            type: "days",
-            isEligible: true,
-          },
-          sickLeave,
-          maternityLeave,
-          paternityLeave,
-        ],
-      };
-      const allLeaveType = result?.leaveData?.map(({ leaveType }) => leaveType);
-      const leaveFilter = leaveCategories.filter(
-        (leave) => !allLeaveType.includes(leave.leaveType)
-      );
-      const newData = leaveFilter.map((item) => {
-        const isEligible =
-          item?.ruleType === "days"
-            ? addDays(new Date(startDateObj), item?.rule)
-            : addMonths(new Date(startDateObj), item?.rule);
-        return {
-          leaveType: item?.leaveType,
-          total: item?.total,
-          used: 0,
-          remaining: item?.total,
-          rule: item?.rule,
-          ruleType: item?.ruleType,
-          eligibleDate: isEligible,
-        };
-      });
-      const newLeavData = {
-        ...result,
-        leaveData: [...result.leaveData, ...newData],
-      };
-      return { success: true, data: newLeavData };
-    } else {
-      console.log("-----Part Time------");
-      const result = {
-        employeeId: employeeId,
-        leaveYear: getYear(new Date()),
-        leaveData: [
-          {
-            leaveType: "Annual Leave",
-            total:
-              Number(data?.partTimeDays) < 6
-                ? Math.round(Number(data?.partTimeDays) * 5.6)
-                : 28,
-            used: 0,
-            remaining:
-              Number(data?.partTimeDays) < 6
-                ? Math.round(Number(data?.partTimeDays) * 5.6)
-                : 28,
-            accrued: Math.round(STATUTORY_ANNUAL_LEAVE_DAYS * fullYearRatio),
-            type: "days",
-            isEligible: true,
-          },
-          sickLeave,
-          maternityLeave,
-          paternityLeave,
-        ],
-      };
-      return result;
-    }
-  } catch (error) {
-    console.error(error);
-    return { success: false, message: "Error processing data" };
-  }
-}
 
 /**
  * One person's leave entitlements for one leave year.
@@ -367,7 +230,10 @@ export async function getEmployeeLeaveData(input) {
       : { employeeId: sessionId };
 
     const employeeId = targetId || sessionId;
-    const leaveYear = input?.leaveYear || getLeaveYearString(new Date());
+    // resolveLeaveYear, not `|| getLeaveYearString(new Date())`: that default was
+    // April's leave year regardless of the company's setting, so an employee at a
+    // company on any other year was shown an empty leave card.
+    const leaveYear = await resolveLeaveYear(input?.leaveYear);
 
     // A year nobody has set entitlements for is ordinary, not an error — the
     // card above simply has nothing to show. Translated here rather than in

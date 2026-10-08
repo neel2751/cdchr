@@ -15,7 +15,7 @@ import { getServerSideProps } from "../session/session";
 import { COMMONMENUITEMS, MENU, DERIVED_ACCESS } from "@/data/menu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
-import { getLeaveYearString } from "@/lib/getLeaveYear";
+import { currentLeaveYear } from "@/lib/leaveYear";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import mongoose from "mongoose";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
@@ -488,7 +488,11 @@ export const getSelectLeaveRequestForEmployee = async () => {
 
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
-    const leaveYear = getLeaveYearString(new Date());
+    // The company's leave year. Pinned to April's before, which meant the
+    // $match below found no entitlement document and this dropdown came back
+    // EMPTY — an employee at a company on any other leave year could not
+    // request leave at all, because there was nothing to pick.
+    const leaveYear = await currentLeaveYear();
     const pipeline = [
       {
         $match: {
@@ -502,7 +506,18 @@ export const getSelectLeaveRequestForEmployee = async () => {
             $filter: {
               input: "$leaveData",
               as: "item",
-              cond: { $eq: ["$$item.isHide", false] },
+              cond: {
+                $and: [
+                  { $eq: ["$$item.isHide", false] },
+                  // A leave type an admin has removed from this employee is not
+                  // theirs to book. `isDelete` was written by
+                  // deleteOneCommonLeaveToOneEmployee and read by nothing, so a
+                  // removed type kept appearing here with a balance behind it.
+                  // `$ne: true` rather than `$eq: false` — the flag is absent on
+                  // every row written before the soft delete existed.
+                  { $ne: ["$$item.isDelete", true] },
+                ],
+              },
             },
           },
         },
