@@ -30,6 +30,13 @@ export default function EmployeeUpdate({ item, queryKey }) {
         required: "Employe Type is required",
       },
     },
+    // No carry-forward field here any more.
+    //
+    // An exception is per leave type now, and a single select cannot say "never
+    // carry annual leave but always carry the company sick days". Rather than
+    // put a dynamic per-type editor inside this small dialog, exceptions are set
+    // in one place — Leave → Settings → Individual exceptions — and shown
+    // read-only against each leave type on the entitlement sheet.
     {
       name: "dayPerWeek",
       labelText: "Days",
@@ -56,8 +63,17 @@ export default function EmployeeUpdate({ item, queryKey }) {
     onClose: () => setIsOpen(false),
   });
 
-  const handleSubmit = (data, password, id) => {
-    updateEmployee({ data: { ...data, password: password }, id });
+  // `password` is deliberately NOT sent.
+  //
+  // This used to pass `item.password` through, but the entitlement table stopped
+  // projecting the password hash (rightly — it has no business reaching the
+  // browser), so the value was `undefined`. handleOfficeEmployee Object.assigns
+  // the payload onto the document, and assigning undefined to a required path
+  // unsets it: the save then failed validation and the button answered
+  // "Something went wrong on Office Employee" every time. Omitting the key
+  // entirely leaves the stored hash alone, which is what was always meant.
+  const handleSubmit = (data, id) => {
+    updateEmployee({ data, id });
   };
 
   return (
@@ -75,6 +91,14 @@ export default function EmployeeUpdate({ item, queryKey }) {
           </DialogDescription>
         </DialogHeader>
         <GlobalForm
+          // Seeded from the row. Without this the dialog opened blank, so
+          // changing one field meant re-entering the others — and with a
+          // carry-forward setting on it, saving would quietly reset that too.
+          initialValues={{
+            employeType: item?.employeType || "",
+            dayPerWeek: item?.dayPerWeek ?? "",
+            ...(item?.joinDate ? {} : { joinDate: new Date() }),
+          }}
           fields={
             // in this one we have to check if the join date is not there we have to add the joinDate field other wise remove it
             item?.joinDate
@@ -94,7 +118,7 @@ export default function EmployeeUpdate({ item, queryKey }) {
                 ]
           }
           isLoading={isPending}
-          onSubmit={(data) => handleSubmit(data, item.password, item?._id)}
+          onSubmit={(data) => handleSubmit(data, item?._id)}
         />
       </DialogContent>
     </Dialog>

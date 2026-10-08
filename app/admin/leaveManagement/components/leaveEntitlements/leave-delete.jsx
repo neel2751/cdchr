@@ -14,10 +14,23 @@ import { useSubmitMutation } from "@/hooks/use-mutate";
 import { deleteOneCommonLeaveToOneEmployee } from "@/server/leaveServer/entitlementServer";
 import { Trash2 } from "lucide-react";
 
+/**
+ * Take one leave type off one employee, for one leave year.
+ *
+ * A soft delete — the row stays on the entitlement document so the days already
+ * taken under it keep something to refer to, and Restore puts it back. The
+ * dialog said "permanently delete your Entitlement and remove your data from our
+ * servers", which was wrong twice: nothing is removed, and it is the employee's
+ * entitlement, not the admin's.
+ *
+ * The server refuses when days have already been booked against the type, so the
+ * message it returns is shown rather than a fixed "Leave Deleted successfully".
+ */
 export default function LeaveDelete({
   leaveType,
   leaveYear,
   employeeId,
+  employeeName,
   queryKey,
 }) {
   const { mutate: deleteLeave, isPending } = useSubmitMutation({
@@ -28,7 +41,7 @@ export default function LeaveDelete({
         employeeId: employeeId,
       }),
     invalidateKey: queryKey,
-    onSuccessMessage: () => "Leave Deleted successfully",
+    onSuccessMessage: (message) => message || "Leave removed",
     onClose: () => {},
   });
 
@@ -46,16 +59,21 @@ export default function LeaveDelete({
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove {leaveType}
+              {employeeName ? ` from ${employeeName}` : ""}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete your
-              Entitlement and remove your data from our servers.
+              They will no longer be able to book {leaveType} in {leaveYear}, and
+              it will stop appearing on their leave summary. Nothing is deleted —
+              the record is kept and you can restore it from this screen. If days
+              have already been booked against it, use Hide instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className="bg-red-600" onClick={deleteLeave}>
-              {isPending ? "Deleting..." : "Delete"}
+              {isPending ? "Removing..." : "Remove"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

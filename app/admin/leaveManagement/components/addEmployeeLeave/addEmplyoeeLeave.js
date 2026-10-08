@@ -1,3 +1,4 @@
+import { useBankHolidayRule } from "@/lib/holiday";
 import {
   Card,
   CardContent,
@@ -13,13 +14,25 @@ import {
 import React, { useState } from "react";
 import LeaveForm from "../leaveRequest/leave-form";
 import { AddLeaveRequest } from "../leaveRequest/request";
-import { isBefore } from "date-fns";
+import { isAfter } from "date-fns";
 import { toast } from "sonner";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { adminEmployeeLeaveRequest } from "@/server/leaveServer/leaveEmployeeServer";
+import {
+  sickNoteField,
+  useSickNoteUpload,
+} from "../leaveRequest/sick-note-field";
 
 export const AddEmploeeLeave = () => {
+  const { isClosedDay } = useBankHolidayRule();
   const [showDialog, setShowDialog] = useState(false);
+
+  // Memoised: GlobalForm resets whenever `initialValues` changes identity, so a
+  // fresh object each render would reset the form on every keystroke.
+  const defaultValues = React.useMemo(
+    () => ({ leaveSubmitDate: new Date() }),
+    []
+  );
 
   const { data: leaveTypes = [] } = useFetchSelectQuery({
     queryKey: ["admin-leave-types"],
@@ -125,6 +138,36 @@ export const AddEmploeeLeave = () => {
           return true;
         },
       },
+      // See leave-request-new.jsx: not offered when the company closes on bank
+      // holidays, and enforced again server-side.
+      disabled: (date) => isClosedDay(date),
+    },
+    // Recording an old absence needs the date it was actually raised.
+    // Left at today it stamps a historical record with today's date, which
+    // reads as leave requested after it had already been taken.
+    {
+      name: "leaveSubmitDate",
+      labelText: "Submit Date",
+      type: "date",
+      placeholder: "Select Submit Date",
+      size: true,
+      validationOptions: {
+        required: "Submit date is required",
+        validate: (value, formValues) => {
+          if (!value) return true;
+          if (isAfter(new Date(value), new Date())) {
+            return "Submit date cannot be in the future";
+          }
+          const firstLeaveDate = [...(formValues?.leaveDates || [])]
+            .map((date) => new Date(date))
+            .sort((a, b) => a - b)[0];
+          if (firstLeaveDate && isAfter(new Date(value), firstLeaveDate)) {
+            return "Submit date should be on or before the first day of leave";
+          }
+          return true;
+        },
+      },
+      disabled: (date) => isAfter(date, new Date()),
     },
     {
       name: "leaveReason",
@@ -133,6 +176,7 @@ export const AddEmploeeLeave = () => {
       placeholder: "Enter Reason",
       size: true,
     },
+    sickNoteField,
   ];
 
   const { mutate: submitLeaveRequest } = useSubmitMutation({
@@ -144,17 +188,17 @@ export const AddEmploeeLeave = () => {
     onClose: () => setShowDialog(false),
   });
 
-  const handleSubmit = (data) => {
-    const { leaveStartDate, leaveEndDate, leaveType } = data;
-    const isBeforeEndDate = isBefore(
-      new Date(leaveEndDate),
-      new Date(leaveStartDate)
-    );
-    if (isBeforeEndDate) {
-      toast.warning("End date should be after start date");
-      return;
+  const { prepareSickNote } = useSickNoteUpload();
+
+  const handleSubmit = async (data) => {
+    // An admin booking sick leave for someone else is held to the same sick
+    // note rule as the employee booking it themselves.
+    const noteResult = await prepareSickNote(data);
+    if (!noteResult.success) {
+      return toast.warning(noteResult.message);
     }
-    submitLeaveRequest(data);
+
+    submitLeaveRequest({ ...data, sickNote: noteResult.sickNote });
   };
 
   return (
@@ -167,7 +211,9 @@ export const AddEmploeeLeave = () => {
         showDialog={showDialog}
         setShowDialog={() => setShowDialog(false)}
         fields={fields}
+        initialValues={defaultValues}
         handleSubmit={handleSubmit}
+        stickyFooter
       />
     </>
   );

@@ -1,6 +1,12 @@
 "use server";
-// import { getLeaveYearString } from "@/lib/getLeaveYear";
-import { differenceInCalendarMonths, isBefore } from "date-fns";
+// The leave year comes from lib/leaveYear.js now — it reads the month the
+// company chose. The old @/lib/getLeaveYear helper hard-coded April and has
+// been deleted; see lib/leaveYear.js for what went wrong with it.
+import {
+  annualLeaveForYear,
+  boundsForLeaveYear,
+  leaveYearBounds,
+} from "@/lib/leaveEntitlement";
 import { getServerSideProps } from "../session/session";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import { connect } from "@/db/db";
@@ -13,6 +19,8 @@ import {
   getPreviousLeaveYearString,
 } from "@/helper/getLeaveYearString";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import { requireEntitlementAccess } from "@/lib/employeeAccess";
+import { carryForwardExpiry, resolveCarryForward } from "@/lib/carryForward";
 
 /**
  * @typedef {Object} LeaveOptions
@@ -79,73 +87,64 @@ class Leave {
 #Points
 
 1: Uk Statutory Leave = 5.6 Weeks x days per week.
-2: Leave Year = April to March (not calendar year).
-3: Round to the nearest whole number.
-4: Only prorate if the employee joined during the current leave year.
+2: Leave Year starts on the month the company chose (LeaveSetting) — April for
+   most, but a January-December company is not unusual.
+3: Round part days UP, in the employee's favour: the figure is a statutory
+   minimum, so rounding down hands somebody less holiday than the law gives.
+4: Only prorate if the employee joined during the leave year being generated.
 5: Days per week can be: full-time (5 or 6) or part-time(e.g:3).
 6: if they joined before of the current leave year -> grant full leave.
+7: if they join AFTER it ends -> nothing. A start date in a future leave year
+   used to produce a negative month count, a negative entitlement, and a stored
+   record saying the employee owed the company leave.
 
-
-#Example
+#Example (April-March leave year)
 
 1: 6 days/week, started in April --> 5.6 * 6 = 33.6 --> 34 days
 2: 5 days/week, started in April --> 5.6 * 5 = 28 days
 3: 3 days/week (part-time), started in April = 5.6 * 3 = 16.8 --> 17 days
-3: 6 days/week, joined in July --> 5.6 * 6 / 12 * 9 = 25.2 --> 25 days
-4: 5 days/week, joined in July --> 5.6 * 5 / 12 * 9 = 20.9 --> 21 days
-5: 3 days/week, joined in july --> 5.6 * 3 / 12 * 9 = 12.6 --> 13 days
+4: 6 days/week, joined 1 July --> 34 * 274/365 = 25.5 --> 26 days
+5: 5 days/week, joined 1 July --> 28 * 274/365 = 21.0 --> 21 days
+6: 3 days/week, joined 1 July --> 17 * 274/365 = 12.6 --> 13 days
 
+The pro-rata is by DAYS employed, not by whole months. The old version counted a
+calendar month as worked however little of it was, so joining on the 30th of June
+was credited the same nine months as joining on the 1st -- about two and a half
+days of leave that had not been accrued -- and the entitlement moved in steps on
+the 1st of each month rather than accruing. See lib/leaveEntitlement.js, which
+holds the arithmetic and the reasoning behind it.
 */
-/**
- * @param {string}
- * @param {number}
- * @returns {object}
- */
 
-async function countAnnualLeave(joinDateStr, dayPerWeek) {
+/**
+ * One employee's annual leave for one leave year.
+ *
+ * `targetLeaveYear` is threaded in rather than always using today's year,
+ * because the caller is not always talking about today: generating a company's
+ * next leave year in advance used to pro-rate everybody against the *current*
+ * one, so a March joiner was given a fraction of a year they would in fact work
+ * all of.
+ *
+ * @param {string|Date} joinDateStr
+ * @param {number} dayPerWeek contracted days per week
+ * @param {string} [targetLeaveYear] e.g. "2026-27". Defaults to today's.
+ * @returns {Promise<number>} whole days
+ */
+async function countAnnualLeave(joinDateStr, dayPerWeek, targetLeaveYear) {
   if (!joinDateStr || dayPerWeek <= 0) return 0;
 
   const settings = await getLeaveSettings(); // later pass companyId
   const startMonth = settings?.data?.leaveYearStartMonth || 4; // 1-12
 
-  const now = new Date();
-  const joinDate = new Date(joinDateStr);
+  const { start, end } = targetLeaveYear
+    ? boundsForLeaveYear(targetLeaveYear, startMonth)
+    : leaveYearBounds(new Date(), startMonth);
 
-  // calculate leave year start and end dynamically
-  const currentMonth = now.getMonth() + 1; // getMonth is zero-based
-  let startYear;
-  if (currentMonth >= startMonth) {
-    startYear = now.getFullYear();
-  } else {
-    startYear = now.getFullYear() - 1;
-  }
-
-  const leaveYearStart = new Date(startYear, startMonth - 1, 1);
-  const leaveYearEnd = new Date(startYear + 1, startMonth - 1, 0);
-  // last day before next leave year starts
-
-  // const leaveYearStart = new Date(
-  //   now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1,
-  //   3,
-  //   1
-  // );
-  // const leaveYearEnd = new Date(leaveYearStart.getFullYear() + 1, 2, 31);
-
-  const weeklyFactor = 5.6;
-  const fullLeave = weeklyFactor * dayPerWeek;
-
-  if (joinDate < leaveYearStart) {
-    return Math.round(fullLeave);
-  }
-
-  // if (isBefore(joinDateStr, leaveYearStart)) {
-  //   return Math.round(fullLeave);
-  // }
-
-  const monthsRemaining =
-    differenceInCalendarMonths(leaveYearEnd, joinDateStr) + 1;
-  const proratedLeave = (fullLeave / 12) * monthsRemaining;
-  return Math.round(proratedLeave);
+  return annualLeaveForYear({
+    joinDate: joinDateStr,
+    dayPerWeek,
+    leaveYearStart: start,
+    leaveYearEnd: end,
+  });
 }
 
 async function countSickLeaveWithSSP() {
@@ -204,9 +203,16 @@ export async function syncMissingLeaveTypesNew(
     if (!mongooseId) return { success: false, message: "Invalid employeeId" };
 
     const settings = await getLeaveSettings();
+    // `.data`, not the wrapper. This read said `settings.leaveYearStartMonth`,
+    // which is always undefined — getLeaveSettings returns `{ success, data }` —
+    // so getLeaveYearString fell back to its April default. For any company on
+    // a leave year that does not start in April, this filed the employee's
+    // entitlement under the wrong year key while the screens that show it
+    // computed the right one, and the employee appeared to have no entitlement
+    // at all.
     const currentYear = getLeaveYearString(
       new Date(),
-      settings.leaveYearStartMonth,
+      settings?.data?.leaveYearStartMonth,
     );
 
     const leaveData = await getLeaveData(employeeId, currentYear, true);
@@ -288,11 +294,23 @@ export async function countLeaveNewFirstTime(
   }
 }
 
+/**
+ * @param {Object} input
+ * @param {string} input.employeeId
+ * @param {string|Date} input.joinDate
+ * @param {number} input.dayPerWeek
+ * @param {string} input.targetLeaveYear e.g. "2025-26"
+ * @param {Object} [input.employee] the employee record, when the caller already
+ *   has it. Carry-forward eligibility depends on their employment type,
+ *   department, start date and personal override, so it has to be read from
+ *   somewhere — passing it in keeps the bulk path from re-fetching per employee.
+ */
 export async function generateLeaveForNewYear({
   employeeId,
   joinDate,
   dayPerWeek,
   targetLeaveYear, // e.g. "2025-26"
+  employee,
 }) {
   await connect();
 
@@ -314,46 +332,93 @@ export async function generateLeaveForNewYear({
   }).lean();
 
   // Base new-year leaves (no carry forward yet)
-  const baseLeaves = await generateDefaultLeaves(joinDate, dayPerWeek);
+  const baseLeaves = await generateDefaultLeaves(
+    joinDate,
+    dayPerWeek,
+    targetLeaveYear,
+  );
 
   if (!carryForwardEnabled || !previousLeave) {
     return baseLeaves;
   }
 
+  const { start: targetYearStart } = boundsForLeaveYear(
+    targetLeaveYear,
+    settings?.data?.leaveYearStartMonth,
+  );
+
+  // Only the four fields eligibility turns on. Fetched here when the caller did
+  // not supply them — a single employee being generated has no record in hand,
+  // while the whole-company sweep does.
+  const subject =
+    employee ||
+    (await OfficeEmployeeModel.findById(employeeId)
+      .select("employeType department joinDate dayPerWeek carryForwardOverrides")
+      .lean());
+
   const finalLeaves = baseLeaves.map((leave) => {
-    const rule = rules.find((r) => r.leaveType === leave.leaveType);
-
-    if (!rule || !rule.allowed || !previousLeave) {
-      return leave;
-    }
-
     const prevType = previousLeave.leaveData.find(
       (l) => l.leaveType === leave.leaveType,
     );
 
-    if (!prevType || prevType.remaining <= 0) {
-      return leave;
-    }
+    // One shared rule, in lib/carryForward.js, rather than a fourth copy of it.
+    // It also caps the carry at the leave type's own ceiling, which nothing did
+    // before: 34 fresh days plus 30 carried used to store a total of 64, above
+    // the 60 anybody is allowed to set by hand — which left the row permanently
+    // uneditable.
+    const carried = resolveCarryForward({
+      enabled: carryForwardEnabled,
+      rule: rules.find((r) => r.leaveType === leave.leaveType),
+      previousRemaining: prevType?.remaining,
+      baseTotal: leave.total,
+      leaveType: leave.leaveType,
+      unit: leave.type === "weeks" ? "weeks" : "days",
+      // WHO. A company allowing carry-forward for some staff and not others is
+      // the normal case; see carryForwardEligibility() in lib/carryForward.js.
+      employee: subject,
+      leaveYearStart: targetYearStart,
+    });
 
-    const carryDays = Math.min(prevType.remaining, rule.maxDays || 0);
-
-    if (carryDays <= 0) {
-      return leave;
-    }
+    if (carried.days <= 0) return leave;
 
     return {
       ...leave,
-      total: leave.total + carryDays,
-      remaining: leave.remaining + carryDays,
-      carryForwarded: carryDays,
+      total: leave.total + carried.days,
+      remaining: leave.remaining + carried.days,
+      // Kept so the screens can explain a total nobody can otherwise account
+      // for. `carryForwarded` and `previousRemaining` were already written here
+      // and read by absolutely nothing, which is why an employee could end up
+      // holding 44 days of annual leave with no breakdown anywhere on screen.
+      carryForwarded: carried.days,
       previousRemaining: prevType.remaining,
+      carriedFrom: prevLeaveYear,
+      // "policy" or "override-always" — which of the two decided it.
+      carryForwardVia: carried.via || "policy",
+      // The entitlement before anything was carried, so the two halves of the
+      // figure stay separable after the fact.
+      baseTotal: leave.total,
+      carryForwardExpiresAt: carryForwardExpiry(
+        rules.find((r) => r.leaveType === leave.leaveType),
+        targetYearStart,
+      ),
     };
   });
 
   return finalLeaves;
 }
 
-export async function generateDefaultLeaves(joinDate, dayPerWeek) {
+/**
+ * @param {string|Date} joinDate
+ * @param {number} dayPerWeek
+ * @param {string} [targetLeaveYear] which leave year the annual figure is for.
+ *   Omitted means today's — correct for a new starter, wrong for a year being
+ *   generated ahead of time.
+ */
+export async function generateDefaultLeaves(
+  joinDate,
+  dayPerWeek,
+  targetLeaveYear,
+) {
   // Fetch all active leave categories
   const categories = await LeaveCategoryModel.find({
     isActive: true,
@@ -386,7 +451,7 @@ export async function generateDefaultLeaves(joinDate, dayPerWeek) {
 
     // Annual Leave (special calculation)
     if (cat.leaveType === "Annual Leave") {
-      const annualCount = await countAnnualLeave(joinDate, dayPerWeek);
+      const annualCount = await countAnnualLeave(joinDate, dayPerWeek, targetLeaveYear);
 
       leaveInstance = new Leave({
         leaveType: "Annual Leave",
@@ -436,7 +501,7 @@ export async function generateDefaultLeaves(joinDate, dayPerWeek) {
 
   // Annual Leave (if admin removed it accidentally)
   if (!addedTypes.has("Annual Leave")) {
-    const annualCount = await countAnnualLeave(joinDate, dayPerWeek);
+    const annualCount = await countAnnualLeave(joinDate, dayPerWeek, targetLeaveYear);
 
     addLeave(
       new Leave({
@@ -542,7 +607,14 @@ export async function getLeaveData(employeeId, leaveYear, server) {
 
 async function checkWithStoreLeaveType(leaveData, employeeId, leaveYear) {
   try {
-    const allLeave = await LeaveCategoryModel.find();
+    // Filtered, which it was not. `find()` with no criteria returns deleted and
+    // deactivated categories too, so every press of the scan button re-added
+    // leave types an admin had removed — and the employee got a fresh allowance
+    // of each.
+    const allLeave = await LeaveCategoryModel.find({
+      isDeleted: false,
+      isActive: true,
+    });
     const existingLeave = leaveData?.data?.leaveData.map(
       (leave) => leave.leaveType,
     );
@@ -580,8 +652,33 @@ async function checkWithStoreLeaveType(leaveData, employeeId, leaveYear) {
   }
 }
 
-// Add one common leave to one employee
-
+/**
+ * Give one employee one more leave type, for one leave year.
+ *
+ * Behind the "+" on the entitlement sheet, for a type the employee does not have
+ * — usually because it was created after their entitlements were built.
+ *
+ * TWO THINGS WERE WRONG.
+ *
+ * `remaining` was hard-coded to 0, and `used` was set to the *whole* allowance
+ * whenever `leaveDays` was passed. So the button created a leave type the
+ * employee could not take a single day of: the sheet showed "20 total, 0
+ * remaining" and every booking against it was refused for lack of balance.
+ * Remaining is now derived — an allowance minus what has been taken of it,
+ * which for a type being added for the first time is all of it.
+ *
+ * And there was no authorisation at all. Every exported "use server" function is
+ * an addressable endpoint whether or not a button points at it, so this took an
+ * employee id from its caller and wrote to that employee's entitlements — any
+ * signed-in account could hand itself an allowance. Guarded now by the same rule
+ * that governs every other write to somebody else's record.
+ *
+ * @param {Object} input
+ * @param {string} input.leaveType must already exist as a LeaveCategory
+ * @param {string} input.leaveYear e.g. "2026-27"
+ * @param {string} input.employeeId
+ * @param {number} [input.leaveDays] override the category's allowance
+ */
 export async function addOneCommonLeaveToOneEmployee({
   leaveType,
   leaveYear,
@@ -589,9 +686,24 @@ export async function addOneCommonLeaveToOneEmployee({
   leaveDays,
 }) {
   try {
+    const refusal = await requireEntitlementAccess(employeeId);
+    if (refusal) return refusal;
+
+    if (!leaveType || !leaveYear || !employeeId) {
+      return {
+        success: false,
+        message: "Leave type, leave year and employee are all required",
+      };
+    }
+    if (!isValidObjectId(employeeId)) {
+      return { success: false, message: "Invalid employeeId" };
+    }
+
+    await connect();
     const employeeObjectId = createObjectId(employeeId); // Convert employeeId once
     const existingLeaveCatogory = await LeaveCategoryModel.findOne({
       leaveType,
+      isDeleted: false,
     });
     if (!existingLeaveCatogory)
       return {
@@ -609,24 +721,48 @@ export async function addOneCommonLeaveToOneEmployee({
         message: "Leave Category already added",
       };
     }
+
+    // An explicit figure wins over the category's default, but it has to be a
+    // real number of days — a blank field arriving as "" would otherwise become
+    // an allowance of zero.
+    const override = Number(leaveDays);
+    const total =
+      leaveDays !== undefined && leaveDays !== null && leaveDays !== ""
+        ? override
+        : Number(existingLeaveCatogory.total);
+
+    if (!Number.isFinite(total) || total < 0) {
+      return { success: false, message: "Invalid number of days" };
+    }
+
     const leaveData = new Leave({
       leaveType: existingLeaveCatogory?.leaveType,
-      total: leaveDays ? leaveDays : existingLeaveCatogory?.total,
-      used: leaveDays ? leaveDays : 0,
-      remaining: 0,
+      total,
+      // Nothing has been taken of an allowance that did not exist a moment ago.
+      used: 0,
+      remaining: total,
       type: existingLeaveCatogory.type || "days",
       isPaid: existingLeaveCatogory?.isPaid === "Paid" ? true : false,
       isHide: existingLeaveCatogory?.isHide === "Hide" ? true : false,
     });
 
     // update the common leave data
-    await CommonLeaveModel.updateOne(
+    const result = await CommonLeaveModel.updateOne(
       { employeeId: employeeObjectId, leaveYear },
       {
         $push: { leaveData: leaveData },
       },
     );
-    return { success: true, message: "Missing leave types synced" };
+    // An employee with no entitlement document for this year has nothing to push
+    // onto. Said plainly rather than reported as success — the row would simply
+    // not appear, and the admin would press the button again.
+    if (!result.matchedCount) {
+      return {
+        success: false,
+        message: `This employee has no entitlements for ${leaveYear} yet. Build them from Leave → Setup first.`,
+      };
+    }
+    return { success: true, message: `${leaveType} added` };
   } catch (error) {
     console.log("Error in addOneCommonLeaveToOneEmployee", error);
     return { success: false, message: "Something want wrong" };
@@ -680,6 +816,8 @@ export async function generateNewLeaveYearForAllEmployees(
           joinDate: emp.joinDate,
           dayPerWeek,
           targetLeaveYear: leaveYear,
+          // Already in hand, so eligibility costs no extra query per employee.
+          employee: emp,
         });
 
         await CommonLeaveModel.create({
@@ -811,6 +949,12 @@ export async function previewCarryForwardForCompany() {
       currentLeaveYear,
       startMonth,
     );
+    // For the service-length condition: how long they had served by the time the
+    // year they are carrying into began.
+    const { start: currentYearStart } = boundsForLeaveYear(
+      currentLeaveYear,
+      startMonth,
+    );
 
     // Get all active employees
     const employees = await OfficeEmployeeModel.find({
@@ -833,6 +977,7 @@ export async function previewCarryForwardForCompany() {
       const baseLeaves = await generateDefaultLeaves(
         emp.joinDate,
         emp.dayPerWeek,
+        currentLeaveYear,
       );
 
       for (const leave of baseLeaves) {
@@ -842,16 +987,20 @@ export async function previewCarryForwardForCompany() {
           (l) => l.leaveType === leave.leaveType,
         );
 
-        let willCarry = 0;
-
-        if (
-          carryForwardEnabled &&
-          rule?.enabled &&
-          prevType &&
-          prevType.remaining > 0
-        ) {
-          willCarry = Math.min(prevType.remaining, rule.maxDays || 0);
-        }
+        // `rule?.enabled` here used to be the whole bug: the schema field is
+        // `allowed`, so this condition was never true and the preview reported
+        // zero carry-forward for everybody while the generator carried days.
+        // Both now go through the same function.
+        const carried = resolveCarryForward({
+          enabled: carryForwardEnabled,
+          rule,
+          previousRemaining: prevType?.remaining,
+          baseTotal: leave.total,
+          leaveType: leave.leaveType,
+          unit: leave.type === "weeks" ? "weeks" : "days",
+          employee: emp,
+          leaveYearStart: currentYearStart,
+        });
 
         previewResults.push({
           employeeId: emp._id,
@@ -859,8 +1008,12 @@ export async function previewCarryForwardForCompany() {
           leaveType: leave.leaveType,
           remainingLastYear: prevType?.remaining || 0,
           ruleMax: rule?.maxDays || 0,
-          willCarry,
-          newTotal: leave.total + willCarry,
+          willCarry: carried.days,
+          willLose: carried.lost,
+          explanation: carried.explanation,
+          eligible: carried.outcome !== "not-eligible",
+          via: carried.via || "policy",
+          newTotal: leave.total + carried.days,
         });
       }
     }
@@ -901,31 +1054,52 @@ export async function previewCarryForwardPerCompany(targetDate = new Date()) {
     rulesMap.set(r.leaveType, r);
   });
 
+  // Everybody at once rather than one findById per employee inside the loop,
+  // which is what this did — and it needs more than the name now, because
+  // carry-forward eligibility turns on employment type, department, start date
+  // and the personal override.
+  const employees = await OfficeEmployeeModel.find({
+    _id: { $in: previousLeaves.map((row) => row.employeeId) },
+  })
+    .select("name employeType department joinDate dayPerWeek carryForwardOverrides")
+    .lean();
+  const employeeById = new Map(employees.map((e) => [String(e._id), e]));
+
+  const { start: currentYearStart } = boundsForLeaveYear(
+    currentLeaveYear,
+    startMonth,
+  );
+
   const preview = [];
 
   for (const empLeave of previousLeaves) {
     const carried = [];
+    const employee = employeeById.get(String(empLeave.employeeId));
 
     for (const leave of empLeave.leaveData) {
-      const rule = rulesMap.get(leave.leaveType);
+      // The same shared rule. Note this preview has no new-year entitlement to
+      // measure the ceiling against, so it passes the old total — which is the
+      // closest honest stand-in and errs towards reporting less, not more.
+      const outcome = resolveCarryForward({
+        enabled: true, // the caller already refused when the switch is off
+        rule: rulesMap.get(leave.leaveType),
+        previousRemaining: leave.remaining,
+        baseTotal: leave.total,
+        leaveType: leave.leaveType,
+        unit: leave.type === "weeks" ? "weeks" : "days",
+        employee,
+        leaveYearStart: currentYearStart,
+      });
 
-      if (!rule || !rule.allowed) continue;
-
-      const maxAllowed = rule.maxDays ?? 0;
-      const carryAmount = Math.min(leave.remaining, maxAllowed);
-
-      if (carryAmount > 0) {
+      if (outcome.days > 0) {
         carried.push({
           leaveType: leave.leaveType,
           remainingLastYear: leave.remaining,
-          willCarryForward: carryAmount,
+          willCarryForward: outcome.days,
+          explanation: outcome.explanation,
         });
       }
     }
-    // based on the employeeId find the employee Name
-    const employee = await OfficeEmployeeModel.findById(
-      empLeave.employeeId,
-    ).lean();
 
     if (carried.length > 0) {
       preview.push({
