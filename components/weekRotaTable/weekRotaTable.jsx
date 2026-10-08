@@ -19,6 +19,7 @@ import {
 import { Button } from "../ui/button";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { useFetchSelectQuery } from "@/hooks/use-query";
+import { useBankHolidayRule } from "@/lib/holiday";
 import {
   getSelectAttendanceCategory,
   getSelectProjects,
@@ -66,6 +67,24 @@ const WeekRotaTable = ({
   const [reason, setReason] = React.useState("");
   const [pendingSchedules, setPendingSchedules] = React.useState(null);
 
+  const { isClosedDay } = useBankHolidayRule();
+
+  const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  /** The calendar date a weekday label falls on in the week being edited. */
+  const dateFor = (day) =>
+    format(addDays(currentWeek, WEEK_DAYS.indexOf(day)), "yyyy-MM-dd");
+
+  /**
+   * Days nobody is rostered onto: Sunday always, and a bank holiday when the
+   * company closes for it.
+   *
+   * Kept as one predicate so the two autofill branches and the edit guard
+   * cannot disagree about which days are off — which is exactly how Sunday
+   * ended up handled three slightly different ways.
+   */
+  const nonWorking = (day, date) => day === "Sun" || isClosedDay(date);
+
   const findMostCommonCategory = (schedule = []) => {
     const frequency = schedule.reduce((acc, dayEntry) => {
       const category = dayEntry?.category;
@@ -83,6 +102,10 @@ const WeekRotaTable = ({
 
   const handleScheduleChange = (employeeId, day, field, value, date) => {
     if (day === "Sun") return; // Skip Sunday as it should always be OFF
+    // A bank holiday the company closes for is not a day anyone is rostered
+    // on, so it is locked the same way Sunday is. Companies that work bank
+    // holidays are unaffected — isClosedDay is false for them.
+    if (isClosedDay(date)) return;
     setSchedules((prevSchedules) =>
       prevSchedules.map((schedule) => {
         if (schedule.employeeId === employeeId) {
@@ -148,10 +171,18 @@ const WeekRotaTable = ({
                   ),
                   "yyyy-MM-dd"
                 ),
-                // Ensure Sunday is always OFF
-                category: entry.day === "Sun" ? "OFF" : entry.category,
-                startTime: entry.day === "Sun" ? "00:00" : entry.startTime,
-                endTime: entry.day === "Sun" ? "00:00" : entry.endTime,
+                // Sunday and any observed bank holiday are always OFF.
+                // Copying last week forward would otherwise roster people onto
+                // a day the office is shut.
+                category: nonWorking(entry.day, dateFor(entry.day))
+                  ? "OFF"
+                  : entry.category,
+                startTime: nonWorking(entry.day, dateFor(entry.day))
+                  ? "00:00"
+                  : entry.startTime,
+                endTime: nonWorking(entry.day, dateFor(entry.day))
+                  ? "00:00"
+                  : entry.endTime,
               })),
             };
           }
@@ -175,8 +206,9 @@ const WeekRotaTable = ({
           const updatedSchedule = days.map((day) => {
             const existingDay = scheduleMap.get(day);
 
-            // If it's Sunday, always return OFF
-            if (day === "Sun") {
+            // Sunday, and any bank holiday the company closes for, are always
+            // OFF rather than filled with a default shift.
+            if (nonWorking(day, dateFor(day))) {
               return {
                 day,
                 category: "OFF",

@@ -1,7 +1,9 @@
 "use server";
 
+import { resolveRegion } from "@/data/bankHolidayRegions";
+
 const BANK_HOLIDAY_URL = "https://www.gov.uk/bank-holidays.json";
-const REGION = "england-and-wales";
+
 
 /**
  * UK bank holidays for the current year onwards, from gov.uk.
@@ -13,8 +15,13 @@ const REGION = "england-and-wales";
  *
  * Cached for a day — the published list changes at most a few times a year.
  */
-export async function getBankHolidays() {
+export async function getBankHolidays(region) {
   try {
+    // An unrecognised region falls back rather than returning nothing: the
+    // caller would otherwise get an empty list, and an empty list means "no
+    // bank holidays", which would quietly deduct days people should keep.
+    const division = resolveRegion(region);
+
     const res = await fetch(BANK_HOLIDAY_URL, {
       next: { revalidate: 60 * 60 * 24 },
     });
@@ -26,7 +33,7 @@ export async function getBankHolidays() {
     }
 
     const payload = await res.json();
-    const events = payload?.[REGION]?.events;
+    const events = payload?.[division]?.events;
     if (!Array.isArray(events)) {
       return { success: false, message: "Unexpected bank holiday response" };
     }
@@ -40,7 +47,11 @@ export async function getBankHolidays() {
       })
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-    return { success: true, data: JSON.stringify(upcoming) };
+    return {
+      success: true,
+      data: JSON.stringify(upcoming),
+      region: division,
+    };
   } catch (error) {
     console.log("Error fetching bank holidays:", error?.message);
     return { success: false, message: "Could not load bank holidays" };
