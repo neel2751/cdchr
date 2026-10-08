@@ -1,462 +1,112 @@
 "use server";
 import { getServerSideProps } from "../session/session";
-import qrcode from "qrcode";
-import jwt from "jsonwebtoken";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
-import ClockModel from "@/models/clockModel";
 import { connect } from "@/db/db";
-import { normalizeDateToUTC } from "@/lib/formatDate";
-import { format } from "date-fns";
-import { storeSiteEmployeeClockTime } from "../siteAssignmentServer/siteAssignmentServer";
-import ClockRecordModel from "@/models/clockInModel";
+import { getClockTime, getWorkingDate } from "@/lib/clockTime";
+import {
+  consumeClockToken,
+  verifyClockToken,
+} from "@/server/clockServer/clockTokenStore";
+import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import { resolveOrCreateLocationForSite } from "@/server/clockServer/clockLocationStore";
+import ClockLocationModel from "@/models/clockLocationModel";
+import { performClockAction } from "@/server/clockServer/clockActions";
 
-export async function getQRCodeToken(expiresIn = "20s") {
-  try {
-    const { props } = await getServerSideProps();
-    const { _id } = props.session.user;
-    // we have to make our own token with expiration time using HMAC
-    const jwtToken = await generateToken(_id, expiresIn);
-    const response = await getQRCode(jwtToken);
-    if (!response.success) {
-      return { success: false, message: "Error generating QR code" };
-    }
-    const qrData = response.qrData;
-    return { success: true, data: JSON.stringify({ qrData }) };
-  } catch (error) {
-    console.error("Error generating QR code:", error);
-    return { success: false, message: "Error generating QR code" };
-  }
-}
-export async function generateToken(userId, expiresIn) {
-  return jwt.sign({ userId }, process.env.NEXTAUTH_SECRET, {
-    expiresIn,
-  });
-}
-
-export async function verifyToken(token) {
-  try {
-    const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET);
-    if (!decoded) return { success: false, message: "Invalid token" };
-
-    return {
-      success: true,
-      employeeId: decoded.employeeId,
-      action: decoded.action,
-      siteId: decoded?.siteId ? decoded?.siteId : "",
-    };
-  } catch (error) {
-    console.error("Error verifying token:", error);
-    return { success: false, message: "Invalid token" };
-  }
-}
-
+/**
+ * The working day and wall-clock time to record a scan against.
+ *
+ * `date` is UTC midnight of the UK calendar day — the same value every other
+ * clock query uses. It used to be a "YYYY-MM-DD" string built by round-tripping
+ * UK parts through a server-local Date, which shifted the day either side of
+ * midnight; see lib/clockTime.js.
+ */
 export async function getCurrentTimeAndDate() {
   try {
-    const formatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/London",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-
-    const parts = formatter.formatToParts(new Date());
-    const dateParts = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-
-    // Construct a valid ISO string manually (YYYY-MM-DDTHH:MM:SS)
-    const ukDate = new Date(
-      `${dateParts.year}-${dateParts.month}-${dateParts.day}T${dateParts.hour}:${dateParts.minute}:${dateParts.second}`
-    );
-
-    const currentTime = format(ukDate, "HH:mm");
-    const date = ukDate.toISOString().split("T")[0];
-
-    return { success: true, date, currentTime };
+    return {
+      success: true,
+      date: getWorkingDate(),
+      currentTime: getClockTime(),
+    };
   } catch (error) {
     console.error("Error getting UK time:", error);
     return { success: false, message: "Error getting current UK time" };
   }
 }
 
-export async function getCurrentTimeAndDateOld() {
-  try {
-    const currentDate = new Date();
-    const utcDate = new Date(
-      currentDate.getUTCFullYear(),
-      currentDate.getUTCMonth(),
-      currentDate.getUTCDate(),
-      currentDate.getUTCHours(),
-      currentDate.getUTCMinutes(),
-      currentDate.getUTCSeconds()
-    );
-    const date = normalizeDateToUTC(utcDate);
-    const currentTime = format(utcDate, "HH:mm");
-    return { success: true, date, currentTime };
-  } catch (error) {
-    console.error("Error getting current time:", error);
-    return { success: false, message: "Error getting current time" };
-  }
-}
-
-export async function storeClockTimeOld(token, codeSiteId) {
-  try {
-    const decode = await verifyToken(token);
-    if (!decode.success) return decode;
-
-    await connect();
-    const employeeId = decode.employeeId;
-    const action = decode.action;
-    const siteId = decode?.siteId;
-
-    if (!employeeId || !action)
-      return { success: false, message: "Invalid token" };
-
-    const { success, date, currentTime } = await getCurrentTimeAndDate();
-    if (!success) return { success: false, message: "Error getting time" };
-
-    const isValidId = isValidObjectId(employeeId);
-    if (!isValidId) return { success: false, message: "Invalid Employee Id" };
-
-    const employeeOid = createObjectId(employeeId);
-    if (siteId) {
-      const mainSiteId = decode(codeSiteId);
-      if (siteId !== mainSiteId)
-        return {
-          success: false,
-          message: " You are not belongs to this site Id",
-        };
-      return await storeSiteEmployeeClockTime(decode);
-    } else {
-      const existing = await OfficeEmployeeModel.findById(employeeOid);
-      if (!existing) return { success: false, message: "Employee not found" };
-
-      const existingAttendance = await ClockModel.findOne({
-        employeeId: employeeOid,
-        date: date,
-      });
-
-      console.log("Existing Attendance:", existingAttendance);
-
-      const MIN_BREAK_DURATION_MINUTES = 30;
-      const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
-      const MIN_BREAK_TIME_HOURS = 2;
-
-      if (!existingAttendance && action !== "clockIn") {
-        return { success: false, message: "You must clock in first." };
-      }
-
-      if (!existingAttendance && action === "clockIn") {
-        await new ClockModel({
-          employeeId: employeeOid,
-          date: date,
-          clockIn: currentTime,
-          clockInStatus: true,
-          actions: [
-            {
-              action: "clockIn",
-              time: date,
-              source: "scanner",
-            },
-          ],
-        }).save();
-        return { success: true, message: "Clocked In", employeeId };
-      }
-
-      if (
-        action === "breakIn" &&
-        !existingAttendance.breakIn &&
-        !existingAttendance.clockOut
-      ) {
-        const timeSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
-
-        if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
-          return {
-            success: false,
-            message: `Cannot take break within ${MIN_BREAK_TIME_HOURS} hours of clocking in.`,
-          };
-        }
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { breakIn: currentTime },
-            $push: {
-              actions: {
-                action: "breakIn",
-                time: date,
-                source: "scanner",
-              },
-            },
-          }
-        );
-        return { success: true, message: "Break In", employeeId };
-      }
-
-      if (
-        action === "breakOut" &&
-        existingAttendance.breakIn &&
-        !existingAttendance.breakOut &&
-        !existingAttendance.clockOut
-      ) {
-        const breakDuration =
-          (currentTime - existingAttendance.breakIn) / (1000 * 60); // in minutes
-        if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
-          return {
-            success: false,
-            message: `Break must be at least ${MIN_BREAK_DURATION_MINUTES} minutes.`,
-          };
-        }
-
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { breakOut: currentTime },
-            $push: {
-              actions: {
-                action: "breakOut",
-                time: date,
-                source: "scanner",
-              },
-            },
-          }
-        );
-        return { success: true, message: "Break Out", employeeId };
-      }
-
-      if (action === "clockOut" && !existingAttendance.clockOut) {
-        const hoursSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
-        if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
-          return {
-            success: false,
-            message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
-          };
-        }
-
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { clockOut: currentTime },
-            $push: {
-              actions: {
-                action: "clockOut",
-                time: date,
-                source: "scanner",
-              },
-            },
-          }
-        );
-
-        const autoFlag =
-          !existingAttendance.breakIn || !existingAttendance.breakOut;
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          { $set: { clockInStatus: autoFlag } }
-        );
-
-        return {
-          success: true,
-          message: autoFlag ? "Clocked Out (No Break)" : "Clocked Out",
-          employeeId,
-        };
-      }
-
+/**
+ * May this employee clock in against the place this code was displayed?
+ *
+ * A site code needs a roster entry for that site on that day — the same
+ * assignment `canEmployeeClockToday` reads to decide which site to show the
+ * employee, asked the other way round. An office code needs the scanner to be
+ * office staff, since a site worker has no business on the office clock.
+ */
+async function canClockAtLocation({
+  employeeId,
+  siteId,
+  date,
+  isOfficeEmployee,
+}) {
+  if (!siteId) {
+    if (!isOfficeEmployee) {
       return {
-        success: false,
-        message: "Already clocked out or invalid action.",
+        ok: false,
+        message: "This code is for office staff. Use the code at your site.",
       };
     }
-  } catch (error) {
-    console.error("Error storing clock time:", error);
-    return { success: false, message: "Error storing clock time" };
+    return { ok: true };
   }
-}
 
-// use Every where for the get the qr code accross the app
-export async function getQRCode(data) {
-  try {
-    const options = {
-      errorCorrectionLevel: "H",
-      type: "image/jpeg",
-      quality: 0.95,
-      margin: 1,
-      width: 200,
-      color: {
-        dark: "#010599FF",
-        light: "#FFBF60FF",
-      },
+  const assigned = await SiteAssignmentModel.findOne({
+    assignDate: date,
+    siteId: createObjectId(siteId),
+    "assignedEmployees.employeeId": createObjectId(employeeId),
+  })
+    .select("_id")
+    .lean();
+
+  if (!assigned) {
+    return {
+      ok: false,
+      message: "You are not assigned to this site today. Speak to your manager.",
     };
-
-    const qrData = await qrcode.toDataURL(data, options);
-    return { success: true, qrData };
-  } catch (error) {
-    console.error("Error generating QR code:", error);
-    return { success: false, message: "Error generating QR code" };
   }
+  return { ok: true };
 }
 
-export async function storeClockTime(token, codeSiteId, action) {
+/**
+ * Record a scan.
+ *
+ * The site is no longer a parameter. It used to be — the caller passed the
+ * token, the site and the action, and only the token's *signature* was ever
+ * checked; its payload was discarded. So the site an employee clocked in at
+ * was simply whatever their browser claimed, and any unexpired token signed
+ * with the app secret unlocked any site. Now the site comes from the code that
+ * was scanned, and the code is spent when it is used.
+ *
+ * The action stays a parameter, deliberately. The reception screen mints a
+ * code with no action in it — employees pick what they are doing on their own
+ * device — and the action is not a privilege: what someone may do next is
+ * fixed by the state of their own record, which checkClockAction enforces.
+ */
+export async function storeClockTimeNew(token, action, clientEvidence = {}) {
   try {
-    console.log("Decoded Token:", token, action);
-    const decode = await verifyToken(token);
-    if (!decode.success) return decode;
-    const { props } = await getServerSideProps();
-    await connect();
-    const employeeId = props?.session?.user?._id;
-
-    if (!employeeId || !action)
-      return { success: false, message: "Invalid token" };
-
-    const { success, date, currentTime } = await getCurrentTimeAndDate();
-    if (!success) return { success: false, message: "Error getting time" };
-
-    const isValidId = isValidObjectId(employeeId);
-    if (!isValidId) return { success: false, message: "Invalid Employee Id" };
-
-    const employeeOid = createObjectId(employeeId);
-    if (codeSiteId) {
-      console.log("Site ID Present:", codeSiteId);
-      // const mainSiteId = decode(codeSiteId);
-      // if (siteId !== mainSiteId)
-      //   return {
-      //     success: false,
-      //     message: " You are not belongs to this site Id",
-      //   };
-      decode.siteId = codeSiteId;
-      decode.action = action;
-      decode.employeeId = employeeId;
-      return await storeSiteEmployeeClockTime(decode);
-    } else {
-      const existing = await OfficeEmployeeModel.findById(employeeOid);
-      if (!existing) return { success: false, message: "Employee not found" };
-
-      const existingAttendance = await ClockModel.findOne({
-        employeeId: employeeOid,
-        date: date,
-      });
-
-      const MIN_BREAK_DURATION_MINUTES = 30;
-      const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
-      const MIN_BREAK_TIME_HOURS = 2;
-
-      if (!existingAttendance && action !== "clockIn") {
-        return { success: false, message: "You must clock in first." };
-      }
-
-      if (!existingAttendance && action === "clockIn") {
-        await new ClockModel({
-          employeeId: employeeOid,
-          date: date,
-          clockIn: currentTime,
-          clockInStatus: true,
-        }).save();
-        return { success: true, message: "Clocked In", employeeId };
-      }
-
-      if (
-        action === "breakIn" &&
-        !existingAttendance.breakIn &&
-        !existingAttendance.clockOut
-      ) {
-        const timeSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
-
-        if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
-          return {
-            success: false,
-            message: `Cannot take break within ${MIN_BREAK_TIME_HOURS} hours of clocking in.`,
-          };
-        }
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { breakIn: currentTime },
-          }
-        );
-        return { success: true, message: "Break In", employeeId };
-      }
-
-      if (
-        action === "breakOut" &&
-        existingAttendance.breakIn &&
-        !existingAttendance.breakOut &&
-        !existingAttendance.clockOut
-      ) {
-        const breakDuration =
-          (currentTime - existingAttendance.breakIn) / (1000 * 60); // in minutes
-        if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
-          return {
-            success: false,
-            message: `Break must be at least ${MIN_BREAK_DURATION_MINUTES} minutes.`,
-          };
-        }
-
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { breakOut: currentTime },
-          }
-        );
-        return { success: true, message: "Break Out", employeeId };
-      }
-
-      if (action === "clockOut" && !existingAttendance.clockOut) {
-        const hoursSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
-        if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
-          return {
-            success: false,
-            message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
-          };
-        }
-
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          {
-            $set: { clockOut: currentTime },
-          }
-        );
-
-        const autoFlag =
-          !existingAttendance.breakIn || !existingAttendance.breakOut;
-        await ClockModel.updateOne(
-          { employeeId: employeeOid, date: date },
-          { $set: { clockInStatus: autoFlag } }
-        );
-
-        return {
-          success: true,
-          message: autoFlag ? "Clocked Out (No Break)" : "Clocked Out",
-          employeeId,
-        };
-      }
-
-      return {
-        success: false,
-        message: "Already clocked out or invalid action.",
-      };
-    }
-  } catch (error) {
-    console.error("Error storing clock time:", error);
-    return { success: false, message: "Error storing clock time" };
-  }
-}
-
-export async function storeClockTimeNew(token, codeSiteId, action) {
-  try {
-    const decode = await verifyToken(token);
-    if (!decode.success) return decode;
     await connect();
     const { props } = await getServerSideProps();
     const employeeId = props?.session?.user?._id;
     if (!employeeId || !action)
-      return { success: false, message: "Invalid token" };
+      return { success: false, message: "Invalid request" };
     if (!isValidObjectId(employeeId))
       return { success: false, message: "Invalid Employee Id" };
+
+    // Checked but not yet spent: a refused action should not cost the employee
+    // their code and a trip back to reception.
+    const code = await verifyClockToken(token);
+    if (!code.ok) return { success: false, message: code.message };
+
+    const codeSiteId = code.siteId;
+    const codeLocationId = code.locationId;
 
     // 1 Detect Employee Type
     let employeeType = "null";
@@ -466,144 +116,63 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
 
     if (!employeeType) return { success: false, message: "Employee not found" };
 
-    // Identify Location Type
-    const locationType = codeSiteId ? "site" : "office";
     const { success, date, currentTime } = await getCurrentTimeAndDate();
     if (!success) return { success: false, message: "Error getting time" };
 
-    const clockData = {
+    // The place this happened, taken from the code rather than inferred.
+    //
+    // Inferring it from the siteId is what made a second office unreachable:
+    // an office code carries no site, so every office scan resolved to the
+    // default office whichever building the screen was actually standing in.
+    // Codes issued before this change have no locationId, so the old inference
+    // stays as the fallback and they keep working until they expire — which,
+    // at thirty seconds, is almost immediately.
+    const location = codeLocationId
+      ? await ClockLocationModel.findById(createObjectId(codeLocationId)).lean()
+      : await resolveOrCreateLocationForSite(codeSiteId);
+    if (!location?._id) {
+      return { success: false, message: "This code is not set up to a location." };
+    }
+
+    // Scanning the code at a gate proves you were there; it does not prove you
+    // were meant to be. A site code is only good for someone rostered to that
+    // site that day, which is the same assignment the employee's own screen
+    // reads to decide what to show them.
+    const permitted = await canClockAtLocation({
+      employeeId,
+      siteId: location.projectSiteId || null,
+      date,
+      isOfficeEmployee: Boolean(officeEmployee),
+    });
+    if (!permitted.ok) return { success: false, message: permitted.message };
+
+    // Everything from here is shared with the NFC path — see
+    // server/clockServer/clockActions.js. The code is spent in onBeforeWrite,
+    // i.e. last, so a refused action does not cost the employee their code and
+    // a trip back to reception.
+    return await performClockAction({
       employeeId,
       employeeType,
-      locationType,
-      siteId: codeSiteId ? codeSiteId : undefined,
+      location,
+      siteId: codeSiteId,
       action,
       date,
-    };
-
-    // 3 Find or Create attendance record
-    const existingRecord = await ClockRecordModel.findOne({
-      employeeId: createObjectId(employeeId),
-      date: date,
+      currentTime,
+      evidence: {
+        method: "deviceQr",
+        coords: clientEvidence?.coords || undefined,
+        deviceId: clientEvidence?.deviceId || undefined,
+        tokenJti: code.jti,
+      },
+      onBeforeWrite: async () => {
+        // One code is one scan, so a photograph of the reception screen is
+        // worth nothing to the second person to try it. Two employees who
+        // genuinely scan the same code in the same second both get here; only
+        // one wins this update.
+        const spent = await consumeClockToken(code.jti, employeeId);
+        return spent.ok ? { ok: true } : { ok: false, message: spent.message };
+      },
     });
-
-    if (!existingRecord && action !== "clockIn") {
-      return { success: false, message: "You must clock in first." };
-    }
-
-    const MIN_BREAK_DURATION_MINUTES = 30;
-    const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
-    const MIN_BREAK_TIME_HOURS = 2;
-
-    // Clock In
-    if (!existingRecord && action === "clockIn") {
-      await ClockRecordModel.create({
-        ...clockData,
-        clockIn: currentTime,
-        clockInStatus: true,
-      });
-      return { success: true, message: "Clocked In", employeeId };
-    }
-
-    if (!existingRecord && action !== "clockIn") {
-      return { success: false, message: "You must clock in first." };
-    }
-
-    if (existingRecord) {
-      // Break In
-      if (action === "breakIn" && !existingRecord.clockOut) {
-        const lastBreak = existingRecord.breaks?.at(-1);
-
-        if (lastBreak && !lastBreak?.breakOut) {
-          return { success: false, message: "You must Break Out first." };
-        }
-        const timeSinceClockIn =
-          (currentTime - existingRecord.clockIn) / (1000 * 60 * 60); // in hours
-        if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
-          return {
-            success: false,
-            message: `Cannot take break within ${MIN_BREAK_TIME_HOURS} hours of clocking in.`,
-          };
-        }
-
-        await ClockRecordModel.updateOne(
-          { employeeId: createObjectId(employeeId), date: date },
-          { $push: { breaks: { breakIn: currentTime } } }
-        );
-        return { success: true, message: "Break In", employeeId };
-      }
-
-      // Break Out
-      if (action === "breakOut" && !existingRecord.clockOut) {
-        const lastBreak = existingRecord.breaks?.at(-1);
-        if (!lastBreak?.breakIn || lastBreak?.breakOut) {
-          return { success: false, message: "You must Break In first." };
-        }
-        const breakDuration =
-          (currentTime - existingRecord.breakIn) / (1000 * 60); // in minutes
-        if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
-          return {
-            success: false,
-            message: `Break must be at least ${MIN_BREAK_DURATION_MINUTES} minutes.`,
-          };
-        }
-        await ClockRecordModel.updateOne(
-          {
-            employeeId: createObjectId(employeeId),
-            date: date,
-            "breaks.breakIn": lastBreak?.breakIn,
-          },
-          { $set: { "breaks.$.breakOut": currentTime } }
-        );
-        return { success: true, message: "Break Out", employeeId };
-      }
-
-      // Clock Out
-      if (action === "clockOut" && !existingRecord.clockOut) {
-        // clockIn convert to hours we have time in 13:20 format
-        // const [clockInHours, clockInMinutes] = existingRecord.clockIn
-        //   .split(":")
-        //   .map(Number);
-        // const clockInDate = new Date();
-        // clockInDate.setHours(clockInHours, clockInMinutes, 0, 0);
-        // const [currentHours, currentMinutes] = currentTime
-        //   .split(":")
-        //   .map(Number);
-        // const currentDate = new Date();
-        // currentDate.setHours(currentHours, currentMinutes, 0, 0);
-
-        // const hoursSinceClockIn =
-        //   (currentTime - existingRecord.clockIn) / (1000 * 60 * 60); // in hours
-        // if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
-        //   return {
-        //     success: false,
-        //     message: `You must work at least ${MIN_WORK_HOURS_TO_CLOCK_OUT} hours before clocking out.`,
-        //   };
-        // }
-
-        const standardHours = 8;
-        // const overtime = Math.max(0, hoursSinceClockIn - standardHours) * 60; // in minutes
-
-        await ClockRecordModel.updateOne(
-          { employeeId: createObjectId(employeeId), date: date },
-          {
-            $set: {
-              clockOut: currentTime,
-              overtime: 0,
-              status: "completed",
-            },
-          }
-        );
-        return {
-          success: true,
-          message: "Clocked Out",
-          employeeId,
-        };
-      }
-    }
-    return {
-      success: false,
-      message: "Already clocked out or invalid action.",
-    };
   } catch (error) {
     console.error("Error storing clock time:", error);
     return { success: false, message: "Error storing clock time" };

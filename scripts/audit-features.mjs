@@ -97,7 +97,6 @@ const CASES = [
   ["/employee", false],
   ["/employee/announcements", false],
   ["/hr", false],
-  ["/hr/scanner", false],
   ["/admin/weeklyRota", false],
   ["/admin/my-leaves", false],
   ["/admin/filterAttendance", false],

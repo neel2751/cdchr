@@ -463,7 +463,6 @@ export default function SiteEmployeeScanner() {
         onOpenChange={setScannerOpen}
         action={currentAction}
         employeeId={employeeId}
-        siteId={siteId}
       />
     </div>
   );

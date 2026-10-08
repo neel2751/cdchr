@@ -2,11 +2,9 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
-import {
-  storeClockTime,
-  storeClockTimeNew,
-} from "@/server/2FAServer/qrcodeServer";
+import { storeClockTimeNew } from "@/server/2FAServer/qrcodeServer";
 import { io } from "socket.io-client";
+import { collectClockEvidence } from "@/lib/clockEvidence";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +26,6 @@ import {
 import { Clock4, Coffee, LogOut, TimerOff, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import {
-  fetchAssignedWithClocks,
   fetchAssignedWithClocksNew,
   fetchClockRecordsTest,
   fetchClockRecordsTestOffice,
@@ -367,7 +364,6 @@ export default function EmployeeClockScanner({ siteId }) {
       </Card>
 
       <SiteEmployeeScannerDialog
-        siteId={siteId}
         action={selectedAction}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -646,250 +642,7 @@ export default function EmployeeClockScanner({ siteId }) {
 //   );
 // }
 
-export function ScannerDialog({
-  siteId,
-  action,
-  open,
-  onOpenChange,
-  employeeId,
-}) {
-  const scannerRef = useRef(null);
-  const audioRef = useRef(null);
-  const errorAudioRef = useRef(null);
-  const socketRef = useRef(null);
-
-  const [cameras, setCameras] = useState([]);
-  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
-  const [activeCameraLabel, setActiveCameraLabel] = useState("");
-  const [permissionError, setPermissionError] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    audioRef.current = new Audio("/audio/beep.mp3");
-    errorAudioRef.current = new Audio("/audio/error.mp3");
-  }, []);
-
-  const stopScanner = () => {
-    if (scannerRef.current) {
-      scannerRef.current
-        .stop()
-        .then(() => {
-          scannerRef.current.clear();
-          scannerRef.current = null;
-        })
-        .catch(() => {});
-    }
-  };
-
-  const startScanner = async (cameraId = null, label = "") => {
-    setLoading(true);
-    try {
-      const scanner = new Html5Qrcode("qr-reader");
-      scannerRef.current = scanner;
-
-      const config = { fps: 10, qrbox: 250 };
-
-      if (cameraId) {
-        await scanner.start(
-          { deviceId: { exact: cameraId } },
-          config,
-          handleScan
-        );
-        setActiveCameraLabel(label || "Unknown Camera");
-
-        // ✅ Add notification here
-        toast.success(`Switched to ${label || "camera"}`);
-      } else {
-        await scanner.start({ facingMode: "environment" }, config, handleScan);
-        setActiveCameraLabel("Back Camera");
-
-        // ✅ Add notification here too
-        toast.success("Switched to Back Camera");
-      }
-
-      setPermissionError(false);
-    } catch (err) {
-      console.log("Scanner start failed:", err);
-      if (
-        err?.name === "NotAllowedError" ||
-        err?.message?.includes("permission")
-      ) {
-        setPermissionError(true);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleScan = async (decodedText) => {
-    try {
-      const response = await storeClockTime(decodedText, siteId, action);
-
-      if (response.success) {
-        toast.success(`✅ ${action.replace(/([A-Z])/g, " $1")} success`);
-        try {
-          await audioRef.current.play();
-        } catch {}
-
-        if (!socketRef.current) {
-          socketRef.current = io({ withCredentials: true });
-        }
-
-        socketRef.current.emit("employee-scan-qr", {
-          token: decodedText,
-          employeeId,
-          action,
-        });
-
-        stopScanner();
-        onOpenChange(false);
-      } else {
-        toast.error(response.message || "❌ Scan failed");
-        try {
-          await errorAudioRef.current.play();
-        } catch {}
-      }
-    } catch (err) {
-      console.log(err);
-      toast.error("❌ Scan failed");
-    }
-  };
-
-  // Load available cameras and start default one
-  useEffect(() => {
-    if (!open) return;
-
-    const initScanner = async () => {
-      try {
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          // start with the back camera if available
-          let backCamera = devices.find((device) =>
-            /back|rear|environment/gi.test(device.label)
-          );
-          if (!backCamera) {
-            backCamera = devices[devices.length - 1]; // fallback to last camera
-          }
-          setCameras(devices);
-          const backCameraIndex = devices.findIndex(
-            (device) => device.id === backCamera.id
-          );
-          setCurrentCameraIndex(backCameraIndex);
-          await startScanner(backCamera.id, backCamera.label);
-        }
-      } catch (err) {
-        console.log("Error fetching cameras:", err);
-        await startScanner(); // fallback
-      }
-    };
-
-    initScanner();
-
-    return () => {
-      stopScanner();
-    };
-  }, [open]);
-
-  // Auto-retry when permission is granted
-  useEffect(() => {
-    if (permissionError) {
-      const retry = setInterval(async () => {
-        try {
-          const devices = await Html5Qrcode.getCameras();
-          if (devices.length > 0) {
-            clearInterval(retry);
-            setPermissionError(false);
-            await startScanner(devices[0].id, devices[0].label);
-          }
-        } catch {
-          // keep retrying silently
-        }
-      }, 2000);
-
-      return () => clearInterval(retry);
-    }
-  }, [permissionError]);
-
-  // Handle camera switching
-  const switchCamera = async () => {
-    if (cameras.length < 2) return;
-    const newIndex = (currentCameraIndex + 1) % cameras.length;
-    setCurrentCameraIndex(newIndex);
-
-    stopScanner();
-    await startScanner(cameras[newIndex].id, cameras[newIndex].label);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full max-w-md h-[75vh] bg-white rounded-lg shadow-lg p-4 flex flex-col">
-        <DialogHeader>
-          <DialogTitle>
-            Scan QR for
-            {action && action.replace(/([A-Z])/g, " $1")}
-          </DialogTitle>
-          <DialogDescription>
-            Hold your camera over the QR code to continue.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="relative flex-1 w-full mt-4">
-          <div
-            id="qr-reader"
-            className="w-full h-full bg-gray-100 rounded-md"
-          />
-          {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-md">
-              <Loader2 className="animate-spin w-6 h-6 text-indigo-600" />
-              <span className="ml-2 text-gray-700">Switching camera...</span>
-            </div>
-          )}
-        </div>
-
-        {/* Show which camera is active */}
-        {activeCameraLabel && (
-          <p className="text-sm text-gray-600 mt-2 text-center">
-            📷 Active Camera:{" "}
-            <span className="font-medium">{activeCameraLabel}</span>
-          </p>
-        )}
-
-        {/* Permission error message */}
-        {permissionError && (
-          <div className="text-red-600 text-sm text-center mt-3 bg-red-50 border border-red-300 p-2 rounded">
-            🚫 Camera access denied. Please allow camera permissions in your
-            browser settings.
-          </div>
-        )}
-
-        <div className="flex gap-2 w-full mt-4">
-          {cameras.length > 1 && (
-            <Button
-              onClick={switchCamera}
-              className="flex-1 bg-indigo-500 hover:bg-indigo-600"
-              disabled={loading}
-            >
-              Switch Camera
-            </Button>
-          )}
-          <Button
-            className="flex-1 bg-red-500 hover:bg-red-600"
-            onClick={() => {
-              stopScanner();
-              onOpenChange(false);
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Site Employee scan Dialog
 export function SiteEmployeeScannerDialog({
-  siteId,
   action,
   open,
   onOpenChange,
@@ -961,7 +714,15 @@ export function SiteEmployeeScannerDialog({
       // This stop the video feed so no more scans can physically happen
       await stopScanner();
 
-      const response = await storeClockTimeNew(decodedText, siteId, action);
+      // What this device can say about where it is. Recorded, not enforced —
+      // and it never blocks: a refused permission or a cold GPS chip resolves
+      // to nothing rather than holding someone up at the gate.
+      const evidence = await collectClockEvidence();
+
+      // No siteId: the site comes from the scanned code now, not from this
+      // device. Sending our own was the hole — it meant the site an employee
+      // clocked in at was whatever their browser said it was.
+      const response = await storeClockTimeNew(decodedText, action, evidence);
       if (response.success) {
         toast.success(`✅ ${action.replace(/([A-Z])/g, " $1")} success`);
         try {
@@ -985,10 +746,17 @@ export function SiteEmployeeScannerDialog({
         try {
           await errorAudioRef.current.play();
         } catch {}
+        // The code is spent or the scan was refused; either way this dialog
+        // cannot retry with the same frame. Let them close and start again
+        // rather than leaving a dead camera on screen.
+        isProcessingRef.current = false;
+        onOpenChange(false);
       }
     } catch (err) {
       console.log(err);
       toast.error("❌ Scan failed");
+      isProcessingRef.current = false;
+      onOpenChange(false);
     }
   };
 

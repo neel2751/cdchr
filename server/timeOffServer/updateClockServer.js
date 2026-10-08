@@ -4,9 +4,7 @@ import {
   isValidObjectId,
   withTransaction,
 } from "@/lib/mongodb";
-import ClockModel from "@/models/clockModel";
 import SiteAssignmentModel from "@/models/siteAssignmentModel";
-import SiteClockModel from "@/models/siteClockModel";
 import { getServerSideProps } from "../session/session";
 import ClockRecordModel from "@/models/clockInModel";
 import { connect } from "@/db/db";
@@ -14,120 +12,70 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
 import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
+import { getClockTime, getWorkingDate, toWorkingDate } from "@/lib/clockTime";
+import { validateShift } from "@/lib/clockRules";
+import { deriveClockStatus } from "@/lib/clockStatus";
+import { getClockRules } from "@/server/settingsServer/workSettings";
+import { canManageAttendance } from "@/server/clockServer/clockAuth";
+import { resolveOrCreateLocationForSite } from "@/server/clockServer/clockLocationStore";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
 
-export const updateClockManuallyById = withAudit(
-  "Clock.update",
-  async ({
-  id = null,
-  employeeId,
-  siteId,
-  date,
-  clockIn,
-  clockOut,
-  breakIn,
-  breakOut,
-  status,
-  actions = [],
-  type = "site", // or 'site'
-}) => {
-  // if (!id) return { success: false, message: "Clock ID is required" };
+/**
+ * The two values `ClockRecord.employeeType` is allowed to hold.
+ *
+ * Callers have historically passed "site"/"office" (the location wording) as
+ * well as the model names, and the report only matches "OfficeEmployee" — so
+ * both spellings are accepted and anything else becomes null rather than being
+ * written through.
+ */
+function normaliseEmployeeType(value) {
+  switch (value) {
+    case "OfficeEmployee":
+    case "office":
+      return "OfficeEmployee";
+    case "Employee":
+    case "site":
+      return "Employee";
+    default:
+      return null;
+  }
+}
 
-  // console.log(id, employeeId, clockIn, type, siteId, date);
-  // return {
-  //   success: false,
-  //   message: "This function is deprecated. Use the new API.",
-  // };
-  if (type !== "site" && type !== "office") {
-    return { success: false, message: "Invalid type specified" };
-  }
-  if (type === "site" && !siteId) {
-    return { success: false, message: "siteId is required for site type" };
-  }
-  if (!id && (!employeeId || !date)) {
-    return {
-      success: false,
-      message: "Either ID or employeeId, and date are required",
-    };
-  }
-  const model = type === "site" ? SiteClockModel : ClockModel;
+/**
+ * Find an employee in whichever collection holds them.
+ *
+ * Returns `{ type, name }` with the enum value the clock record wants, or
+ * nulls when the id matches neither — a missing name is cosmetic in the audit
+ * log, so this never throws.
+ */
+async function resolveEmployee(employeeId) {
+  const empty = { type: null, name: "" };
+  if (!employeeId || !isValidObjectId(employeeId)) return empty;
+
   try {
-    const updateFields = {};
-    if (clockIn !== undefined) updateFields.clockIn = clockIn;
-    if (clockOut !== undefined) updateFields.clockOut = clockOut;
-    if (breakIn !== undefined) updateFields.breakIn = breakIn;
-    if (breakOut !== undefined) updateFields.breakOut = breakOut;
-    if (status !== undefined) updateFields.status = status;
+    const oid = createObjectId(employeeId);
 
-    const updateQuery = {
-      $set: updateFields,
-    };
-    // if (actions.length > 0) {
-    //   updateQuery.$push = {
-    //     actions: { $each: actions }, // append all actions at once
-    //   };
-    // }
-    let updated;
-    let beforeDoc = null;
+    const office = await OfficeEmployeeModel.findById(oid)
+      .select("name")
+      .lean();
+    if (office) return { type: "OfficeEmployee", name: office.name || "" };
 
-    if (id) {
-      beforeDoc = await model.findById(createObjectId(id)).lean();
-      updated = await model.findByIdAndUpdate(createObjectId(id), updateQuery, {
-        new: true,
-      });
-    } else {
-      const normalizedDate = date;
-      beforeDoc = await model
-        .findOne({
-          employeeId: createObjectId(employeeId),
-          ...(type === "site" && { siteId: createObjectId(siteId) }),
-          date: normalizedDate,
-        })
-        .lean();
-      updated = await model.findOneAndUpdate(
-        {
-          employeeId: createObjectId(employeeId),
-          // on site type, siteId is required
-          ...(type === "site" && { siteId: createObjectId(siteId) }),
-          date: normalizedDate,
-        },
-        {
-          ...updateQuery,
-          $setOnInsert: {
-            employeeId,
-            siteId: type === "site" ? createObjectId(siteId) : undefined,
-            date: normalizedDate,
-          },
-        },
-        { new: true, upsert: true },
-      );
+    const site = await EmployeModel.findById(oid)
+      .select("firstName lastName")
+      .lean();
+    if (site) {
+      return {
+        type: "Employee",
+        name: `${site.firstName || ""} ${site.lastName || ""}`.trim(),
+      };
     }
 
-    if (!updated) {
-      return { success: false, message: "Clock entry not found or failed" };
-    }
-
-    recordAudit({
-      entityId: updated._id,
-      before: beforeDoc,
-      after: updated.toObject ? updated.toObject() : updated,
-      description: id
-        ? `Edited ${type} attendance time for clock ${updated._id}`
-        : `Created ${type} attendance entry for employee ${employeeId}`,
-    });
-
-    return {
-      success: true,
-      message: id ? "Clock updated successfully" : "Clock created successfully",
-    };
-  } catch (err) {
-    console.log("Error in updateClockManuallyById:", err);
-    return { success: false, message: "Failed to update or create clock" };
+    return empty;
+  } catch {
+    return empty;
   }
-  },
-  { module: "Clock" },
-);
+}
 
 export const updateClockManuallyByIdNew = withAudit(
   "Clock.update",
@@ -139,12 +87,19 @@ export const updateClockManuallyByIdNew = withAudit(
     clockIn,
     clockOut,
     breaks = [], // now supports multiple breaks
-    status,
     actions = [],
-    employeeType = "site", // 'site' or 'office'
+    employeeType = null,
   }) => {
     try {
       await connect();
+
+    // These times feed pay. Until now this action had no authorisation at all:
+    // a server action is an HTTP endpoint, and the only thing resembling a gate
+    // was a role array on a menu entry, which gates a link and nothing else.
+    const permitted = await canManageAttendance();
+    if (!permitted.ok) {
+      return { success: false, message: permitted.reason };
+    }
 
     if (!id && (!employeeId || !date)) {
       return {
@@ -162,10 +117,16 @@ export const updateClockManuallyByIdNew = withAudit(
     // set individual fields if provided
     if (clockIn !== undefined) updateFields.clockIn = clockIn;
     if (clockOut !== undefined) updateFields.clockOut = clockOut;
-    if (status !== undefined) updateFields.status = status;
+    // `status` is deliberately NOT taken from the caller. It is a cache of
+    // clockIn/clockOut/breaks, and it is recomputed from the merged result
+    // below — see lib/clockStatus.js for why five writers each having their
+    // own vocabulary stopped being survivable.
 
-    if (Array.isArray(breaks) && breaks.length > 0) {
-      const normalizedBreaks = breaks
+    // `Array.isArray` rather than `length > 0`: the old condition meant an
+    // empty array was ignored, so deleting the last break row in the editor
+    // silently saved nothing and the break came back on the next render.
+    if (Array.isArray(breaks)) {
+      updateFields.breaks = breaks
         .map((b) => ({
           breakIn:
             typeof b?.breakIn === "string" ? b.breakIn.trim() : b?.breakIn,
@@ -174,71 +135,112 @@ export const updateClockManuallyByIdNew = withAudit(
         }))
         // Ignore fully empty rows from UI editors
         .filter((b) => Boolean(b.breakIn || b.breakOut));
-
-      for (let i = 0; i < normalizedBreaks.length; i++) {
-        const b = normalizedBreaks[i];
-
-        // If breakOut exists but breakIn does NOT → REJECT
-        if (b.breakOut && !b.breakIn) {
-          return {
-            success: false,
-            message: `Break #${i + 1} has breakOut but no breakIn.
-            Please refresh the page and try again.
-            `,
-          };
-        }
-
-        // If both exist, ensure valid times
-        if (b.breakIn && b.breakOut) {
-          if (new Date(b.breakOut) < new Date(b.breakIn)) {
-            return {
-              success: false,
-              message: `Break #${
-                i + 1
-              }: breakOut cannot be earlier than breakIn`,
-            };
-          }
-        }
-      }
-
-      // If all good → allow saving breaks
-      updateFields.breaks = normalizedBreaks;
     }
 
-    if (employeeType) updateFields.employeeType = employeeType;
+    // `employeeType` is what the attendance report splits office staff from
+    // site staff on, and this used to overwrite it on every edit with whatever
+    // the caller passed — defaulting to "site", which is not one of the two
+    // values the report looks for. Editing an office employee's times silently
+    // dropped them out of the office bucket. The enum is also unenforced here:
+    // findOneAndUpdate does not run validators, so the bad value stuck.
+    //
+    // Now: an unrecognised value is ignored rather than written, and the type
+    // is only ever *set on insert*, resolved from the employee themselves.
+    const requestedType = normaliseEmployeeType(employeeType);
 
     const updateQuery = { $set: updateFields };
     if (actions?.length > 0) {
       updateQuery.$push = { actions: { $each: actions } };
     }
 
+    // The day the record belongs to, read the same way everywhere else. The
+    // caller's value used to go through `new Date(date)` unchecked, so a
+    // date-only string picked up the server's timezone offset.
+    const normalizedDate = id ? null : toWorkingDate(date);
+    if (!id && !normalizedDate) {
+      return { success: false, message: "Invalid date" };
+    }
+
+    // An insert has to know the employee before it writes, because that is
+    // what decides employeeType — looking them up beats trusting the caller,
+    // which is what put "site" in the field in the first place. An edit can
+    // wait until after, where the record's own employeeId is available as a
+    // fallback. Either way it is one lookup.
+    const employeeForInsert = id ? null : await resolveEmployee(employeeId);
+
+    // The place, resolved the same way the scanner resolves it, so a record
+    // created by an admin and one created by a scan land on the same location.
+    const location = id ? null : await resolveOrCreateLocationForSite(siteId);
+    if (!id && !location?._id) {
+      return { success: false, message: "That site has no clock-in location." };
+    }
+
+    // Read the record first, so the edit can be judged as a whole shift rather
+    // than field by field. An admin changing only the clock out still needs
+    // the stored clock in and breaks for "does this hang together".
+    const beforeDoc = id
+      ? await ClockRecordModel.findById(createObjectId(id)).lean()
+      : await ClockRecordModel.findOne({
+          employeeId: createObjectId(employeeId),
+          date: normalizedDate,
+          locationId: location._id,
+          isDeleted: false,
+        }).lean();
+
     // 👉 ADD DUPLICATE CHECK HERE 👇👇👇
-    if (!id) {
-      const normalizedDate = new Date(date);
-
-      const existingRecord = await ClockRecordModel.findOne({
-        employeeId: createObjectId(employeeId),
-        date: normalizedDate,
-        ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
-        isDeleted: false,
-      });
-
-      if (existingRecord) {
-        return {
-          success: false,
-          message:
-            "Clock record for this employee on this date already exists.",
-        };
-      }
+    if (!id && beforeDoc) {
+      return {
+        success: false,
+        message: "Clock record for this employee on this date already exists.",
+      };
     }
     // 👉 END DUPLICATE CHECK
 
+    if (id && !beforeDoc) {
+      return { success: false, message: "Clock record not found" };
+    }
+
+    // What the record will look like once this update lands. Validating the
+    // merge rather than the payload is the only way a partial edit can be
+    // checked at all: `{ clockOut: "08:00" }` says nothing on its own.
+    const resulting = {
+      clockIn:
+        updateFields.clockIn !== undefined
+          ? updateFields.clockIn
+          : beforeDoc?.clockIn,
+      clockOut:
+        updateFields.clockOut !== undefined
+          ? updateFields.clockOut
+          : beforeDoc?.clockOut,
+      breaks:
+        updateFields.breaks !== undefined
+          ? updateFields.breaks
+          : beforeDoc?.breaks || [],
+    };
+
+    const rules = await getClockRules();
+    const { ok, errors } = validateShift(
+      resulting,
+      {
+        date: beforeDoc?.date || normalizedDate,
+        today: getWorkingDate(),
+        now: getClockTime(),
+      },
+      rules,
+    );
+    if (!ok) {
+      // Every problem at once: an admin fixing a row should not have to save
+      // four times to be told about four things.
+      return { success: false, message: errors.join(". ") };
+    }
+
+    const derivedStatus = deriveClockStatus(resulting);
+    if (derivedStatus) updateFields.status = derivedStatus;
+
     let updatedDoc;
-    let beforeDoc = null;
 
     if (id) {
       // update by ID directly
-      beforeDoc = await ClockRecordModel.findById(createObjectId(id)).lean();
       updatedDoc = await ClockRecordModel.findByIdAndUpdate(
         createObjectId(id),
         updateQuery,
@@ -246,12 +248,13 @@ export const updateClockManuallyByIdNew = withAudit(
       );
     } else {
       // update or insert by employeeId + date (+ optional siteId)
-      const normalizedDate = new Date(date);
       const query = {
         employeeId: createObjectId(employeeId),
         date: normalizedDate,
-        ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
+        locationId: location._id,
       };
+
+      const insertType = employeeForInsert?.type || requestedType;
 
       updatedDoc = await ClockRecordModel.findOneAndUpdate(
         query,
@@ -260,7 +263,9 @@ export const updateClockManuallyByIdNew = withAudit(
           $setOnInsert: {
             employeeId: createObjectId(employeeId),
             date: normalizedDate,
-            ...(siteId ? { siteId: createObjectId(siteId) } : {}),
+            locationId: location._id,
+            ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
+            ...(insertType ? { employeeType: insertType } : {}),
           },
         },
         { new: true, upsert: true },
@@ -271,37 +276,17 @@ export const updateClockManuallyByIdNew = withAudit(
       return { success: false, message: "Failed to update or create record" };
     }
 
-    // Resolve a human-readable employee name so the audit log clearly shows
-    // whose attendance time was changed.
     const empIdForName = employeeId || updatedDoc?.employeeId;
-    let employeeName = "";
-    try {
-      if (empIdForName && isValidObjectId(empIdForName)) {
-        if (employeeType === "office") {
-          const emp = await OfficeEmployeeModel.findById(
-            createObjectId(empIdForName),
-          )
-            .select("name")
-            .lean();
-          employeeName = emp?.name || "";
-        } else {
-          const emp = await EmployeModel.findById(createObjectId(empIdForName))
-            .select("firstName lastName")
-            .lean();
-          employeeName = emp
-            ? `${emp.firstName || ""} ${emp.lastName || ""}`.trim()
-            : "";
-        }
-      }
-    } catch {
-      // name is best-effort; fall back to the id below
-    }
+    const employee = employeeForInsert ?? (await resolveEmployee(empIdForName));
+    const employeeName = employee.name;
+    const auditType =
+      updatedDoc.employeeType || employee.type || "attendance";
 
     recordAudit({
       entityId: updatedDoc._id,
       before: beforeDoc,
       after: updatedDoc.toObject ? updatedDoc.toObject() : updatedDoc,
-      description: `${id ? "Edited" : "Created"} ${employeeType} attendance time for ${
+      description: `${id ? "Edited" : "Created"} ${auditType} attendance time for ${
         employeeName || empIdForName
       }`,
     });
@@ -324,6 +309,13 @@ export const updateClockManuallyByIdNew = withAudit(
 export const moveEmployeeToNewSite = withAudit(
   "SiteAssignment.moveEmployee",
   async ({ employeeId, toSiteId, date }) => {
+    // Moving someone between sites rewrites which job their hours land on, so
+    // it needs the same permission as editing the hours themselves.
+    const permitted = await canManageAttendance();
+    if (!permitted.ok) {
+      return { success: false, message: permitted.reason };
+    }
+
     let movedFromSiteId = null;
     const result = await withTransaction(async (session) => {
     const { props } = await getServerSideProps();
@@ -419,9 +411,15 @@ export const moveEmployeeToNewSite = withAudit(
       throw new Error("Failed to move employee to target site.");
     }
 
-    // Step 6: Update siteId in SiteClockModel
-    await SiteClockModel.updateMany(
-      { employeeId: eid, date: assignDate },
+    // Step 6: move any clock record for that day to the new site.
+    //
+    // This wrote to `siteclocks`, which nothing has read or written since the
+    // app moved to clockrecords — so moving an employee left their actual
+    // clock record pointing at the old site, and their hours stayed on the
+    // wrong job. Scoped to live records: a deleted one should stay where it
+    // was, as a record of what happened.
+    await ClockRecordModel.updateMany(
+      { employeeId: eid, date: assignDate, isDeleted: false },
       { $set: { siteId: toSid } },
       { session },
     );
@@ -560,70 +558,3 @@ export async function reportAllAttendanceData() {
   }
 }
 
-export async function OldAttendanceData() {
-  try {
-    await connect();
-
-    // 1. Fetch data
-    const logs = await ClockModel.find({ isDeleted: false }).lean();
-
-    if (!logs || logs.length === 0) {
-      return new Response("No data found", { status: 404 });
-    }
-
-    const employees = await OfficeEmployeeModel.find({}).lean();
-    const employeeMap = {};
-    employees.forEach((emp) => {
-      employeeMap[emp._id.toString()] = emp.name;
-    });
-    logs.forEach((log) => {
-      log.name = employeeMap[log.employeeId.toString()] || "Unknown";
-    });
-
-    // 2. Define Headers
-    const headers = [
-      "No. ",
-      "Name",
-      "Date",
-      "Clock In",
-      "Break In",
-      "Break Out",
-      "Clock Out",
-    ];
-
-    // 3. Map data to rows
-    // We use JSON.stringify on values to handle commas or quotes that might break CSV formatting
-    const rows = logs.map((log, index) => [
-      index + 1,
-      log.name || "",
-      log.date ? log.date.toISOString().split("T")[0] : "",
-      log.clockIn,
-      log.breakIn || "",
-      log.breakOut || "",
-      log.clockOut || "",
-    ]);
-
-    // 4. Combine headers and rows into a single string
-    const csvContent = [
-      headers.join(","),
-      ...rows.map((row) => row.join(",")),
-    ].join("\n");
-
-    // 5. Return CSV
-    await logCsvExport({
-      source: "oldAttendanceExport",
-      label: "Legacy attendance",
-      rowCount: rows.length,
-    });
-    return {
-      success: true,
-      data: csvContent,
-    };
-  } catch (error) {
-    console.error("Error exporting old attendance data:", error);
-    return {
-      success: false,
-      message: "Failed to export data",
-    };
-  }
-}

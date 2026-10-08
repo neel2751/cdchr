@@ -3,14 +3,14 @@
 import { connect } from "@/db/db";
 import { getServerSideProps } from "../session/session";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
-import ClockModel from "@/models/clockModel";
-import { normalizeDateToUTC } from "@/lib/formatDate";
+import { getWorkingDate, toWorkingDate } from "@/lib/clockTime";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { decrypt } from "@/lib/algo";
 import { addDays, startOfWeek } from "date-fns";
 import { formatDate, getUKTime } from "@/utils/time";
 import EmployeModel from "@/models/employeModel";
 import ClockRecordModel from "@/models/clockInModel";
+import { currentlyEmployedMatch } from "@/lib/employeeStatus";
 
 export default async function fetchEmployeeWithHoliday() {
   try {
@@ -23,17 +23,10 @@ export default async function fetchEmployeeWithHoliday() {
 
     await connect();
     // start to fetch only isActive, isDeleted =false, visaEndDate & End Date is valid
+    // The `$or` here used `$lte`, which matched staff whose visa or employment
+    // had already lapsed — the opposite of what the comment above describes.
     const pipeline = [
-      {
-        $match: {
-          isActive: true,
-          delete: false,
-          $or: [
-            { visaEndDate: { $lte: new Date() } },
-            { endDate: { $lte: new Date() } },
-          ],
-        },
-      },
+      { $match: currentlyEmployedMatch(now) },
       {
         $lookup: {
           from: "leaverequests",
@@ -57,9 +50,12 @@ export default async function fetchEmployeeWithHoliday() {
                       ],
                     },
                     { $in: ["$leaveStatus", ["Approved"]] }, // ✅ Only active leaves
-                    {
-                      leaveYear: new Date().getFullYear(),
-                    },
+                    // A `{ leaveYear: <number> }` clause sat here. Inside
+                    // `$expr` a plain document is a literal, not a comparison,
+                    // so it was always truthy and filtered nothing — and
+                    // `leaveYear` holds a string like "2026-27", never a
+                    // number, so it could not have matched regardless. The
+                    // date bounds above already scope this to today.
                   ],
                 },
               },
@@ -95,220 +91,6 @@ export default async function fetchEmployeeWithHoliday() {
       error,
     );
   }
-}
-
-export async function getTodayAttendanceData() {
-  try {
-    await connect();
-    const today = normalizeDateToUTC(new Date());
-    const clockInfo = await ClockModel.find({ date: today });
-    return JSON.stringify(clockInfo);
-  } catch (error) {
-    console.error("Error fetching today's attendance:", error);
-    return null;
-  }
-}
-
-export async function getEmployeeTodayAttendanceData(employeeId) {
-  try {
-    await connect();
-    const today = normalizeDateToUTC(new Date());
-
-    // .lean() returns a plain JS object without Mongoose metadata
-    const clockInfo = await ClockModel.findOne({
-      employeeId,
-      date: today,
-    }).lean();
-
-    if (!clockInfo) {
-      return {
-        success: true,
-        data: JSON.stringify({
-          _id: null,
-          employeeId,
-          clockIn: null,
-          breakIn: null,
-          breakOut: null,
-          clockOut: null,
-        }),
-      };
-    }
-    return {
-      success: true,
-      data: JSON.stringify(clockInfo),
-    };
-  } catch (error) {
-    console.error(
-      `Error fetching today's attendance for employee ${employeeId}:`,
-      error,
-    );
-    return { success: false, message: "Something went wrong" };
-  }
-}
-
-export async function getEmployeeTodayAttendanceDataForAdmin(employeeId) {
-  try {
-    await connect();
-    const today = normalizeDateToUTC(new Date());
-    const clockInfo = await ClockModel.findOne({
-      employeeId: employeeId, // Assuming createObjectId is handled elsewhere or not needed here
-      date: today,
-    });
-    return JSON.stringify(clockInfo);
-  } catch (error) {
-    console.error(
-      `Error fetching today's attendance for employee ${employeeId}:`,
-      error,
-    );
-    return null;
-  }
-}
-
-export async function fetchLiveOfficeClockOld({
-  siteId = null,
-  employeeId = null,
-  fromDate = null,
-  toDate = null,
-  query = "",
-  page = 1,
-  pageSize = 10,
-}) {
-  try {
-    const { props } = await getServerSideProps();
-    await connect();
-    const { user } = props?.session || {};
-    // const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    // const employeeOid = isAdmin ? employeeId : user?._id;
-    const today = normalizeDateToUTC(new Date());
-    const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
-    const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
-    const queryObj = {};
-    if (employeeId) {
-      queryObj._id = createObjectId(employeeId); // Use employeeOid instead of employeeId
-    }
-    if (query) {
-      queryObj.$or = [
-        { name: { $regex: query, $options: "i" } },
-        { email: { $regex: query, $options: "i" } },
-      ];
-    }
-
-    const skip = (page - 1) * pageSize;
-
-    const basePipeline = [
-      {
-        $match: queryObj,
-      },
-      {
-        $lookup: {
-          from: "clocks",
-          let: { eid: "$_id", sid: siteId ? siteId : null },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $gte: ["$date", start] },
-                    { $lte: ["$date", end] },
-                    { $eq: ["$isDeleted", false] },
-                    { $eq: ["$employeeId", "$$eid"] },
-                  ],
-                },
-              },
-            },
-            // { $sort: { date: -1 } }, // Sort by date descending
-            // { $limit: 1 }, // Get the latest clock record
-          ],
-          as: "clockRecords",
-        },
-      },
-      { $unwind: { path: "$clockRecords", preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          _id: null, // Exclude the _id field from the output
-          employeeId: "$_id",
-          name: 1,
-          email: 1,
-          clockRecordId: { $ifNull: ["$clockRecords._id", null] },
-          clockIn: { $ifNull: ["$clockRecords.clockIn", null] },
-          clockOut: { $ifNull: ["$clockRecords.clockOut", null] },
-          breakIn: { $ifNull: ["$clockRecords.breakIn", null] },
-          breakOut: { $ifNull: ["$clockRecords.breakOut", null] },
-          status: { $ifNull: ["$clockRecords.status", null] },
-          date: { $ifNull: ["$clockRecords.date", null] },
-        },
-      },
-    ];
-    const pipeline = [
-      {
-        $facet: {
-          totalCount: [...basePipeline, { $count: "count" }],
-          data: [
-            ...basePipeline,
-
-            { $skip: skip }, // Skip for pagination
-            { $limit: pageSize }, // Limit results for pagination
-          ],
-        },
-      },
-      {
-        $addFields: {
-          total: { $ifNull: [{ $arrayElemAt: ["$totalCount.count", 0] }, 0] },
-        },
-      },
-      {
-        $project: {
-          total: 1,
-          data: 1,
-        },
-      },
-    ];
-    const [result] = await OfficeEmployeeModel.aggregate(pipeline);
-    // console.log("Live Office Clock Data:", result);
-
-    return {
-      success: true,
-      data: JSON.stringify(result.data || []),
-      totalCount: result.total || 0,
-    };
-  } catch (error) {
-    console.error("Error fetching live office clock data:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}
-
-// We have to count total Hour per employee with per week, and Avrage count
-
-function convertTimeToMinutes(fieldName) {
-  return {
-    $let: {
-      vars: {
-        parts: {
-          $split: [
-            {
-              $cond: [
-                {
-                  $or: [
-                    { $eq: [`$${fieldName}`, ""] },
-                    { $eq: [`$${fieldName}`, null] },
-                  ],
-                },
-                "0:0",
-                `$${fieldName}`,
-              ],
-            },
-            ":",
-          ],
-        },
-      },
-      in: {
-        $add: [
-          { $multiply: [{ $toInt: { $arrayElemAt: ["$$parts", 0] } }, 60] },
-          { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-        ],
-      },
-    },
-  };
 }
 
 export async function fetchOfficeEmployeeClockCount({
@@ -349,11 +131,11 @@ export async function fetchOfficeEmployeeClockCount({
     const toEndDate = new Date(addDays(monday, 7));
 
     const start = fromDate
-      ? normalizeDateToUTC(new Date(fromDate))
-      : normalizeDateToUTC(new Date(formdate));
+      ? toWorkingDate(fromDate)
+      : toWorkingDate(formdate);
     const end = toDate
-      ? normalizeDateToUTC(new Date(toDate))
-      : normalizeDateToUTC(new Date(toEndDate));
+      ? toWorkingDate(toDate)
+      : toWorkingDate(toEndDate);
 
     const matchConditions = {
       employeeId: createObjectId(resolvedEmployeeId),
@@ -484,165 +266,6 @@ export async function fetchOfficeEmployeeClockCount({
   }
 }
 
-export async function fetchChartData({
-  employeeId = null,
-  fromDate = null,
-  toDate = null,
-}) {
-  try {
-    const { props } = await getServerSideProps();
-    const { user } = props?.session || {};
-    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    await connect(); // your mongo connection
-    const today = new Date();
-    const start = fromDate
-      ? new Date(fromDate)
-      : startOfWeek(today, { weekStartsOn: 1 });
-    const end = toDate ? new Date(toDate) : today;
-    const employeeOid = isAdmin ? decrypt(employeeId) : user?._id;
-    if (!employeeOid) {
-      return { success: false, message: "Invalid employee ID" };
-    }
-    const matchConditions = {
-      date: { $gte: start, $lte: end },
-      isDeleted: false,
-    };
-    if (employeeId) {
-      matchConditions.employeeId = createObjectId(employeeOid);
-    }
-
-    const chartData = await ClockModel.aggregate([
-      { $match: matchConditions }, // filtered by employee/date range
-      {
-        $addFields: {
-          clockInMinutes: {
-            $let: {
-              vars: { parts: { $split: ["$clockIn", ":"] } },
-              in: {
-                $add: [
-                  {
-                    $multiply: [
-                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                      60,
-                    ],
-                  },
-                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                ],
-              },
-            },
-          },
-          clockOutMinutes: {
-            $let: {
-              vars: { parts: { $split: ["$clockOut", ":"] } },
-              in: {
-                $add: [
-                  {
-                    $multiply: [
-                      { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                      60,
-                    ],
-                  },
-                  { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                ],
-              },
-            },
-          },
-          breakInMinutes: {
-            $cond: [
-              { $ifNull: ["$breakIn", false] },
-              {
-                $let: {
-                  vars: { parts: { $split: ["$breakIn", ":"] } },
-                  in: {
-                    $add: [
-                      {
-                        $multiply: [
-                          { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                          60,
-                        ],
-                      },
-                      { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                    ],
-                  },
-                },
-              },
-              null,
-            ],
-          },
-          breakOutMinutes: {
-            $cond: [
-              { $ifNull: ["$breakOut", false] },
-              {
-                $let: {
-                  vars: { parts: { $split: ["$breakOut", ":"] } },
-                  in: {
-                    $add: [
-                      {
-                        $multiply: [
-                          { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                          60,
-                        ],
-                      },
-                      { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                    ],
-                  },
-                },
-              },
-              null,
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          durationMinutes: {
-            $subtract: ["$clockOutMinutes", "$clockInMinutes"],
-          },
-          breakMinutes: {
-            $cond: [
-              { $and: ["$breakInMinutes", "$breakOutMinutes"] },
-              { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$date",
-          totalMinutes: { $sum: "$durationMinutes" },
-          avgBreakMinutes: { $avg: "$breakMinutes" },
-        },
-      },
-      {
-        $project: {
-          date: "$_id",
-          totalHours: {
-            $concat: [
-              { $toString: { $floor: { $divide: ["$totalMinutes", 60] } } },
-              ":",
-              { $toString: { $mod: ["$totalMinutes", 60] } },
-            ],
-          },
-          avgBreakHours: {
-            $concat: [
-              { $toString: { $floor: { $divide: ["$avgBreakMinutes", 60] } } },
-              ":",
-              { $toString: { $mod: ["$avgBreakMinutes", 60] } },
-            ],
-          },
-        },
-      },
-      { $sort: { date: 1 } },
-    ]);
-
-    return { success: true, data: JSON.stringify(chartData) };
-  } catch (error) {
-    console.error("Error fetching chart data:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}
-
 export async function fetchLiveOfficeClock({
   siteId = null,
   employeeId = null,
@@ -655,9 +278,63 @@ export async function fetchLiveOfficeClock({
   try {
     await connect();
 
-    const today = normalizeDateToUTC(new Date());
-    const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
-    const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
+    const today = getWorkingDate();
+    const start = fromDate ? toWorkingDate(fromDate) : today;
+    const end = toDate ? toWorkingDate(toDate) : today;
+
+    // Exclusive upper bound for matching leave. `leaveDates` entries are not
+    // guaranteed to sit exactly on UTC midnight, so an inclusive `$lte: end`
+    // would miss a leave day stored with a time on it. Stepped in pure UTC
+    // milliseconds — `end` is already UTC midnight and a local-time day step
+    // would drift across a BST change.
+    const endExclusive = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+    // Approved leave covering any day in the requested range. Without this the
+    // table cannot tell "did not come in" apart from "booked the day off", and
+    // everyone on holiday reads as absent.
+    const leaveLookup = [
+      {
+        $lookup: {
+          from: "leaverequests",
+          let: { eid: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$employeeId", "$$eid"] },
+                    { $eq: ["$leaveStatus", "Approved"] },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ["$leaveDates", []] },
+                              as: "d",
+                              cond: {
+                                $and: [
+                                  { $gte: ["$$d", start] },
+                                  { $lt: ["$$d", endExclusive] },
+                                ],
+                              },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 0, leaveType: 1, isPaid: 1 } },
+            { $limit: 1 },
+          ],
+          as: "leave",
+        },
+      },
+      { $unwind: { path: "$leave", preserveNullAndEmptyArrays: true } },
+    ];
 
     // -----------------------------------------------
     // 1) SINGLE EMPLOYEE VIEW
@@ -692,6 +369,8 @@ export async function fetchLiveOfficeClock({
 
         { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
 
+        ...leaveLookup,
+
         {
           $project: {
             _id: 0,
@@ -700,6 +379,10 @@ export async function fetchLiveOfficeClock({
             email: 1,
 
             clockRecordId: { $ifNull: ["$clockRecord._id", null] },
+            // Surfaced so the nightly job's findings are visible where the
+            // fixing happens. A flag nobody sees is not a control.
+            needsReview: { $ifNull: ["$clockRecord.needsReview", false] },
+            reviewReason: "$clockRecord.reviewReason",
             clockIn: "$clockRecord.clockIn",
             clockOut: "$clockRecord.clockOut",
 
@@ -707,6 +390,10 @@ export async function fetchLiveOfficeClock({
             breaks: { $ifNull: ["$clockRecord.breaks", []] },
 
             date: "$clockRecord.date",
+
+            onLeave: { $cond: [{ $ifNull: ["$leave", false] }, true, false] },
+            leaveType: { $ifNull: ["$leave.leaveType", null] },
+            leaveIsPaid: { $ifNull: ["$leave.isPaid", null] },
           },
         },
       ]);
@@ -721,7 +408,12 @@ export async function fetchLiveOfficeClock({
     // -----------------------------------------------
     // 2) ALL EMPLOYEES VIEW (PAGINATED)
     // -----------------------------------------------
-    const queryObj = {};
+    // Only current staff belong on the attendance board. Without this the
+    // aggregation matched every office employee ever created, so deactivated
+    // and soft-deleted people were listed as absent every day and were counted
+    // in the summary cards. "Active" here means the same thing it does on the
+    // office employee page: the account is switched on and not soft-deleted.
+    const queryObj = { isActive: true, delete: { $ne: true } };
     if (query) {
       queryObj.$or = [
         { name: { $regex: query, $options: "i" } },
@@ -760,6 +452,8 @@ export async function fetchLiveOfficeClock({
 
       { $unwind: { path: "$clockRecord", preserveNullAndEmptyArrays: true } },
 
+      ...leaveLookup,
+
       {
         $project: {
           employeeId: "$_id",
@@ -767,6 +461,10 @@ export async function fetchLiveOfficeClock({
           email: 1,
 
           clockRecordId: { $ifNull: ["$clockRecord._id", null] },
+            // Surfaced so the nightly job's findings are visible where the
+            // fixing happens. A flag nobody sees is not a control.
+            needsReview: { $ifNull: ["$clockRecord.needsReview", false] },
+            reviewReason: "$clockRecord.reviewReason",
           clockIn: "$clockRecord.clockIn",
           clockOut: "$clockRecord.clockOut",
 
@@ -774,6 +472,10 @@ export async function fetchLiveOfficeClock({
           breaks: { $ifNull: ["$clockRecord.breaks", []] },
 
           date: "$clockRecord.date",
+
+          onLeave: { $cond: [{ $ifNull: ["$leave", false] }, true, false] },
+          leaveType: { $ifNull: ["$leave.leaveType", null] },
+          leaveIsPaid: { $ifNull: ["$leave.isPaid", null] },
         },
       },
     ];
@@ -882,6 +584,27 @@ export async function fetchLiveOfficeClock({
                     ],
                   },
                 },
+                // Split by whether the leave is paid: unpaid leave is an
+                // absence the business is not paying for, so it does not
+                // belong in the same figure as booked holiday.
+                onLeave: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $ne: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                onUnpaidLeave: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$onLeave", true] }, { $eq: ["$leaveIsPaid", false] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
                 totalWorkedMinutes: {
                   $sum: {
                     $cond: [
@@ -958,6 +681,8 @@ export async function fetchLiveOfficeClock({
                 presentToday: 1,
                 onBreak: 1,
                 clockedOut: 1,
+                onLeave: 1,
+                onUnpaidLeave: 1,
                 averageMinutes: {
                   $cond: [
                     { $gt: ["$clockedOut", 0] },
@@ -981,6 +706,8 @@ export async function fetchLiveOfficeClock({
                 presentToday: 0,
                 onBreak: 0,
                 clockedOut: 0,
+                onLeave: 0,
+                onUnpaidLeave: 0,
                 averageMinutes: 0,
               },
             ],
@@ -1002,6 +729,8 @@ export async function fetchLiveOfficeClock({
         presentToday: 0,
         onBreak: 0,
         clockedOut: 0,
+        onLeave: 0,
+        onUnpaidLeave: 0,
         averageMinutes: 0,
       },
     };
@@ -1028,9 +757,9 @@ export async function fetchLiveClockRecords({
   try {
     await connect();
 
-    const today = normalizeDateToUTC(new Date());
-    const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
-    const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
+    const today = getWorkingDate();
+    const start = fromDate ? toWorkingDate(fromDate) : today;
+    const end = toDate ? toWorkingDate(toDate) : today;
 
     // helper to build common projection shape
     const projectClockShape = (employeeTypeLiteral) => ({
@@ -1194,189 +923,6 @@ export async function fetchLiveClockRecords({
 }
 
 // KPI Metrics
-export async function fetchKpiMetrics({ employeeId = null }) {
-  try {
-    const { props } = await getServerSideProps();
-    const { user } = props?.session || {};
-    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    const empId = isAdmin ? decrypt(employeeId) : user?._id;
-    if (!empId) {
-      return { success: false, message: "Invalid employee ID" };
-    }
-    await connect();
-
-    const today = normalizeDateToUTC(new Date());
-    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
-    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
-
-    // 1️⃣ Fetch total work hours for the year
-    const [workHoursResult] = await ClockModel.aggregate([
-      {
-        $match: {
-          employeeId: createObjectId(empId),
-          date: { $gte: startOfYear, $lte: endOfYear },
-          isDeleted: false,
-        },
-      },
-      {
-        $addFields: {
-          clockInMinutes: convertTimeToMinutes("clockIn"),
-          clockOutMinutes: convertTimeToMinutes("clockOut"),
-          breakInMinutes: convertTimeToMinutes("breakIn"),
-          breakOutMinutes: convertTimeToMinutes("breakOut"),
-        },
-      },
-      {
-        $addFields: {
-          dailyWorkMinutes: {
-            $subtract: [
-              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
-              {
-                $cond: [
-                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
-                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
-                  0,
-                ],
-              },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalWorkMinutes: { $sum: "$dailyWorkMinutes" },
-        },
-      },
-    ]);
-
-    const totalWorkHours = workHoursResult
-      ? Math.floor(workHoursResult.totalWorkMinutes / 60) +
-        ":" +
-        String(workHoursResult.totalWorkMinutes % 60).padStart(2, "0")
-      : "0:00";
-
-    // 2️⃣ Fetch total leave days taken this year
-    const leaveCount = await OfficeEmployeeModel.aggregate([
-      { $match: { _id: createObjectId(empId) } },
-      {
-        $lookup: {
-          from: "leaverequests",
-          let: { eid: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$employeeId", "$$eid"] },
-                    { $in: ["$leaveStatus", ["Approved"]] },
-                    {
-                      $or: [
-                        {
-                          $and: [
-                            {
-                              $gte: [
-                                { $toDate: "$leaveStartDate" },
-                                startOfYear,
-                              ],
-                            },
-                            {
-                              $lte: [{ $toDate: "$leaveStartDate" }, endOfYear],
-                            },
-                          ],
-                        },
-                        {
-                          $and: [
-                            {
-                              $gte: [{ $toDate: "$leaveEndDate" }, startOfYear],
-                            },
-                            { $lte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
-                          ],
-                        },
-                        {
-                          $and: [
-                            {
-                              $lte: [
-                                { $toDate: "$leaveStartDate" },
-                                startOfYear,
-                              ],
-                            },
-                            { $gte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-            },
-            {
-              $project: {
-                leaveStartDate: { $toDate: "$leaveStartDate" },
-                leaveEndDate: { $toDate: "$leaveEndDate" },
-              },
-            },
-          ],
-          as: "leaves",
-        },
-      },
-      { $unwind: "$leaves" },
-      {
-        $addFields: {
-          adjustedStartDate: {
-            $cond: [
-              { $lt: ["$leaves.leaveStartDate", startOfYear] },
-              startOfYear,
-              "$leaves.leaveStartDate",
-            ],
-          },
-          adjustedEndDate: {
-            $cond: [
-              { $gt: ["$leaves.leaveEndDate", endOfYear] },
-              endOfYear,
-              "$leaves.leaveEndDate",
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          leaveDaysCount: {
-            $add: [
-              {
-                $dateDiff: {
-                  startDate: "$adjustedStartDate",
-                  endDate: "$adjustedEndDate",
-                  unit: "day",
-                },
-              },
-              1,
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalLeaveDays: { $sum: "$leaveDaysCount" },
-        },
-      },
-    ]);
-    const totalLeaveDays = leaveCount[0]?.totalLeaveDays || 0;
-    return {
-      success: true,
-      data: JSON.stringify({
-        totalWorkHours,
-        totalLeaveDays,
-      }),
-    };
-  } catch (error) {
-    console.error("Error fetching KPI metrics:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}
-
-// Punctuality Rate KPI
 export async function fetchPunctualityRate({ employeeId = null }) {
   try {
     const { props } = await getServerSideProps();
@@ -1388,18 +934,25 @@ export async function fetchPunctualityRate({ employeeId = null }) {
     }
     await connect();
 
-    const today = normalizeDateToUTC(new Date());
-    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
-    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
-    const gracePeriodMinutes = 5; // 15 minutes grace period
+    const today = getWorkingDate();
+    // UTC, to match how a working day is stored. Built from local parts, a
+    // January 1st west of Greenwich lands in the previous year.
+    const startOfYear = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
+    const endOfYear = new Date(Date.UTC(today.getUTCFullYear(), 11, 31));
+    const gracePeriodMinutes = 5;
 
-    // Fetch total work days and late days for the year
-    const [punctualityResult] = await ClockModel.aggregate([
+    // Reads clockrecords. It used to read `clocks`, which nothing has written
+    // to since the app moved to clockrecords — so this chart showed whatever
+    // was in that collection the day writing stopped, and nothing since.
+    // scripts/migrate-legacy-clocks.mjs brings the history across.
+    const [punctualityResult] = await ClockRecordModel.aggregate([
       {
         $match: {
           employeeId: createObjectId(empId),
           date: { $gte: startOfYear, $lte: endOfYear },
           isDeleted: false,
+          // A day with no clock-in is not a day they were late for.
+          clockIn: { $type: "string", $ne: "" },
         },
       },
       {
@@ -1463,360 +1016,3 @@ export async function fetchPunctualityRate({ employeeId = null }) {
 }
 
 // Average Daily Hours KPI
-export async function fetchAverageDailyHours({ employeeId = null }) {
-  try {
-    const { props } = await getServerSideProps();
-    const { user } = props?.session || {};
-    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    const empId = isAdmin ? decrypt(employeeId) : user?._id;
-    if (!empId) {
-      return { success: false, message: "Invalid employee ID" };
-    }
-    await connect();
-
-    const today = normalizeDateToUTC(new Date());
-    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
-    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
-
-    // Fetch total work minutes and work days for the year
-    const [averageResult] = await ClockModel.aggregate([
-      {
-        $match: {
-          employeeId: createObjectId(empId),
-          date: { $gte: startOfYear, $lte: endOfYear },
-          isDeleted: false,
-        },
-      },
-      {
-        $addFields: {
-          clockInMinutes: convertTimeToMinutes("clockIn"),
-          clockOutMinutes: convertTimeToMinutes("clockOut"),
-          breakInMinutes: convertTimeToMinutes("breakIn"),
-          breakOutMinutes: convertTimeToMinutes("breakOut"),
-        },
-      },
-      {
-        $addFields: {
-          dailyWorkMinutes: {
-            $subtract: [
-              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
-              {
-                $cond: [
-                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
-                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
-                  0,
-                ],
-              },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalWorkMinutes: { $sum: "$dailyWorkMinutes" },
-          totalWorkDays: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const totalWorkMinutes = averageResult?.totalWorkMinutes || 0;
-    const totalWorkDays = averageResult?.totalWorkDays || 0;
-
-    const avgDailyMinutes =
-      totalWorkDays === 0 ? 0 : Math.round(totalWorkMinutes / totalWorkDays);
-
-    const avgDailyHours = Math.floor(avgDailyMinutes / 60);
-    const avgDailyRemainingMinutes = avgDailyMinutes % 60;
-    const avgDailyMinutesStr = String(avgDailyRemainingMinutes).padStart(
-      2,
-      "0",
-    );
-    // const avgDailyMinutes = `${avgDailyHours}:${avgDailyMinutesStr}`;
-
-    console.log("Average Daily Hours Calculation:", {
-      totalWorkMinutes,
-      totalWorkDays,
-      avgDailyHours,
-      avgDailyMinutes,
-      avgDailyMinutesStr,
-    });
-    return {
-      success: true,
-      data: JSON.stringify({
-        totalWorkDays,
-        totalWorkMinutes,
-        avgDailyHours,
-        avgDailyMinutes,
-      }),
-    };
-  } catch (error) {
-    console.error("Error fetching average daily hours:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}
-
-// Attendance Rate KPI
-export async function fetchAttendanceRate({ employeeId = null }) {
-  try {
-    const { props } = await getServerSideProps();
-    const { user } = props?.session || {};
-    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    const empId = isAdmin ? decrypt(employeeId) : user?._id;
-    if (!empId) {
-      return { success: false, message: "Invalid employee ID" };
-    }
-    await connect();
-
-    const today = normalizeDateToUTC(new Date());
-    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
-    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
-
-    // Fetch total work days from ClockModel
-    const [workDaysResult] = await ClockModel.aggregate([
-      {
-        $match: {
-          employeeId: createObjectId(empId),
-          date: { $gte: startOfYear, $lte: endOfYear },
-          isDeleted: false,
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalWorkDays: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const totalWorkDays = workDaysResult?.totalWorkDays || 0;
-
-    // Fetch total leave days from OfficeEmployeeModel
-    const leaveCount = await OfficeEmployeeModel.aggregate([
-      { $match: { _id: createObjectId(empId) } },
-      {
-        $lookup: {
-          from: "leaverequests",
-          let: { eid: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$employeeId", "$$eid"] },
-                    { $in: ["$leaveStatus", ["Approved"]] },
-                    {
-                      $or: [
-                        {
-                          $and: [
-                            {
-                              $gte: [
-                                { $toDate: "$leaveStartDate" },
-                                startOfYear,
-                              ],
-                            },
-                            {
-                              $lte: [{ $toDate: "$leaveStartDate" }, endOfYear],
-                            },
-                          ],
-                        },
-                        {
-                          $and: [
-                            {
-                              $gte: [{ $toDate: "$leaveEndDate" }, startOfYear],
-                            },
-                            { $lte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
-                          ],
-                        },
-                        {
-                          $and: [
-                            {
-                              $lte: [
-                                { $toDate: "$leaveStartDate" },
-                                startOfYear,
-                              ],
-                            },
-                            { $gte: [{ $toDate: "$leaveEndDate" }, endOfYear] },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              },
-            },
-            {
-              $project: {
-                leaveStartDate: { $toDate: "$leaveStartDate" },
-                leaveEndDate: { $toDate: "$leaveEndDate" },
-              },
-            },
-          ],
-          as: "leaves",
-        },
-      },
-      { $unwind: "$leaves" },
-      {
-        $addFields: {
-          adjustedStartDate: {
-            $cond: [
-              { $lt: ["$leaves.leaveStartDate", startOfYear] },
-              startOfYear,
-              "$leaves.leaveStartDate",
-            ],
-          },
-          adjustedEndDate: {
-            $cond: [
-              { $gt: ["$leaves.leaveEndDate", endOfYear] },
-              endOfYear,
-              "$leaves.leaveEndDate",
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          leaveDaysCount: {
-            $add: [
-              {
-                $dateDiff: {
-                  startDate: "$adjustedStartDate",
-                  endDate: "$adjustedEndDate",
-                  unit: "day",
-                },
-              },
-              1,
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalLeaveDays: { $sum: "$leaveDaysCount" },
-        },
-      },
-    ]);
-    const totalLeaveDays = leaveCount[0]?.totalLeaveDays || 0;
-    const totalPossibleDays = totalWorkDays + totalLeaveDays;
-    const attendanceRate =
-      totalPossibleDays === 0
-        ? 0
-        : Math.round((totalWorkDays / totalPossibleDays) * 100);
-    console.log("Attendance Rate Calculation:", {
-      totalWorkDays,
-      totalLeaveDays,
-      totalPossibleDays,
-      attendanceRate,
-    });
-    return {
-      success: true,
-      data: JSON.stringify({
-        totalWorkDays,
-        totalLeaveDays,
-        totalPossibleDays,
-        attendanceRate,
-      }),
-    };
-  } catch (error) {
-    console.error("Error fetching attendance rate:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}
-// Overtime Hours KPI - Assuming any hours worked beyond 8 hours a day is considered overtime but we remove break time also
-export async function fetchOvertimeHours({ employeeId = null }) {
-  try {
-    const { props } = await getServerSideProps();
-    const { user } = props?.session || {};
-    const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
-    const empId = isAdmin ? decrypt(employeeId) : user?._id;
-    if (!empId) {
-      return { success: false, message: "Invalid employee ID" };
-    }
-    await connect();
-
-    const today = normalizeDateToUTC(new Date());
-    const startOfYear = new Date(today.getUTCFullYear(), 0, 1);
-    const endOfYear = new Date(today.getUTCFullYear(), 11, 31);
-
-    // Fetch total overtime minutes for the year
-    const [overtimeResult] = await ClockModel.aggregate([
-      {
-        $match: {
-          employeeId: createObjectId(empId),
-          date: { $gte: startOfYear, $lte: endOfYear },
-          isDeleted: false,
-        },
-      },
-      {
-        $addFields: {
-          clockInMinutes: convertTimeToMinutes("clockIn"),
-          clockOutMinutes: convertTimeToMinutes("clockOut"),
-          breakInMinutes: convertTimeToMinutes("breakIn"),
-          breakOutMinutes: convertTimeToMinutes("breakOut"),
-        },
-      },
-      {
-        $addFields: {
-          dailyWorkMinutes: {
-            $subtract: [
-              { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
-              {
-                $cond: [
-                  { $and: ["$breakInMinutes", "$breakOutMinutes"] },
-                  { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
-                  0,
-                ],
-              },
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          overtimeMinutes: {
-            $cond: [
-              { $gt: ["$dailyWorkMinutes", 480] }, // 8 hours = 480 minutes
-              { $subtract: ["$dailyWorkMinutes", 480] },
-              0,
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalOvertimeMinutes: { $sum: "$overtimeMinutes" },
-        },
-      },
-    ]);
-
-    const totalOvertimeMinutes = overtimeResult?.totalOvertime
-      ? overtimeResult.totalOvertimeMinutes
-      : 0;
-    const overtimeHours = Math.floor(totalOvertimeMinutes / 60);
-    const overtimeRemainingMinutes = totalOvertimeMinutes % 60;
-    const overtimeMinutesStr = String(overtimeRemainingMinutes).padStart(
-      2,
-      "0",
-    );
-    // const totalOvertime = `${overtimeHours}:${overtimeMinutesStr}`;
-    console.log("Overtime Hours Calculation:", {
-      totalOvertimeMinutes,
-      overtimeHours,
-      overtimeRemainingMinutes,
-      overtimeMinutesStr,
-    });
-    return {
-      success: true,
-      data: JSON.stringify({
-        totalOvertimeMinutes,
-        overtimeHours,
-        overtimeRemainingMinutes,
-      }),
-    };
-  } catch (error) {
-    console.error("Error fetching overtime hours:", error);
-    return { success: false, message: "Something went wrong" };
-  }
-}

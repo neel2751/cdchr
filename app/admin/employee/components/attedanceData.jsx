@@ -10,7 +10,6 @@ import { CardDescription, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Table } from "@/components/ui/table";
 import { useFetchQuery } from "@/hooks/use-query";
-import { calculateDuration } from "@/lib/utils";
 import { getSiteEmployeAttendanceData } from "@/server/employeServer/employeServer";
 import { formatCurrency } from "@/utils/time";
 import { format } from "date-fns";
@@ -37,20 +36,34 @@ export default function SiteAttedanceData() {
   });
   const { newData: attendance, totalCount } = attendanceData || {};
 
+  // A record can hold several breaks. It used to hold one, as two flat fields,
+  // and this read them straight off the row — so a day with a morning and an
+  // afternoon break showed only the morning one and counted only its minutes.
+  // The totals now come from the server, which sums the whole list.
+  const describeBreaks = (breaks) => {
+    if (!breaks?.length) return "N/A";
+    return breaks
+      .map((b) => `${b?.breakIn || "--"}-${b?.breakOut || "--"}`)
+      .join(", ");
+  };
+
+  const asHoursAndMinutes = (minutes) => {
+    if (!Number.isFinite(minutes) || minutes <= 0) return "00:00";
+    const h = String(Math.floor(minutes / 60)).padStart(2, "0");
+    const m = String(Math.round(minutes % 60)).padStart(2, "0");
+    return `${h}:${m}`;
+  };
+
   const attendanceTableData =
     attendance?.data?.map((item) => ({
       siteName: item?.siteName || "N/A",
       clockIn: item.clockIn || "N/A",
-      breakIn: item.breakIn || "N/A",
-      breakOut: item.breakOut || "N/A",
+      breaks: describeBreaks(item?.breaks),
       clockOut: item.clockOut || "N/A",
       date: item?.date ? format(new Date(item.date), "PPP") : "N/A",
-      totalHour: calculateDuration(item?.clockIn, item?.clockOut),
-      totalBreak: calculateDuration(item?.breakIn, item?.breakOut),
-      grandHour: calculateDuration(
-        calculateDuration(item?.breakIn, item?.breakOut),
-        calculateDuration(item?.clockIn, item?.clockOut)
-      ),
+      totalHour: asHoursAndMinutes(item?.workMinutes),
+      totalBreak: asHoursAndMinutes(item?.breakMinutes),
+      grandHour: asHoursAndMinutes(item?.netMinutes),
     })) || [];
 
   const exportedData = () => {
@@ -83,24 +96,15 @@ export default function SiteAttedanceData() {
     }).catch(() => {});
   };
 
-  const totalHour = attendanceTableData.reduce((acc, item) => {
-    let clockIn = item.clockIn || null;
-    let clockOut = item.clockOut || null;
-    // we store time like "HH:mm" in the database, so we need to convert it to Date objects
-    if (clockIn) {
-      const [hours, minutes] = clockIn.split(":").map(Number);
-      clockIn = new Date(0, 0, 0, hours, minutes).getTime();
-    }
-    if (clockOut) {
-      const [hours, minutes] = clockOut.split(":").map(Number);
-      clockOut = new Date(0, 0, 0, hours, minutes).getTime();
-    }
-
-    if (clockIn && clockOut) {
-      return acc + (clockOut - clockIn) / 3600000; // Convert milliseconds to hours
-    }
-    return acc;
-  }, 0);
+  // Summed from the server's own per-row figures. This used to re-derive the
+  // total here by subtracting two "HH:mm" strings turned into Dates, which
+  // ignored breaks entirely and went negative across midnight — a night shift
+  // subtracted sixteen hours from the total instead of adding eight.
+  const totalHour =
+    (attendance?.data || []).reduce(
+      (acc, item) => acc + (Number(item?.netMinutes) || 0),
+      0,
+    ) / 60;
 
   return (
     <div>

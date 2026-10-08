@@ -9,7 +9,7 @@ import { createObjectId } from "@/lib/mongodb";
 import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
 import { emailButton } from "@/lib/emailTemplate";
 import { decrypt } from "@/lib/algo";
-import SiteClockModel from "@/models/siteClockModel";
+import ClockRecordModel from "@/models/clockInModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
@@ -17,7 +17,68 @@ import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
 
 // The form only asks for a country when the employee is not British.
+/**
+ * "HH:mm" as minutes from midnight, inside an aggregation.
+ *
+ * Null stays null so the caller can tell "no clock out yet" from "clocked out
+ * at midnight" — 00:00 is a real time and zero is a real number of minutes.
+ */
+const TIME_TO_MINUTES = (field) => ({
+  $cond: [
+    {
+      $and: [
+        { $ne: [field, null] },
+        { $eq: [{ $type: field }, "string"] },
+        { $eq: [{ $strLenCP: { $ifNull: [field, ""] } }, 5] },
+      ],
+    },
+    {
+      $let: {
+        vars: { parts: { $split: [field, ":"] } },
+        in: {
+          $add: [
+            { $multiply: [{ $toInt: { $arrayElemAt: ["$$parts", 0] } }, 60] },
+            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
+          ],
+        },
+      },
+    },
+    null,
+  ],
+});
+
+/**
+ * Minutes between two of those, 0 if either is missing.
+ *
+ * An end before the start wraps past midnight rather than going negative —
+ * the same reading lib/clockTime.js `diffMinutes` takes, and the one a night
+ * shift needs. The old pipeline subtracted directly, so 22:00 to 06:00 came
+ * out as minus sixteen hours and was paid as such.
+ */
+const SPAN_MINUTES = (start, end) => ({
+  $cond: [
+    { $and: [{ $ne: [start, null] }, { $ne: [end, null] }] },
+    {
+      $cond: [
+        { $gte: [end, start] },
+        { $subtract: [end, start] },
+        { $add: [{ $subtract: [1440, start] }, end] },
+      ],
+    },
+    0,
+  ],
+});
+
 const UNITED_KINGDOM = "United Kingdom";
+
+// The employee edit form is seeded from the list row, so it round-trips the
+// right-to-work history. That log is append-only — only
+// recordRightToWorkCheck() may write it — so drop those keys before saving.
+const stripRightToWorkFields = ({
+  rightToWorkChecks,
+  lastRightToWorkCheckDate,
+  ...rest
+}) => rest;
 
 export const getAllEmployees = async (filterData) => {
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -217,7 +278,7 @@ export const handleEmploye = withAudit(
           id,
           {
             $set: {
-              ...data,
+              ...stripRightToWorkFields(data),
               eAddress: eAddress,
               ...(bankDetail ? { bankDetail } : {}),
               employeType,
@@ -267,7 +328,7 @@ export const handleEmploye = withAudit(
         const password = await GenerateHashPassword("Interior@1234");
         if (!isExists.status) return isExists;
         const addEmploye = await EmployeModel.create({
-          ...data,
+          ...stripRightToWorkFields(data),
           eAddress: eAddress,
           ...(bankDetail ? { bankDetail } : {}),
           employeType,
@@ -500,7 +561,14 @@ export async function changeSiteEmployeePassword(data) {
  */
 export const resetSiteEmployeePassword = withAudit(
   "Password.reset",
-  async ({ employeeId, newPassword, reason } = {}) => {
+  async ({
+    employeeId,
+    newPassword,
+    reason,
+    // See resetOfficeEmployeePassword — same two options, same defaults.
+    signOutEverywhere = true,
+    requirePasswordChange = true,
+  } = {}) => {
     const { props } = await getServerSideProps();
     const actor = props?.session?.user;
 
@@ -531,7 +599,34 @@ export const resetSiteEmployeePassword = withAudit(
         return { success: false, message: "Failed to secure the new password" };
       }
       employee.password = hashed;
+      // Ends every signed-in device: sessions are JWTs, so auth.js refuses any
+      // token minted before this instant rather than deleting anything.
+      if (signOutEverywhere) {
+        employee.sessionsValidFrom = new Date();
+      }
+      employee.mustChangePassword = !!requirePasswordChange;
       await employee.save();
+
+      // Read the flags back — see resetOfficeEmployeePassword for why. A stale
+      // compiled model drops them without error, which would tell the admin the
+      // account was secured when it was not.
+      const saved = await EmployeModel.findById(employeeId)
+        .select("mustChangePassword sessionsValidFrom")
+        .lean();
+
+      if (
+        (!!requirePasswordChange && saved?.mustChangePassword !== true) ||
+        (!!signOutEverywhere && !saved?.sessionsValidFrom)
+      ) {
+        return {
+          success: false,
+          message:
+            "The password was changed, but 'sign out everywhere' and 'require a " +
+            "password change' could not be saved — the server is running an " +
+            "older version of the employee record. Restart the app and set them " +
+            "again.",
+        };
+      }
 
       await clearLockByEmail(employee.email);
 
@@ -663,141 +758,60 @@ export async function getSiteEmployeAttendanceData(params) {
           metadata: [
             {
               $addFields: {
-                // Convert to minutes, but only if the time exists
-                clockInMinutes: {
-                  $cond: [
-                    { $gt: ["$clockIn", null] },
-                    {
-                      $let: {
-                        vars: { parts: { $split: ["$clockIn", ":"] } },
-                        in: {
-                          $add: [
-                            {
-                              $multiply: [
-                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                                60,
-                              ],
+                // "HH:mm" -> minutes from midnight, null when absent.
+                clockInMinutes: TIME_TO_MINUTES("$clockIn"),
+                clockOutMinutes: TIME_TO_MINUTES("$clockOut"),
+                // Every break on the record, summed. The old pipeline read a
+                // single breakIn/breakOut pair off the document, because that
+                // is the shape the legacy `siteclocks` collection had. A
+                // clockrecords row carries a list, and reading only the first
+                // of them would have quietly paid people for their second
+                // break.
+                totalBreakMinutes: {
+                  $reduce: {
+                    input: { $ifNull: ["$breaks", []] },
+                    initialValue: 0,
+                    in: {
+                      $add: [
+                        "$$value",
+                        {
+                          $let: {
+                            vars: {
+                              s: TIME_TO_MINUTES("$$this.breakIn"),
+                              e: TIME_TO_MINUTES("$$this.breakOut"),
                             },
-                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                          ],
+                            in: SPAN_MINUTES("$$s", "$$e"),
+                          },
                         },
-                      },
-                    },
-                    null,
-                  ],
-                },
-                clockOutMinutes: {
-                  $cond: [
-                    { $gt: ["$clockOut", null] },
-                    {
-                      $let: {
-                        vars: { parts: { $split: ["$clockOut", ":"] } },
-                        in: {
-                          $add: [
-                            {
-                              $multiply: [
-                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                                60,
-                              ],
-                            },
-                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                          ],
-                        },
-                      },
-                    },
-                    null,
-                  ],
-                },
-                breakInMinutes: {
-                  $cond: [
-                    { $gt: ["$breakIn", null] },
-                    {
-                      $let: {
-                        vars: { parts: { $split: ["$breakIn", ":"] } },
-                        in: {
-                          $add: [
-                            {
-                              $multiply: [
-                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                                60,
-                              ],
-                            },
-                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                          ],
-                        },
-                      },
-                    },
-                    null,
-                  ],
-                },
-                breakOutMinutes: {
-                  $cond: [
-                    { $gt: ["$breakOut", null] },
-                    {
-                      $let: {
-                        vars: { parts: { $split: ["$breakOut", ":"] } },
-                        in: {
-                          $add: [
-                            {
-                              $multiply: [
-                                { $toInt: { $arrayElemAt: ["$$parts", 0] } },
-                                60,
-                              ],
-                            },
-                            { $toInt: { $arrayElemAt: ["$$parts", 1] } },
-                          ],
-                        },
-                      },
-                    },
-                    null,
-                  ],
-                },
-              },
-            },
-            {
-              $addFields: {
-                totalWorkMinutes: {
-                  $cond: [
-                    {
-                      $and: [
-                        { $ne: ["$clockOutMinutes", null] },
-                        { $ne: ["$clockInMinutes", null] },
-                        { $gte: ["$clockOutMinutes", "$clockInMinutes"] },
                       ],
                     },
-                    { $subtract: ["$clockOutMinutes", "$clockInMinutes"] },
-                    0,
-                  ],
-                },
-                totalBreakMinutes: {
-                  $cond: [
-                    {
-                      $and: [
-                        { $ne: ["$breakOutMinutes", null] },
-                        { $ne: ["$breakInMinutes", null] },
-                        { $gte: ["$breakOutMinutes", "$breakInMinutes"] },
-                      ],
-                    },
-                    { $subtract: ["$breakOutMinutes", "$breakInMinutes"] },
-                    0,
-                  ],
+                  },
                 },
               },
             },
             {
+              // One pass, and it keeps its guards. There used to be a second
+              // $addFields immediately after this one that recomputed both
+              // figures with a bare $subtract, overwriting the guarded values
+              // — so an open shift (clockOut still null) produced null rather
+              // than 0, and that null went on into totalPay and the CIS
+              // deduction below.
               $addFields: {
-                totalWorkMinutes: {
-                  $subtract: ["$clockOutMinutes", "$clockInMinutes"],
-                },
-                totalBreakMinutes: {
-                  $subtract: ["$breakOutMinutes", "$breakInMinutes"],
-                },
+                totalWorkMinutes: SPAN_MINUTES(
+                  "$clockInMinutes",
+                  "$clockOutMinutes",
+                ),
               },
             },
             {
               $addFields: {
+                // Never negative: a break longer than the recorded shift is
+                // bad data, and paying it as negative time would be worse.
                 netWorkMinutes: {
-                  $subtract: ["$totalWorkMinutes", "$totalBreakMinutes"],
+                  $max: [
+                    0,
+                    { $subtract: ["$totalWorkMinutes", "$totalBreakMinutes"] },
+                  ],
                 },
               },
             },
@@ -950,8 +964,13 @@ export async function getSiteEmployeAttendanceData(params) {
                 siteName: "$site.siteName",
                 clockIn: 1,
                 clockOut: 1,
-                breakIn: 1,
-                breakOut: 1,
+                // The list, plus the totals worked out above — the client used
+                // to recompute them from a single break pair, which cannot be
+                // right for a day with two.
+                breaks: { $ifNull: ["$breaks", []] },
+                workMinutes: "$totalWorkMinutes",
+                breakMinutes: "$totalBreakMinutes",
+                netMinutes: "$netWorkMinutes",
                 date: 1,
               },
             },
@@ -965,7 +984,7 @@ export async function getSiteEmployeAttendanceData(params) {
       },
     ];
 
-    const attendanceData = await SiteClockModel.aggregate(pipeline);
+    const attendanceData = await ClockRecordModel.aggregate(pipeline);
     if (!attendanceData || attendanceData.length === 0) {
       return { success: false, message: "No Attendance Data Found" };
     }

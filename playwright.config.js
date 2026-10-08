@@ -74,6 +74,11 @@ export default defineConfig({
       MONGO_DB_URL: TEST_DB,
       // The whole point of these tests is the enforced path.
       TENANT_ENFORCEMENT: "enforce",
+      // Seals tag keys. A fixture value, like TOTP_SECRET — never a real one.
+      // Without it the provisioning station correctly refuses to accept an
+      // order, which is right in production and unhelpful in a test.
+      TAG_KEY_MASTER:
+        "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
       // Auth.js builds callback URLs from this; leaving the .env value would
       // point the sign-in round trip at the wrong origin.
       NEXTAUTH_URL: BASE_URL,

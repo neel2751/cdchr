@@ -24,8 +24,17 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
-    // Camera is required for QR-code scanning; microphone/geolocation are not used.
-    value: "camera=(self), microphone=(), geolocation=()",
+    // Camera for QR-code scanning; geolocation for the clock-in location check.
+    //
+    // `geolocation=()` was correct until attendance started recording where a
+    // clock-in happened, and it failed in the worst possible way: the browser
+    // refuses with "disabled by permissions policy", lib/clockEvidence.js
+    // treats any failure as "no position" by design, and the clock-in carries
+    // on. So nothing broke, nothing was logged, and every coordinate was
+    // silently null — a geofence would have evaluated "cannot tell" for ever.
+    //
+    // Microphone stays off: nothing here records audio.
+    value: "camera=(self), microphone=(), geolocation=(self)",
   },
   // HSTS only in production so it does not pin localhost to HTTPS during dev.
   ...(isProd

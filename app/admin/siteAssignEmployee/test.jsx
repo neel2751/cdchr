@@ -35,7 +35,6 @@ import {
 } from "@/lib/utils";
 import { format } from "date-fns";
 import {
-  handleTimeAction,
   handleTimeActionNew,
 } from "../_components/handleTimeAction";
 import { toast } from "sonner";
@@ -203,36 +202,29 @@ const EmployeeSiteManagement = () => {
   };
 
   const handleSave = async () => {
-    const {
-      clockIn,
-      clockOut,
-      breakIn,
-      breakOut,
-      employeeId,
-      siteId,
-      clockRecordId,
-    } = showEditForm;
+    const { clockIn, clockOut, breaks, employeeId, siteId, clockRecordId } =
+      showEditForm;
     if (!employeeId || !siteId || !clockRecordId) {
       toast.error("Invalid clock record");
       return;
     }
-    const result = await handleTimeAction({
+    // Every other part of this screen already reads and writes the breaks
+    // array on a clockrecords row; only this save was left behind, still
+    // sending a single breakIn/breakOut pair to the legacy site collection.
+    // So edits made here were written somewhere the table never read back —
+    // the row appeared unchanged, and the real record kept its old times.
+    const result = await handleTimeActionNew({
       clockId: clockRecordId,
-      type: "site",
+      employeeId,
       siteId,
-      manualTimes: {
-        clockIn,
-        clockOut,
-        breakIn,
-        breakOut,
-      },
+      employeeType: "Employee",
+      manualTimes: { clockIn, clockOut, breaks },
+      selectedDate: date || undefined,
     });
     if (result?.success) {
-      toast.success("Updated successfully");
       setShowEditForm({});
       socket.emit("admin-clock-update", employeeId);
-    } else {
-      toast.error("Failed to update clock");
+      queryClient.invalidateQueries({ queryKey });
     }
   };
 

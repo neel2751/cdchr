@@ -3,8 +3,6 @@
 import { useFetchQuery } from "@/hooks/use-query";
 import { useAvatar } from "../Avatar/AvatarContext";
 import {
-  fetchChartData,
-  fetchKpiMetrics,
   fetchOfficeEmployeeClockCount,
   fetchPunctualityRate,
 } from "@/server/timeOffServer/timeOffServer";
