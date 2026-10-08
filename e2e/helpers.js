@@ -12,6 +12,8 @@ export const ACCOUNTS = {
   acmeAdmin: { email: "admin@acme.test", role: "admin" },
   acmeSuper: { email: "super@acme.test", role: "superAdmin" },
   acmeUser: { email: "user@acme.test", role: "user" },
+  // The provider side. Lands on /platform rather than /admin.
+  platformOps: { email: "ops@platform.test", role: "platformAdmin" },
 };
 
 /**
@@ -33,7 +35,7 @@ export async function signIn(page, account) {
   await page.getByRole("button", { name: "Sign in" }).click();
 
   // Privileged accounts land on /verify; everyone else goes straight through.
-  await page.waitForURL(/\/(verify|admin|employee|hr|unauthorized)/, {
+  await page.waitForURL(/\/(verify|admin|employee|hr|platform|unauthorized)/, {
     timeout: 45_000,
   });
 
@@ -44,16 +46,28 @@ export async function signIn(page, account) {
 
 /** Type a current TOTP code into the six-slot OTP input. */
 async function enterTotp(page) {
+  // Scoped to the dialog if there is one, otherwise the page. The challenge
+  // used to be a modal and is now a full page; pinning this to getByRole
+  // ("dialog") made every spec fail at sign-in the day that changed.
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
+  const scope = (await dialog.count()) > 0 ? dialog : page;
+
+  await expect(scope.getByText(/verification code/i).first()).toBeVisible();
 
   // input-otp renders one hidden text input that owns the whole value; typing
-  // into it drives every slot, and `onComplete` fires on the sixth digit.
-  const field = dialog.locator("input").first();
+  // into it drives every slot.
+  const field = scope.locator("input").first();
   await field.click();
   await field.fill(authenticator.generate(TOTP_SECRET));
 
-  await page.waitForURL(/\/(admin|employee|hr)/, { timeout: 45_000 });
+  // Some versions submit on the sixth digit, others want the button. Click it
+  // when it is there and still enabled; the URL wait settles either way.
+  const verify = scope.getByRole("button", { name: /^verify$/i });
+  if ((await verify.count()) > 0 && (await verify.first().isEnabled())) {
+    await verify.first().click().catch(() => {});
+  }
+
+  await page.waitForURL(/\/(admin|employee|hr|platform)/, { timeout: 45_000 });
 }
 
 /** A value unique to this run, so reruns never collide on the duplicate check. */

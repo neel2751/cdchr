@@ -15,6 +15,7 @@ import {
 import { Loader2, ShieldCheck, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { homePathForRole } from "@/lib/roleHome";
+import BackupCodes from "@/components/2FA/BackupCodes";
 
 export default function ForcedTwoFactorSetup() {
   const { data: session, update } = useSession();
@@ -23,6 +24,11 @@ export default function ForcedTwoFactorSetup() {
   const [code, setCode] = useState("");
   const [loadingQr, setLoadingQr] = useState(true);
   const [isPending, startTransition] = useTransition();
+  // Set once enrolment succeeds. Holding them in state is what turns this into
+  // a two-step flow: enrolment is done, but the user does not leave until they
+  // have saved the codes — the whole point being that this is the only time
+  // they are readable.
+  const [backupCodes, setBackupCodes] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -52,15 +58,30 @@ export default function ForcedTwoFactorSetup() {
       const res = await enable2FA(code, secret);
       if (res?.success) {
         toast.success("Two-factor authentication enabled");
-        // Wait for the updated JWT cookie, then do a full-page navigation so
-        // middleware re-evaluates with mustSetup2FA cleared (a client-side
-        // push can run before the cookie propagates and bounce back here).
-        await update({ twoFactorSetupComplete: true });
-        window.location.assign(homePathForRole(session?.user?.role));
+        // Show the recovery codes before going anywhere. Navigating straight to
+        // the dashboard here is what would leave a newly-enrolled admin one
+        // lost phone away from a permanent lockout.
+        if (res.backupCodes?.length) {
+          setBackupCodes(res.backupCodes);
+          return;
+        }
+        await finish();
       } else {
         toast.error(res?.message || "Invalid code, please try again");
       }
     });
+  };
+
+  /**
+   * Leave the setup flow.
+   *
+   * Waits for the updated JWT cookie, then does a full-page navigation so the
+   * middleware re-evaluates with mustSetup2FA cleared — a client-side push can
+   * run before the cookie propagates and bounce straight back here.
+   */
+  const finish = async () => {
+    await update({ twoFactorSetupComplete: true });
+    window.location.assign(homePathForRole(session?.user?.role));
   };
 
   const copySecret = () => {
@@ -77,11 +98,21 @@ export default function ForcedTwoFactorSetup() {
             <CardTitle>Set up two-factor authentication</CardTitle>
           </div>
           <CardDescription>
-            Your role requires 2FA. Scan the QR code with an authenticator app
-            (Google Authenticator, Microsoft Authenticator, etc.) and enter the
-            6-digit code to finish.
+            {backupCodes
+              ? "Two-factor authentication is on. Save your recovery codes to finish."
+              : "Your role requires 2FA. Scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, etc.) and enter the 6-digit code to finish."}
           </CardDescription>
         </CardHeader>
+
+        {backupCodes ? (
+          <CardContent>
+            <BackupCodes
+              codes={backupCodes}
+              onDone={finish}
+              doneLabel="Finish and continue"
+            />
+          </CardContent>
+        ) : (
         <CardContent className="space-y-4">
           <div className="flex justify-center">
             {loadingQr ? (
@@ -150,6 +181,7 @@ export default function ForcedTwoFactorSetup() {
             Sign out
           </Button>
         </CardContent>
+        )}
       </Card>
     </div>
   );

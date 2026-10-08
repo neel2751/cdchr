@@ -202,7 +202,8 @@ async function main() {
   ];
   await db.collection("officeemployes").insertMany(employees);
 
-  await db.collection("platformusers").insertOne({
+  const platformUser = {
+    _id: oid(),
     name: "Platform Ops",
     email: "ops@platform.test",
     password,
@@ -210,7 +211,8 @@ async function main() {
     delete: false,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  await db.collection("platformusers").insertOne(platformUser);
 
   // A little tenant-owned data, so Phase 2 scoping has something to prove.
   const weekStart = new Date(2026, 7, 24);
@@ -317,8 +319,11 @@ async function main() {
   // gate being weakened to let tests through.
   //
   // TOTP_SECRET is a fixture value and must never be used anywhere else.
+  // Platform Ops is in this list too. Their role forces 2FA, so without a
+  // seeded secret every platform-console test stalls on the enrolment screen
+  // rather than reaching the thing it means to exercise.
   await db.collection("twofas").insertMany(
-    [employees[0], employees[1], employees[3], employees[4]].map((e) => ({
+    [employees[0], employees[1], employees[3], employees[4], platformUser].map((e) => ({
       _id: oid(),
       employeeId: e._id,
       secret: TOTP_SECRET,
