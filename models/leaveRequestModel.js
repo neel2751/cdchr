@@ -23,7 +23,14 @@ const leaveRequestSchema = new mongoose.Schema(
     },
     leaveStatus: {
       type: String,
-      enum: ["Pending", "Approved", "Rejected", "Expired", "Cancelled"],
+      enum: [
+        "Pending",
+        "Approved",
+        "Rejected",
+        "Expired",
+        "Cancelled",
+        "Rolled Back",
+      ],
       default: "Pending",
     },
     leaveReason: {
@@ -99,6 +106,37 @@ const leaveRequestSchema = new mongoose.Schema(
     halfDayType: {
       type: String,
       enum: ["First Half", "Second Half"],
+    },
+    // Fit note / sick note evidence. Mandatory once a sick leave runs for
+    // SICK_NOTE_MIN_CONSECUTIVE_DAYS consecutive calendar days or more.
+    sickNote: {
+      key: String,
+      fileName: String,
+      fileSize: Number,
+      fileType: String,
+      access: {
+        type: String,
+        default: "private",
+      },
+      uploadedAt: Date,
+      uploadedBy: {
+        type: mongoose.Types.ObjectId,
+        ref: "OfficeEmploye",
+      },
+    },
+    // A super admin can undo an approval. The request is never deleted — it
+    // keeps its history and carries who reversed it, when, and why.
+    rollback: {
+      reason: String,
+      previousStatus: String,
+      rolledBackBy: {
+        type: mongoose.Types.ObjectId,
+        ref: "OfficeEmploye",
+      },
+      rolledBackAt: Date,
+      // Days handed back to the balance, so the entry is auditable on its own.
+      restoredDays: Number,
+      restoredLeaveType: String,
     },
   },
   { timestamps: true }

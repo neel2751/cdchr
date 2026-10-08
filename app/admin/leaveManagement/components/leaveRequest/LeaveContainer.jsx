@@ -1,5 +1,6 @@
 "use client";
 import React, { useState } from "react";
+import { useBankHolidayRule } from "@/lib/holiday";
 import LeaveForm from "./leave-form";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import { getSelectLeaveRequestForEmployee } from "@/server/selectServer/selectServer";
@@ -17,8 +18,10 @@ import {
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
 import { AddEmploeeLeave } from "../addEmployeeLeave/addEmplyoeeLeave";
+import { sickNoteField, useSickNoteUpload } from "./sick-note-field";
 
 export default function LeaveContainer() {
+  const { isClosedDay } = useBankHolidayRule();
   const [showDialog, setShowDialog] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [initialValues, setInitialValues] = useState(null);
@@ -57,7 +60,9 @@ export default function LeaveContainer() {
     fetchFn: getSelectLeaveRequestForEmployee,
   });
 
-  const handleSubmit = (data) => {
+  const { prepareSickNote } = useSickNoteUpload();
+
+  const handleSubmit = async (data) => {
     // ✅ Task1 : Implement the logic to submit the leave request
     // ✅ Task2 : Check the validation like Start Date, End Date
     // ✅ Task3 : Check if End date is before Start date
@@ -66,6 +71,14 @@ export default function LeaveContainer() {
     // ✅ Task6 : Check if the employee has enough leave balance
     // ✅ Task7 : Submit the leave request
     const { leaveType, leaveDates } = data;
+
+    // A long sick leave cannot go in without its note — the upload happens
+    // first so the request carries the stored reference, not the raw file.
+    const noteResult = await prepareSickNote(data);
+    if (!noteResult.success) {
+      return toast.warning(noteResult.message);
+    }
+    data = { ...data, sickNote: noteResult.sickNote };
     // const isBeforeEndDate = isBefore(
     //   new Date(leaveEndDate),
     //   new Date(leaveStartDate)
@@ -163,7 +176,9 @@ export default function LeaveContainer() {
           return true;
         },
       },
-      disabled: (date) => isBefore(date, new Date()),
+      // See leave-request-new.jsx: not offered when the company closes on
+      // bank holidays, and enforced again server-side.
+      disabled: (date) => isBefore(date, new Date()) || isClosedDay(date),
     },
     {
       name: "leaveReason",
@@ -172,6 +187,7 @@ export default function LeaveContainer() {
       placeholder: "Enter Reason",
       size: true,
     },
+    sickNoteField,
   ];
 
   return (
@@ -201,6 +217,7 @@ export default function LeaveContainer() {
         initialValues={initialValues}
         handleSubmit={handleSubmit}
         isEdit={isEdit}
+        stickyFooter
       />
     </div>
   );

@@ -122,6 +122,44 @@ export async function validateOverlap(entries, excludeId) {
   }
 }
 
+/**
+ * Hand days back to a leave entitlement — the one way it should ever be done.
+ *
+ * Two rules, both of which the codebase had already learned and then applied
+ * inconsistently:
+ *
+ *   `used` never goes below zero. A record rejected twice by different routes,
+ *   or rejected after a partial edit, would otherwise leave a negative usage
+ *   that every report then reads as fact.
+ *
+ *   Unpaid Leave has no allowance, so its `remaining` stays where it is. Only
+ *   `used` moves. Refunding it was how an unpaid balance drifted upwards: the
+ *   request path deliberately skips `remaining` for unpaid, so adding it back
+ *   on rejection invented days out of nothing, permanently and with no way to
+ *   notice.
+ *
+ * rollbackLeaveRequest already did both. This is that behaviour lifted out so
+ * the reject paths cannot keep disagreeing with it.
+ *
+ * Mutates in place, matching how the callers already work with their
+ * subdocuments.
+ *
+ * @param {object} entitlement a `leaveData` entry
+ * @param {number} days        days to return
+ * @param {string} leaveType   the type being returned
+ */
+export function refundLeaveDays(entitlement, days, leaveType) {
+  if (!entitlement || !Number.isFinite(days) || days <= 0) return entitlement;
+
+  entitlement.used = Math.max((entitlement.used || 0) - days, 0);
+
+  if (leaveType !== "Unpaid Leave") {
+    entitlement.remaining = (entitlement.remaining || 0) + days;
+  }
+
+  return entitlement;
+}
+
 export function updateLeaveUsage(leaveData, rollbackDays, newDays) {
   leaveData.used -= rollbackDays;
   leaveData.remaining += rollbackDays;
@@ -586,9 +624,15 @@ export async function updateLeaveBalance({
       }
 
       leaveDoc.leaveData[idx].used += leaveDays;
-      // if (leaveType === "Annual Leave") {
-      leaveDoc.leaveData[idx].remaining -= leaveDays;
-      // }
+      // Unpaid Leave carries no allowance, so only `used` moves — the same rule
+      // addLeaveRequest applies when it deducts, and refundLeaveDays when it
+      // gives back. Subtracting here drove an unpaid `remaining` negative while
+      // the reject path was driving it positive, so the number meant nothing in
+      // either direction. The guard was present and commented out; it is the
+      // commenting-out that was the mistake.
+      if (leaveType !== "Unpaid Leave") {
+        leaveDoc.leaveData[idx].remaining -= leaveDays;
+      }
 
       leaveDoc.markModified(`leaveData.${idx}`);
       await leaveDoc.save({ session });

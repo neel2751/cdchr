@@ -1,9 +1,9 @@
 "use server";
 import { connect } from "@/db/db";
+import { carriedState } from "@/lib/carryForward";
 import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getServerSideProps } from "../session/session";
 import CommonLeaveModel from "@/models/commonLeaveModel";
-import { addOneCommonLeaveToOneEmployee } from "./countLeaveServer";
 import { differenceInDays, weeksToDays } from "date-fns";
 import { createObjectId, withTransaction } from "@/lib/mongodb";
 import {
@@ -20,10 +20,110 @@ import {
   validateOverlappingHalfDayLeave,
   validateOverlappingLeave,
 } from "./helper/helper";
+import { excludeBankHolidays, describeExclusion } from "@/lib/bankHolidays";
+import { getWorkSettings } from "../settingsServer/workSettings";
+import { getBankHolidays } from "../holidayServer/holidayServer";
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import { getLeaveYearString } from "@/helper/getLeaveYearString";
 import { getLeaveSettings } from "../leaveSettingServer";
 import { create } from "lodash";
+import {
+  hasSickNote,
+  needsSickNote,
+  SICK_NOTE_REQUIRED_MESSAGE,
+} from "@/lib/sickNote";
+
+/**
+ * The date a request should be recorded as having been raised.
+ *
+ * Defaults to today. An admin entering a historical record may pass the real
+ * date it was raised so the notice period reads correctly; an employee cannot,
+ * since backdating their own request would rewrite how much notice they gave.
+ * A future date is ignored — notice cannot be given after the fact.
+ */
+function resolveSubmitDate(leaveSubmitDate, adminId) {
+  const today = normalizeDateToUTC(new Date());
+  if (!adminId || !leaveSubmitDate) return today;
+
+  const chosen = normalizeDateToUTC(new Date(leaveSubmitDate));
+  if (!chosen || Number.isNaN(chosen.getTime())) return today;
+
+  return chosen > today ? today : chosen;
+}
+
+/**
+ * Drop the days the company does not charge for, when it closes on bank
+ * holidays.
+ *
+ * Enforced here and not only in the date picker for the same reason the sick
+ * note rule is: this is the one engine every submission path funnels through,
+ * and a disabled day in a calendar is a courtesy, not a guarantee.
+ *
+ * Fails open on purpose. If the setting cannot be read, or gov.uk cannot be
+ * reached, the days are deducted exactly as they are today — the status quo and
+ * a recoverable mistake. Silently refunding somebody a day because a fetch
+ * failed is neither.
+ *
+ * @returns {Promise<{dates: Array, removed: Array, holidays: Array}>}
+ */
+async function applyBankHolidayRule(leaveDates) {
+  try {
+    // The setting is read first: when the company does not observe bank
+    // holidays there is no reason to call gov.uk at all.
+    const settingsRes = await getWorkSettings();
+    const settings = settingsRes?.success
+      ? JSON.parse(settingsRes.data || "{}")
+      : {};
+    if (!settings?.observesBankHolidays) {
+      return { dates: leaveDates, removed: [], holidays: [] };
+    }
+
+    // Fetched for this company's region, not a hardcoded one.
+    const holidayRes = await getBankHolidays(settings.bankHolidayRegion);
+    const holidays = holidayRes?.success
+      ? JSON.parse(holidayRes.data || "[]")
+      : [];
+
+    const { kept, removed } = excludeBankHolidays(leaveDates, {
+      observes: true,
+      holidays,
+    });
+    return { dates: kept, removed, holidays };
+  } catch (error) {
+    console.log("Bank holiday rule skipped:", error?.message);
+    return { dates: leaveDates, removed: [], holidays: [] };
+  }
+}
+
+/**
+ * Normalises the sick note a form sends us into the shape stored on the leave
+ * request, and refuses the request when the note is required but missing.
+ *
+ * The rule is enforced here rather than in each form so every route in —
+ * employee, admin-for-employee and the edit flow — is covered by one check.
+ */
+function resolveSickNote({ leaveType, leaveDates, sickNote, uploadedBy }) {
+  const note = Array.isArray(sickNote) ? sickNote[0] : sickNote;
+
+  if (needsSickNote(leaveType, leaveDates) && !hasSickNote(note)) {
+    return { success: false, message: SICK_NOTE_REQUIRED_MESSAGE };
+  }
+
+  if (!hasSickNote(note)) return { success: true, sickNote: undefined };
+
+  return {
+    success: true,
+    sickNote: {
+      key: note.key,
+      fileName: note.fileName,
+      fileSize: note.fileSize,
+      fileType: note.fileType,
+      access: note.access || "private",
+      uploadedAt: new Date(),
+      uploadedBy: uploadedBy ? createObjectId(uploadedBy) : undefined,
+    },
+  };
+}
 
 export async function storeEmployeeLeaveData(data, requestId) {
   try {
@@ -49,6 +149,7 @@ export async function storeEmployeeLeaveData(data, requestId) {
         isHalfDay: data.leaveType === "Half Day",
         halfDayType: data.halfDayType || null,
         leaveReason: data.leaveReason || "",
+        sickNote: data.sickNote,
         submitBy: employeeId,
       });
       return response;
@@ -88,577 +189,20 @@ export async function storeEmployeeLeaveData(data, requestId) {
   }
 }
 
-// Add Leave Request
-export async function addLeaveRequestOld({ data, employeeId, adminId }) {
-  return await withTransaction(async (session) => {
-    await connect();
-    // const { leaveType, leaveStartDate, leaveEndDate } = data;
-    const { leaveType, leaveDates } = data;
-
-    const leaveYear = getLeaveYearString(new Date());
-    // const countDays = differenceInDays(leaveEndDate, leaveStartDate) + 1;
-
-    const { leaveData } = await validateLeaveData({
-      employeeId,
-      leaveYear,
-      leaveType,
-      session,
-      adminId,
-    });
-
-    const entries = await splitLeaveWithYearRulesByDates(
-      leaveDates,
-      leaveData?.type === "weeks"
-        ? weeksToDays(leaveData?.remaining)
-        : leaveData.remaining,
-      employeeId,
-      leaveType,
-      adminId ? "Approved" : "Pending",
-      adminId
-    );
-
-    // Question --> For Peternity & Maternity Leave we have to check the overLap dates or not... eg:Annual Leave
-    await validateOverlap(entries);
-
-    // const requestsToInsert = [];
-    // for (const entry of entries) {
-    //   const { leaveYear, leaveType, leaveDays } = entry;
-    //   const existingLeave = await CommonLeaveModel.findOne({
-    //     employeeId: createObjectId(employeeId),
-    //     leaveYear,
-    //     "leaveData.leaveType": leaveType,
-    //   }).session(session);
-
-    //   if (existingLeave) {
-    //     const idx = existingLeave.leaveData.findIndex(
-    //       (l) => l.leaveType === leaveType
-    //     );
-    //     if (idx !== -1) {
-    //       const unit = leaveData?.type || "days";
-
-    //       // ✅ Validate balance before deducting
-    //       const balanceCheck = hasSufficientLeaveBalance(
-    //         existingLeave.leaveData[idx].remaining,
-    //         leaveDays,
-    //         leaveData?.type,
-    //         leaveType === "Maternity Leave" || leaveType === "Paternity Leave"
-    //           ? true
-    //           : false
-    //       );
-    //       if (!balanceCheck.success) {
-    //         throw new Error(balanceCheck.message);
-    //       }
-    //       // Apply leave adjustment if valid
-    //       const modifiedFields = adjustLeaveData(
-    //         existingLeave.leaveData[idx],
-    //         leaveDays,
-    //         existingLeave.leaveData[idx].type
-    //       );
-    //       modifiedFields.forEach((field) => existingLeave.markModified(field));
-    //       await existingLeave.save({ session });
-    //     }
-    //   } else {
-    //     await addOneCommonLeaveToOneEmployee({
-    //       leaveType: leaveType,
-    //       leaveYear: leaveYear,
-    //       leaveDays: leaveDays,
-    //       employeeId: createObjectId(employeeId),
-    //     });
-    //   }
-    //   const approved = adminId
-    //     ? { approvedBy: adminId, approvedDate: new Date() }
-    //     : {};
-    //   requestsToInsert.push({
-    //     ...data,
-    //     leaveSubmitDate: normalizeDateToUTC(new Date()),
-    //     ...entry,
-    //     ...approved,
-    //     addByAdmin: adminId ? true : false,
-    //   });
-    // }
-    // await LeaveRequestModel.insertMany(requestsToInsert, { session });
-    // After you build entries[] from splitLeaveWithYearRules (max 2 segments)
-    const requestsToInsert = [];
-    const leaveBreakdown = []; // store how many days per type
-
-    for (const entry of entries) {
-      const {
-        leaveYear,
-        leaveType,
-        leaveDays,
-        leaveStartDate,
-        leaveEndDate,
-        leaveDates,
-      } = entry;
-
-      // Ensure Correct Order of Leave Dates
-      const sortedDates = [...leaveDates].sort(
-        (a, b) => new Date(a) - new Date(b)
-      );
-      entry.leaveDates = sortedDates;
-      entry.leaveStartDate = sortedDates[0];
-      entry.leaveEndDate = sortedDates[sortedDates.length - 1];
-
-      // 🔹 Update balances in CommonLeaveModel
-      const existingLeave = await CommonLeaveModel.findOne({
-        employeeId: createObjectId(employeeId),
-        leaveYear,
-        "leaveData.leaveType": leaveType,
-      }).session(session);
-
-      if (existingLeave) {
-        const idx = existingLeave.leaveData.findIndex(
-          (l) => l.leaveType === leaveType
-        );
-        if (idx !== -1) {
-          const unit = leaveData?.type || "days";
-
-          // ✅ Validate balance
-          // const balanceCheck = hasSufficientLeaveBalance(
-          //   existingLeave.leaveData[idx].remaining,
-          //   leaveDays,
-          //   leaveData?.type,
-          //   ["Maternity Leave", "Paternity Leave"].includes(leaveType)
-          // );
-          // if (!balanceCheck.success) throw new Error(balanceCheck.message);
-
-          // Apply adjustment
-          const modifiedFields = adjustLeaveData(
-            existingLeave.leaveData[idx],
-            leaveDays,
-            existingLeave.leaveData[idx].type
-          );
-          modifiedFields.forEach((field) => existingLeave.markModified(field));
-          await existingLeave.save({ session });
-        }
-      } else {
-        await addOneCommonLeaveToOneEmployee({
-          leaveType,
-          leaveYear,
-          leaveDays,
-          employeeId: createObjectId(employeeId),
-        });
-      }
-
-      // store breakdown
-      leaveBreakdown.push({ leaveType, leaveYear, leaveDays });
-
-      const approved = adminId
-        ? { approvedBy: adminId, approvedDate: new Date() }
-        : {};
-
-      requestsToInsert.push({
-        ...data,
-        leaveSubmitDate: normalizeDateToUTC(new Date()),
-        leaveStartDate,
-        leaveEndDate,
-        leaveDays,
-        leaveDates,
-        leaveStatus: adminId ? "Approved" : "Pending",
-        employeeId: createObjectId(employeeId),
-        leaveYear,
-        leaveType, // <- important: each request has its own type
-        leaveBreakdown: [
-          { leaveType, leaveYear, leaveDays }, // <- each request keeps its own breakdown
-        ],
-        ...approved,
-        addByAdmin: !!adminId,
-      });
-    }
-    await LeaveRequestModel.insertMany(requestsToInsert, { session });
-
-    // 🔹 Now insert ONE request
-    return { success: true, message: "Leave added successfully." };
-  });
-}
-export async function addLeaveRequestNew({ data, employeeId, adminId }) {
-  return await withTransaction(async (session) => {
-    await connect();
-    // const { leaveType, leaveStartDate, leaveEndDate } = data;
-    const { leaveType, leaveDates } = data;
-
-    const settings = await getLeaveSettings();
-    const startMonth = settings?.leaveYearStartMonth || 4;
-
-    const groupedByYear = splitLeaveDatesByYear(leaveDates, startMonth);
-
-    const finalDeductions = [];
-
-    // 3. VALIDATE EACH YEAR FIRST (NO DEDUCTION YET)
-    for (const [leaveYear, dates] of Object.entries(groupedByYear)) {
-      let remainingDaysToDeduct = dates.length;
-
-      const commonLeave = await CommonLeaveModel.findOne({
-        employeeId,
-        leaveYear,
-      });
-
-      if (!commonLeave) {
-        return {
-          success: false,
-          message: `Leave year ${leaveYear} is not generated yet. Contact HR.`,
-        };
-      }
-
-      const leaveDataList = commonLeave.leaveData;
-
-      // Find Annual
-      const annual = leaveDataList.find((l) => l.leaveType === leaveType);
-      // const unpaid = leaveDataList.find((l) => l.leaveType === "Unpaid Leave");
-
-      if (!annual) {
-        return {
-          success: false,
-          message: `${leaveType} not configured for ${leaveYear}`,
-        };
-      }
-
-      // 🟡 First deduct from Annual
-      if (annual.remaining > 0) {
-        const useAnnual = Math.min(annual.remaining, remainingDaysToDeduct);
-
-        finalDeductions.push({
-          commonLeaveId: commonLeave._id,
-          leaveYear,
-          leaveType: leaveType,
-          days: useAnnual,
-          dates: dates.slice(0, useAnnual),
-        });
-
-        remainingDaysToDeduct -= useAnnual;
-      }
-
-      // 🔴 Remaining → go to Unpaid
-      if (remainingDaysToDeduct > 0) {
-        // if (!unpaid || unpaid.remaining < remainingDaysToDeduct) {
-        //   return {
-        //     success: false,
-        //     message: `Not enough leave balance in ${leaveYear}. Need ${remainingDaysToDeduct} more days.`,
-        //   };
-        // }
-
-        finalDeductions.push({
-          commonLeaveId: commonLeave._id,
-          leaveYear,
-          leaveType: "Unpaid Leave",
-          days: remainingDaysToDeduct,
-          dates: dates.slice(-remainingDaysToDeduct),
-        });
-
-        remainingDaysToDeduct = 0;
-      }
-    }
-
-    // 5️⃣ APPLY ALL DEDUCTIONS (TRANSACTION STYLE)
-    for (const item of finalDeductions) {
-      await CommonLeaveModel.updateOne(
-        {
-          _id: item.commonLeaveId,
-          "leaveData.leaveType": item.leaveType,
-        },
-        {
-          $inc: {
-            "leaveData.$.used": item.days,
-            "leaveData.$.remaining": -item.days,
-          },
-          $push: {
-            leaveHistory: {
-              leaveType: item.leaveType,
-              leaveYear: item.leaveYear,
-              leaveDays: item.days,
-              leaveDates: item.dates,
-              createdAt: new Date(),
-              createdBy: session?.user?._id,
-            },
-          },
-        }
-      );
-    }
-
-    // Build entries for insertion
-    const requestsToInsert = [];
-    const leaveBreakdown = []; // store how many days per type
-    for (const item of finalDeductions) {
-      const { leaveYear, leaveType, days: leaveDays, dates: leaveDates } = item;
-      // Ensure Correct Order of Leave Dates
-      const sortedDates = [...leaveDates].sort(
-        (a, b) => new Date(a) - new Date(b)
-      );
-      const leaveStartDate = sortedDates[0];
-      const leaveEndDate = sortedDates[sortedDates.length - 1];
-      // store breakdown
-      leaveBreakdown.push({ leaveType, leaveYear, leaveDays });
-
-      const approved = adminId
-        ? { approvedBy: adminId, approvedDate: new Date() }
-        : {};
-
-      requestsToInsert.push({
-        ...data,
-        leaveSubmitDate: normalizeDateToUTC(new Date()),
-        leaveStartDate,
-        leaveEndDate,
-        leaveDays,
-        leaveDates,
-        leaveStatus: adminId ? "Approved" : "Pending",
-        employeeId: createObjectId(employeeId),
-        leaveYear,
-        isPaid: leaveType !== "Unpaid Leave",
-        leaveType, // <- important: each request has its own type
-        leaveBreakdown: [
-          { leaveType, leaveYear, leaveDays }, // <- each request keeps its own breakdown
-        ],
-        ...approved,
-        addByAdmin: !!adminId,
-      });
-    }
-
-    await LeaveRequestModel.insertMany(requestsToInsert, { session });
-
-    // 🔹 Now insert ONE request
-    return { success: true, message: "Leave added successfully." };
-  });
-}
-export async function addHalfDayLeaveNew({ data, employeeId, adminId }) {
-  return await withTransaction(async (session) => {
-    await connect();
-    const { leaveType, leaveDates, halfDayType } = data;
-
-    const validatedOverlap = await validateOverlappingHalfDayLeave(
-      employeeId,
-      leaveDates,
-      halfDayType
-    );
-    if (!validatedOverlap.success) {
-      throw new Error(validatedOverlap.message);
-    }
-
-    const settings = await getLeaveSettings();
-
-    // 2️⃣ Split dates by leave year
-    const splitByYear = splitLeaveDatesByYear(
-      leaveDates,
-      settings?.data?.leaveYearStartMonth
-    );
-
-    const leaveRequestsToInsert = [];
-
-    // 3️⃣ Process YEAR → DATE → ONE RECORD EACH
-    for (const leaveYear of Object.keys(splitByYear)) {
-      const yearDates = splitByYear[leaveYear];
-
-      const commonLeave = await CommonLeaveModel.findOne({
-        employeeId,
-        leaveYear,
-      });
-
-      if (!commonLeave) {
-        return {
-          success: false,
-          message: `Leave entitlement not generated for ${leaveYear}`,
-        };
-      }
-
-      const annual = commonLeave.leaveData.find(
-        (l) => l.leaveType === "Annual Leave"
-      );
-      const unpaid = commonLeave.leaveData.find(
-        (l) => l.leaveType === "Unpaid Leave"
-      );
-
-      if (!annual || !unpaid) {
-        return { success: false, message: "Leave categories not configured" };
-      }
-
-      // 4️⃣ LOOP EACH DATE SEPARATELY (🔥 THIS IS THE FIX 🔥)
-      for (const date of yearDates) {
-        let deducted = false;
-
-        // ---- Try Annual Leave first
-        if (annual.remaining >= 0.5) {
-          annual.remaining -= 0.5;
-          annual.used += 0.5;
-
-          leaveRequestsToInsert.push({
-            employeeId,
-            leaveYear,
-            leaveType,
-            leaveSubmitDate: new Date(),
-            leaveStatus: "Pending",
-            leaveReason: "Half Day Leave",
-            leaveDates: [date], // 🔥 SINGLE DATE ONLY
-            leaveStartDate: date,
-            leaveEndDate: date,
-            leaveDays: 0.5,
-            leaveStatus: adminId ? "Approved" : "Pending",
-            isPaid: true,
-            isHalfDay: true,
-            halfDayType,
-            submitBy: adminId || employeeId,
-            leaveBreakdown: [{ leaveType, leaveYear, leaveDays: 0.5 }],
-          });
-
-          deducted = true;
-        }
-
-        // ---- Try Carry Forward
-        if (
-          !deducted &&
-          settings?.data?.carryForwardEnabled &&
-          annual.carryForwardAllowed &&
-          annual.carryForwardRemaining >= 0.5
-        ) {
-          annual.carryForwardRemaining -= 0.5;
-
-          leaveRequestsToInsert.push({
-            employeeId,
-            leaveYear,
-            leaveType,
-            leaveSubmitDate: new Date(),
-            leaveStatus: adminId ? "Approved" : "Pending",
-            leaveReason: "Half Day Leave (Carry Forward)",
-            leaveDates: [date],
-            leaveStartDate: date,
-            leaveEndDate: date,
-            leaveDays: 0.5,
-            isPaid: true,
-            isHalfDay: true,
-            halfDayType,
-            submitBy: adminId || employeeId,
-            leaveBreakdown: [{ leaveType, leaveYear, leaveDays: 0.5 }],
-          });
-
-          deducted = true;
-        }
-
-        // ---- Fallback → Unpaid Leave (unlimited ✅)
-        if (!deducted) {
-          unpaid.used += 0.5;
-
-          leaveRequestsToInsert.push({
-            employeeId,
-            leaveYear,
-            leaveType: "Unpaid Leave",
-            leaveSubmitDate: new Date(),
-            leaveStatus: adminId ? "Approved" : "Pending",
-            leaveReason: "Half Day Leave",
-            leaveDates: [date],
-            leaveStartDate: date,
-            leaveEndDate: date,
-            leaveDays: 0.5,
-            isPaid: false,
-            isHalfDay: true,
-            halfDayType,
-            submitBy: adminId || employeeId,
-            leaveBreakdown: [
-              { leaveType: "Unpaid Leave", leaveYear, leaveDays: 0.5 },
-            ],
-          });
-        }
-        commonLeave.markModified("leaveData");
-      }
-      await commonLeave.save({ session });
-    }
-    await LeaveRequestModel.insertMany(leaveRequestsToInsert, { session });
-    return { success: true, message: "Leave added successfully." };
-  });
-}
-//Add Half Day Request
-export async function addHalfDayLeaveOld({ data, employeeId, adminId }) {
-  return await withTransaction(async (session) => {
-    await connect();
-    const { leaveType, leaveDates } = data;
-
-    const leaveYear = getLeaveYearString(new Date());
-    const { commonLeave, leaveData } = await validateLeaveData({
-      employeeId,
-      leaveYear,
-      leaveType,
-      session,
-      adminId,
-    });
-    const annualLeaveRemaining = commonLeave?.leaveData?.find(
-      (item) => item?.leaveType === "Annual Leave"
-    );
-    const { breakdown } = splitHalfDayLeaveIntoAnnualOrUnpaid({
-      halfDaysRequested: 1,
-      annualLeaveRemaining: annualLeaveRemaining?.remaining,
-      dates: leaveDates,
-    });
-    const halfDayEntries = splitHalfDayLeaveWithYearRules({
-      breakdown,
-      // startDate: leaveDates[0],
-      employeeId,
-      adminId,
-    });
-
-    // console.log(breakdown, halfDayEntries);
-
-    // Question --> For Peternity & Maternity Leave we have to check the overLap dates or not... eg:Annual Leave
-    await validateOverlap(halfDayEntries);
-    const requestsToInsert = [];
-
-    for (const entry of halfDayEntries) {
-      let { leaveYear, leaveType, leaveDays } = entry;
-
-      // Step 1: Always log Half Day entitlement
-      await updateLeaveBalance({
-        employeeId,
-        leaveYear,
-        leaveType: "Half Day",
-        leaveDays,
-        session,
-        allowNegative: true,
-      });
-
-      // Step 2: Try Annual Leave first, fallback to Unpaid
-      if (leaveType === "Annual Leave") {
-        const success = await updateLeaveBalance({
-          employeeId,
-          leaveYear,
-          leaveType: "Annual Leave",
-          leaveDays,
-          session,
-        });
-
-        if (!success) {
-          leaveType = "Unpaid Leave";
-        }
-      }
-
-      // Step 3: Always update unpaid if selected/fallback
-      if (leaveType === "Unpaid Leave") {
-        await updateLeaveBalance({
-          employeeId,
-          leaveYear,
-          leaveType: "Unpaid Leave",
-          leaveDays,
-          session,
-          allowNegative: true,
-        });
-      }
-
-      // Step 4: Insert leave request
-      const approved = adminId
-        ? { approvedBy: adminId, approvedDate: new Date() }
-        : {};
-
-      requestsToInsert.push({
-        ...entry,
-        leaveType,
-        leaveDays: 0.5, // always store half-day explicitly
-        ...approved,
-        addByAdmin: !!adminId,
-        employeeId,
-        createdAt: new Date(),
-      });
-    }
-
-    await LeaveRequestModel.insertMany(requestsToInsert, { session });
-    return { success: true, message: "Leave added successfully." };
-  });
-}
-
+// Five superseded functions were removed from this file: addLeaveRequestOld,
+// addLeaveRequestNew, addHalfDayLeaveOld, addHalfDayLeaveNew and
+// editLeaveRequestOld.
+//
+// None of them was called from anywhere. That did not make them harmless —
+// every one was exported from this "use server" module, so each was a live POST
+// endpoint into the leave balance that nobody was maintaining. One still
+// carried the fractional-balance defect that silently dropped a requested day
+// from the record, months after the supported path had it fixed.
+//
+// What survives below is the whole supported surface: addLeaveRequest,
+// addHalfDayLeave, editLeaveRequest, editLeaveRequestAdvanced and
+// editHalfDayLeave. If a name here looks like it is missing a "new" or
+// "advanced" variant, it is not — this is the one.
 export async function addLeaveRequest({
   data,
   employeeId,
@@ -669,13 +213,51 @@ export async function addLeaveRequest({
 
   const { leaveType, leaveDates, leaveReason } = data;
 
+  // 0️⃣ Sick note gate — checked before anything is deducted or inserted.
+  const sickNoteCheck = resolveSickNote({
+    leaveType,
+    leaveDates,
+    sickNote: data.sickNote,
+    uploadedBy: adminId || employeeId,
+  });
+  if (!sickNoteCheck.success) return sickNoteCheck;
+
+  // 0️⃣b Bank holidays. Deliberately after the sick note gate, which reads the
+  // dates as submitted: a sick absence spanning a bank holiday is still an
+  // absence of that many consecutive days, whether or not the office was open.
+  const bankHolidays = await applyBankHolidayRule(leaveDates);
+  const chargeableDates = bankHolidays.dates;
+
+  if (!chargeableDates.length) {
+    return {
+      success: false,
+      message: bankHolidays.removed.length
+        ? "Every day you selected is a bank holiday, so there is nothing to book — the office is already closed."
+        : "Select at least one date.",
+    };
+  }
+
+  // When an admin records leave that was taken months ago, stamping it with
+  // today's date reads as a request raised after the leave had already started
+  // — which is what drove the notice period negative. Only an admin may set it,
+  // and never into the future; an employee's own request is always "now".
+  const submittedOn = resolveSubmitDate(data.leaveSubmitDate, adminId);
+
   const settings = await getLeaveSettings();
-  const startMonth = settings?.leaveYearStartMonth || 4;
+  // `.data`, not the wrapper: getLeaveSettings returns `{ success, data }`, so
+  // `settings.leaveYearStartMonth` was always undefined and this silently fell
+  // back to April. A company on any other leave year therefore deducted every
+  // booking from the wrong year's balance — the entitlement was filed under the
+  // company's real leave year and the deduction looked for an April one.
+  const startMonth = settings?.data?.leaveYearStartMonth || 4;
 
   // 1️⃣ Overlap Validation (inside same transaction)
 
-  // 2️⃣ Split dates by leave year
-  const groupedByYear = splitLeaveDatesByYear(leaveDates, startMonth);
+  // 2️⃣ Split dates by leave year.
+  // Built from the chargeable dates, not the submitted ones: excluding once,
+  // here, is what keeps the deduction plan, the stored request and the day
+  // count from disagreeing with each other.
+  const groupedByYear = splitLeaveDatesByYear(chargeableDates, startMonth);
 
   const finalDeductions = [];
 
@@ -705,18 +287,55 @@ export async function addLeaveRequest({
         message: `${leaveType} not configured for ${leaveYear}`,
       };
     }
-    // 🟡 Deduct from paid leave first
-    if (annual.remaining > 0) {
-      const useAnnual = Math.min(annual.remaining, remainingDaysToDeduct);
+    // Removed from this employee by an admin. Checked here as well as filtered
+    // out of the dropdown, because this action is an addressable endpoint and the
+    // dropdown is only what the screen offers.
+    if (annual.isDelete === true) {
+      return {
+        success: false,
+        message: `${leaveType} has been removed from this employee for ${leaveYear}`,
+      };
+    }
+    // How far through this year's dates the allocation has got. Tracked
+    // explicitly so each date is handed to exactly one bucket — the paid rows
+    // take from the front, and whatever is left over follows on from there.
+    let cursor = 0;
+
+    // 🟡 Deduct from paid leave first.
+    //
+    // Whole days only. Every date in this request is a full day, so a
+    // fractional balance cannot buy one: 2.5 days remaining pays for two, and
+    // the half stays on the balance where a later half-day request can still
+    // spend it.
+    //
+    // Flooring is what stops a date going missing. `days` used to be allowed to
+    // come out fractional and the dates were sliced by it — `slice(0, 2.5)`
+    // returns two entries and `slice(-1.5)` one, so with four days requested
+    // the third was charged for and then written to no leave record at all. It
+    // appeared on no rota, blocked no clash and showed on no report.
+    //
+    // Carried-over days that have passed their expiry are NOT payable, however
+    // much `remaining` says. `expireAfterMonths` was a setting the form demanded
+    // and nothing read, so "carried days expire after three months" meant they
+    // lasted the whole year and were spent months after they should have gone.
+    // Enforced here as well as materialised by the nightly job, because a day
+    // must be unbookable from the instant it expires rather than from whenever
+    // the job next runs.
+    const carried = carriedState(annual);
+    const payableDays = Math.floor(carried.usable);
+
+    if (payableDays > 0) {
+      const useAnnual = Math.min(payableDays, remainingDaysToDeduct);
 
       finalDeductions.push({
         commonLeaveId: commonLeave._id,
         leaveYear,
         leaveType: leaveType,
         days: useAnnual,
-        dates: dates.slice(0, useAnnual),
+        dates: dates.slice(cursor, cursor + useAnnual),
       });
 
+      cursor += useAnnual;
       remainingDaysToDeduct -= useAnnual;
     }
 
@@ -727,9 +346,12 @@ export async function addLeaveRequest({
         leaveYear,
         leaveType: "Unpaid Leave",
         days: remainingDaysToDeduct,
-        dates: dates.slice(-remainingDaysToDeduct),
+        // Everything the paid row did not take, by position rather than by
+        // count, so the two cannot overlap or leave a gap between them.
+        dates: dates.slice(cursor),
       });
 
+      cursor = dates.length;
       remainingDaysToDeduct = 0;
     }
   }
@@ -775,8 +397,10 @@ export async function addLeaveRequest({
     const leaveStartDate = sortedDates[0];
     const leaveEndDate = sortedDates[sortedDates.length - 1];
 
+    // A backdated record was also decided back then, so the approval carries
+    // the same date rather than today's.
     const approved = adminId
-      ? { approvedBy: adminId, approvedDate: new Date() }
+      ? { approvedBy: adminId, approvedDate: submittedOn }
       : {};
 
     requestsToInsert.push({
@@ -788,10 +412,15 @@ export async function addLeaveRequest({
       leaveStartDate,
       leaveEndDate,
       leaveReason,
-      leaveSubmitDate: normalizeDateToUTC(new Date()),
+      leaveSubmitDate: submittedOn,
       leaveStatus: adminId ? "Approved" : "Pending",
       isPaid: leaveType !== "Unpaid Leave",
       leaveBreakdown: [{ leaveType, leaveYear, leaveDays }],
+      // A submission can split across leave years and into unpaid days; the
+      // same note belongs to every piece of it.
+      ...(sickNoteCheck.sickNote
+        ? { sickNote: sickNoteCheck.sickNote }
+        : {}),
       ...approved,
       addByAdmin: !!adminId,
     });
@@ -800,7 +429,20 @@ export async function addLeaveRequest({
   // 6️⃣ INSERT ALL REQUESTS
   await LeaveRequestModel.insertMany(requestsToInsert, { session });
 
-  return { success: true, message: "Leave added successfully." };
+  // Naming the days that were free is the difference between the booking
+  // looking wrong and looking right: "3 days booked" after selecting five reads
+  // like a bug until you say which two were bank holidays.
+  const exclusionNote = describeExclusion(
+    bankHolidays.removed,
+    bankHolidays.holidays
+  );
+
+  return {
+    success: true,
+    message: exclusionNote
+      ? `Leave added successfully. ${exclusionNote}`
+      : "Leave added successfully.",
+  };
 }
 
 export async function addHalfDayLeave({
@@ -813,8 +455,17 @@ export async function addHalfDayLeave({
 
   const { leaveType, leaveDates, halfDayType, leaveReason } = data;
 
+  // Same rule as a full-day request: an admin may record when a historical
+  // half day was actually raised, an employee may not.
+  const submittedOn = resolveSubmitDate(data.leaveSubmitDate, adminId);
+
   const settings = await getLeaveSettings();
-  const startMonth = settings?.leaveYearStartMonth || 4;
+  // `.data`, not the wrapper: getLeaveSettings returns `{ success, data }`, so
+  // `settings.leaveYearStartMonth` was always undefined and this silently fell
+  // back to April. A company on any other leave year therefore deducted every
+  // booking from the wrong year's balance — the entitlement was filed under the
+  // company's real leave year and the deduction looked for an April one.
+  const startMonth = settings?.data?.leaveYearStartMonth || 4;
 
   // 1️⃣ Overlap validation (inside transaction)
 
@@ -852,12 +503,19 @@ export async function addHalfDayLeave({
       };
     }
 
+    // Expired carry-over is not spendable here either — see the note on the
+    // full-day path. Taken once before the loop: the lapse is a property of the
+    // row as it stood when the request arrived, not something that changes as
+    // this request spends against it.
+    const halfDayLapsed = carriedState(annual).lapsed;
+    let spendable = Math.max(Number(annual.remaining || 0) - halfDayLapsed, 0);
+
     // 🔥 EACH DATE IS INDEPENDENT ENTRY
     for (const date of yearDates) {
       let deducted = false;
 
       // 🟡 Annual first
-      if (annual.remaining >= 0.5) {
+      if (spendable >= 0.5) {
         finalDeductions.push({
           commonLeaveId: commonLeave._id,
           leaveYear,
@@ -869,29 +527,20 @@ export async function addHalfDayLeave({
 
         annual.remaining -= 0.5;
         annual.used += 0.5;
+        spendable -= 0.5;
 
         deducted = true;
       }
 
-      // 🟠 Carry Forward (if enabled)
-      else if (
-        settings?.carryForwardEnabled &&
-        annual.carryForwardAllowed &&
-        annual.carryForwardRemaining >= 0.5
-      ) {
-        finalDeductions.push({
-          commonLeaveId: commonLeave._id,
-          leaveYear,
-          leaveType: leaveType,
-          days: 0.5,
-          date,
-          isPaid: true,
-          isCarryForward: true,
-        });
-
-        annual.carryForwardRemaining -= 0.5;
-        deducted = true;
-      }
+      // The "🟠 Carry Forward" branch that used to sit here was dead twice over.
+      // It tested `annual.carryForwardAllowed` and `annual.carryForwardRemaining`
+      // — two fields nothing in the codebase has ever written — and guarded them
+      // with `settings?.carryForwardEnabled`, read off the `{ success, data }`
+      // wrapper and therefore always undefined. It could not run.
+      //
+      // It was also the wrong model: carried days are not a second balance to
+      // fall back on, they are part of `remaining` and are spent first. See
+      // carriedState() in lib/carryForward.js.
 
       // 🔴 Fallback → Unpaid (UNLIMITED)
       if (!deducted) {
@@ -919,14 +568,14 @@ export async function addHalfDayLeave({
 
   for (const item of finalDeductions) {
     const approved = adminId
-      ? { approvedBy: adminId, approvedDate: new Date() }
+      ? { approvedBy: adminId, approvedDate: submittedOn }
       : {};
 
     requestsToInsert.push({
       employeeId: createObjectId(employeeId),
       leaveYear: item.leaveYear,
       leaveType: item.leaveType,
-      leaveSubmitDate: normalizeDateToUTC(new Date()),
+      leaveSubmitDate: submittedOn,
       leaveStatus: adminId ? "Approved" : "Pending",
       leaveReason,
       leaveDates: [item.date], // 🔥 SINGLE DATE
@@ -963,6 +612,7 @@ export async function editLeaveRequestAdvanced({
   isHalfDay,
   halfDayType,
   leaveReason,
+  sickNote,
   submitBy,
 }) {
   return await withTransaction(async (session) => {
@@ -978,6 +628,20 @@ export async function editLeaveRequestAdvanced({
     if (!oldLeaves.length) {
       throw new Error("No valid leave requests found to edit");
     }
+
+    // A record an admin entered for a past absence keeps the date it was
+    // originally raised — re-saving it should not turn a historical entry into
+    // one submitted today. An employee editing their own request gets a fresh
+    // submit date, since the notice they are giving really is from today.
+    const carriedSubmitDate = oldLeaves.find((leave) => leave.addByAdmin)
+      ?.leaveSubmitDate;
+
+    // An edit that does not re-upload keeps the note already on file, so
+    // changing a date on a long sick leave does not ask for it again.
+    const carriedSickNote =
+      sickNote ||
+      oldLeaves.find((leave) => leave.sickNote?.key)?.sickNote?.toObject?.() ||
+      oldLeaves.find((leave) => leave.sickNote?.key)?.sickNote;
 
     // 4️⃣ Overlap validation for new dates
     const overlap = await LeaveRequestModel.find({
@@ -1052,6 +716,8 @@ export async function editLeaveRequestAdvanced({
           leaveDates: newLeaveDates,
           leaveType,
           leaveReason,
+          sickNote: carriedSickNote,
+          leaveSubmitDate: carriedSubmitDate,
         },
         employeeId,
         adminId: submitBy !== employeeId ? submitBy : null,
@@ -1070,206 +736,6 @@ export async function editLeaveRequestAdvanced({
   });
 }
 
-// Edit Leave Request
-export async function editLeaveRequestOld(data, requestId, employeeId) {
-  return await withTransaction(async (session) => {
-    await connect();
-    const { leaveType, leaveStartDate, leaveEndDate, leaveReason } = data;
-
-    const originalRequest = await LeaveRequestModel.findById(requestId).session(
-      session
-    );
-    if (!originalRequest) throw new Error("Leave request not found");
-
-    if (["Approved", "Rejected"].includes(originalRequest.leaveStatus))
-      throw new Error("Cannot edit approved or rejected request");
-
-    const originalLeaveDays = originalRequest.leaveDays;
-    const originalLeaveType = originalRequest.leaveType;
-    const newLeaveDays = differenceInDays(leaveEndDate, leaveStartDate) + 1;
-    const leaveYear = getLeaveYearString(new Date());
-
-    // Step 1: Validate new leave type using utility
-    const { commonLeave, leaveData: newLeaveData } = await validateLeaveData({
-      employeeId,
-      leaveYear,
-      leaveType,
-      session,
-    });
-    console.log("New Leave Data:", newLeaveData);
-
-    // Step 2: Rollback usage from the old leave type (if changed)
-    if (originalLeaveType !== leaveType) {
-      const oldLeaveData = commonLeave.leaveData.find(
-        (l) => l.leaveType === originalLeaveType
-      );
-      if (oldLeaveData) {
-        oldLeaveData.used -= originalLeaveDays;
-        oldLeaveData.remaining += originalLeaveDays;
-        if (oldLeaveData.used < 0) oldLeaveData.used = 0;
-      }
-    } else {
-      // Just reset old usage if same type
-      newLeaveData.used -= originalLeaveDays;
-      newLeaveData.remaining += originalLeaveDays;
-    }
-
-    // Step 3: Split entries
-    const entries = await splitLeaveWithYearRules(
-      newLeaveDays,
-      newLeaveData.remaining,
-      leaveStartDate,
-      employeeId,
-      leaveType
-    );
-
-    // Step 4: Overlap check
-    await validateOverlap(entries, requestId);
-
-    // Step 5: Apply new leave usage
-    const totalUsed = entries.reduce((sum, e) => sum + e.leaveDays, 0);
-    if (newLeaveData.remaining < totalUsed)
-      throw new Error(`Insufficient balance in ${leaveType}`);
-
-    newLeaveData.used += totalUsed;
-    newLeaveData.remaining -= totalUsed;
-
-    commonLeave.markModified("leaveData");
-    await commonLeave.save({ session });
-
-    // Step 6: Update main request
-    const main = entries[0];
-    originalRequest.leaveStartDate = main.leaveStartDate;
-    originalRequest.leaveEndDate = main.leaveEndDate;
-    originalRequest.leaveType = leaveType;
-    originalRequest.leaveReason = leaveReason;
-    originalRequest.leaveDays = totalUsed;
-    await originalRequest.save({ session });
-
-    // Step 7: Insert any split entries
-    const extraEntries = entries.slice(1).map((e) => ({
-      ...e,
-      employeeId,
-      leaveStatus: "Pending",
-      leaveReason,
-    }));
-    if (extraEntries.length > 0) {
-      await LeaveRequestModel.insertMany(extraEntries, { session });
-    }
-
-    return { success: true, message: "Leave request updated successfully." };
-  });
-}
-
-// export async function editLeaveRequest({ data, requestId, adminId }) {
-//   return await withTransaction(async (session) => {
-//     await connect();
-
-//     const { leaveDates, leaveReason, employeeId } = data;
-//     if (!leaveDates || leaveDates.length === 0)
-//       throw new Error("No leave dates provided");
-
-//     // 1️⃣ Fetch the leave request to edit
-//     const originalRequest = await LeaveRequestModel.findById(requestId).session(
-//       session
-//     );
-//     if (!originalRequest) throw new Error("Leave request not found");
-
-//     // Restrict editing if approved/rejected
-//     if (
-//       !adminId &&
-//       ["Approved", "Rejected"].includes(originalRequest.leaveStatus)
-//     ) {
-//       throw new Error("Cannot edit approved or rejected request");
-//     }
-
-//     const leaveType = originalRequest.leaveType; // Leave type is fixed
-//     const leaveYear = getLeaveYearString(new Date());
-
-//     // 2️⃣ Rollback only this request's usage
-//     await updateLeaveBalance({
-//       employeeId,
-//       leaveYear,
-//       leaveType,
-//       leaveDays: -originalRequest.leaveDays,
-//       session,
-//       allowNegative: true, // rollback always allowed
-//     });
-
-//     // 3️⃣ Get current leave data
-//     const { commonLeave, leaveData } = await validateLeaveData({
-//       employeeId,
-//       leaveYear,
-//       leaveType,
-//       session,
-//       adminId,
-//     });
-
-//     // 4️⃣ Split new dates into entries (Annual + fallback Unpaid, half-days)
-//     const entries = await splitLeaveWithYearRulesByDates(
-//       leaveDates,
-//       leaveData?.type === "weeks"
-//         ? weeksToDays(leaveData?.remaining)
-//         : leaveData.remaining,
-//       employeeId,
-//       leaveType,
-//       adminId ? "Approved" : "Pending"
-//     );
-
-//     console.log(entries);
-
-//     // 5️⃣ Validate overlaps only against other requests
-//     await validateOverlap(entries, requestId);
-
-//     // 6️⃣ Apply allocation to CommonLeave only for this request
-//     for (const entry of entries) {
-//       await updateLeaveBalance({
-//         employeeId,
-//         leaveYear: entry.leaveYear,
-//         leaveType: entry.leaveType,
-//         leaveDays: entry.leaveDays,
-//         session,
-//         allowNegative: entry.leaveType !== "Annual Leave",
-//       });
-//     }
-
-//     // 7️⃣ Update the main leave request
-//     const mainEntry = entries[0];
-//     originalRequest.leaveStartDate = mainEntry.leaveStartDate;
-//     originalRequest.leaveEndDate = mainEntry.leaveEndDate;
-//     originalRequest.leaveReason = leaveReason;
-//     originalRequest.leaveDates = leaveDates;
-//     originalRequest.leaveDays = entries.reduce(
-//       (sum, e) => sum + e.leaveDays,
-//       0
-//     );
-//     originalRequest.leaveBreakdown = entries.map((e) => ({
-//       leaveType: e.leaveType,
-//       leaveYear: e.leaveYear,
-//       leaveDays: e.leaveDays,
-//     }));
-//     originalRequest.leaveStatus = adminId ? "Approved" : "Pending";
-//     originalRequest.adminId = adminId || null;
-
-//     await originalRequest.save({ session });
-
-//     // 8️⃣ Insert additional segments if the split created more than one
-//     const additionalEntries = entries.slice(1).map((entry) => ({
-//       ...entry,
-//       employeeId: createObjectId(employeeId),
-//       leaveStatus: adminId ? "Approved" : "Pending",
-//       leaveReason,
-//       addByAdmin: !!adminId,
-//       createdAt: new Date(),
-//     }));
-
-//     if (additionalEntries.length > 0) {
-//       await LeaveRequestModel.insertMany(additionalEntries, { session });
-//     }
-
-//     return { success: true, message: "Leave request updated successfully." };
-//   });
-// }
 
 // ---------------------- Half-Day Edit ----------------------
 export async function editHalfDayLeave({ data, requestId, adminId }) {
