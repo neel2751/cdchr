@@ -24,6 +24,7 @@ import {
   MonitorSmartphone,
   Receipt,
   Mail,
+  FileUp,
 } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
 import { Collapsible } from "../ui/collapsible";
@@ -57,6 +58,7 @@ const ICON_MAP = {
   MonitorSmartphone: MonitorSmartphone,
   Receipt: Receipt,
   Mail: Mail,
+  FileUp: FileUp,
 };
 
 export default function SideBarMenuCom({ menuItems, path }) {

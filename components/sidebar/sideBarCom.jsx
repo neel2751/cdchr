@@ -168,7 +168,9 @@ const SideBarMenu = () => {
                     } text-sm text-gray-800 font-normal rounded-lg flex items-center p-2 group`}
                   >
                     <Link href={item?.path} className="flex gap-2 items-center">
-                      {item?.icon}
+                      {/* `icon` is a component now, not an element — see the
+                          note on REPORT in data/menu.js. */}
+                      {item?.icon && <item.icon className="w-5 h-5" />}
                       <span>{item?.name}</span>
                     </Link>
                   </SidebarMenuButton>

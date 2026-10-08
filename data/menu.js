@@ -1,5 +1,4 @@
 import { AlertTriangle, ShieldCheck } from "lucide-react";
-import React from "react";
 
 export const MENU = [
   // {
@@ -242,6 +241,22 @@ export const MENU = [
     role: ["superAdmin"],
     icon: "Settings",
   },
+  // Bringing an existing staff list in from whatever the company used before
+  // this one. Sits next to Company Settings because it belongs to setting the
+  // company up rather than to running it — most companies use it once.
+  //
+  // Super admin only, and not only as caution. The import creates sign-in
+  // credentials in bulk and can be aimed at either staff list, so the server
+  // action behind it refuses anybody else as well (requireImporter in
+  // server/migrationServer/migrationServer.js). Showing the page to an admin
+  // would show them a screen whose Import button answers "Only a super admin
+  // can import employee data".
+  {
+    name: "Import Staff Data",
+    path: "/admin/migration",
+    role: ["superAdmin"],
+    icon: "FileUp",
+  },
   // The company's outgoing mail senders. Built but never linked, so it was
   // reachable only by a super admin typing the URL. Super admin only for the
   // same reason as Company Settings: it decides the identity every message the
@@ -391,17 +406,27 @@ export const COMMONMENUITEMS = [
 // so anyone reading this file to work out what the sidebar shows had three
 // competing answers to choose from.
 
+/**
+ * The "More" group at the bottom of the sidebar.
+ *
+ * `icon` is a component, not an element: this file is a data module, and JSX in
+ * it meant the whole thing could only be parsed by the bundler — so anything
+ * importing it (server/selectServer/selectServer.js, which builds every user's
+ * menu) could not be loaded by a plain-node test. MENU above uses string names
+ * resolved through an ICON_MAP for the same reason; these two were the only JSX
+ * left. Rendered by components/sidebar/sideBarCom.jsx.
+ */
 export const REPORT = [
   {
     name: "Permission",
     path: "/admin/permissions",
-    icon: <ShieldCheck className="w-5 h-5" />,
+    icon: ShieldCheck,
     role: ["superAdmin"],
   },
   {
     name: "Report Issue",
     path: "/admin/reportIssue",
-    icon: <AlertTriangle className="w-5 h-5" />,
+    icon: AlertTriangle,
     role: ["superAdmin"],
   },
 ];
