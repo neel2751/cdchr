@@ -72,6 +72,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 const defaultWorkApplications = [
   {
@@ -132,7 +133,17 @@ const defaultWorkApplications = [
   },
 ];
 
-export function DeviceInformationForm() {
+/**
+ * The device-information form.
+ *
+ * `companyName` is a prop rather than a `useBranding()` call because this form
+ * is rendered on the PUBLIC /device-info/[id] route as well as inside the admin
+ * shell. There is no tenant context on the public one, and reaching for the
+ * admin providers would pull the whole shell into that page's bundle to
+ * discover as much. Unnamed, it falls back to the platform — which is the
+ * honest answer for a form served outside any company.
+ */
+export function DeviceInformationForm({ companyName = PLATFORM_APP_NAME }) {
   const [devices, setDevices] = useState([
     {
       tempId: "1",
@@ -681,7 +692,7 @@ export function DeviceInformationForm() {
             width={40}
           />
           <CardTitle className={"sm:text-base text-sm"}>
-            Creative Design & Construction
+            {companyName}
           </CardTitle>
         </CardHeader>
       </Card>
@@ -4146,7 +4157,7 @@ function SuccessfulSubmit({
             {/* Peerlist logo */}
             <div className="flex justify-center opacity-80">
               <p className="text-2xl font-serif text-slate-600">
-                Creative Design & Construction
+                {companyName}
               </p>
             </div>
           </div>

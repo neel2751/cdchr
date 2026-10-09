@@ -41,13 +41,14 @@ import { mergeAndFilterMenus } from "@/lib/object";
 import { useBranding } from "@/app/admin/providers";
 import CompanySwitcher from "./companySwitcher";
 import { useMemo } from "react";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 const SideBarHeaderCom = () => {
   // Falls back to the platform defaults from lib/tenant.js when the company has
   // set no branding, so this is safe before any tenant configures anything.
   const branding = useBranding();
   const logo = branding?.logoUrl || "/images/Interiorlogo.svg";
-  const appName = branding?.appName || "Hr Management";
+  const appName = branding?.appName || PLATFORM_APP_NAME;
 
   return (
     <SidebarHeader>
@@ -229,7 +230,7 @@ const SideBarFooterCom = () => {
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
-                    {session?.user?.name || branding?.appName || "Hr Management"}
+                    {session?.user?.name || branding?.appName || PLATFORM_APP_NAME}
                   </span>
                   <span className="truncate text-xs">
                     {session?.user?.role || "hr"}

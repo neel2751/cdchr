@@ -47,8 +47,13 @@ import { usePasswordConfirm } from "@/context/usePasswordContext";
 
 import { DeviceInformationForm } from "@/components/deviceInfo/deviceInfo";
 import ProjectDashboard from "./countEmployee";
+import { useBranding } from "@/app/admin/providers";
+import { brandCompanyName } from "@/lib/tenant";
 
 export function DeviceSubmissionsDashboard() {
+  // Inside the admin shell there IS a company, so the form carries its name
+  // rather than the platform's.
+  const branding = useBranding();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -197,7 +202,7 @@ export function DeviceSubmissionsDashboard() {
                   policies. Please fill out all required fields.
                 </DialogDescription>
               </DialogHeader>
-              <DeviceInformationForm />
+              <DeviceInformationForm companyName={brandCompanyName(branding)} />
             </DialogContent>
           </Dialog>
         </CardHeader>

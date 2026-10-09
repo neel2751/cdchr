@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: PLATFORM_APP_NAME,
-  description: "Hr Management System",
+  description: `${PLATFORM_APP_NAME} — HR, attendance and leave for your team`,
   // Without a manifest declaring display:standalone, iOS cannot install this
   // to the Home Screen — and an installed PWA is the ONLY way Safari delivers
   // web push. The clock-out reminder was therefore impossible on every iPhone,
