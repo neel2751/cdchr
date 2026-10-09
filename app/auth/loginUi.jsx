@@ -10,11 +10,12 @@ import { GlobalForm } from "@/components/form/form";
 import { CopyCode } from "@/components/clipboard";
 import { describeLoginError } from "@/lib/authErrors";
 import { toSafeRelativePath } from "@/lib/roleHome";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 // Platform fallbacks, used when the host resolves to no tenant. They mirror
 // resolveBranding() in lib/tenant.js so the page looks the same either way.
 const DEFAULT_BRANDING = {
-  appName: "HR Management",
+  appName: PLATFORM_APP_NAME,
   logoUrl: "/images/Interiorlogo.svg",
   loginBackgroundUrl: "",
   supportEmail: "",

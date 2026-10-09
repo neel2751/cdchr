@@ -21,6 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { completeSignup } from "@/server/authServer/signupServer";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 /**
  * Redeems the emailed confirmation link, which is what actually creates the
@@ -68,7 +69,7 @@ export default function VerifySignup({ token }) {
             width={32}
             className="h-8 w-8"
           />
-          <span className="font-semibold">HR Management</span>
+          <span className="font-semibold">{PLATFORM_APP_NAME}</span>
         </div>
 
         {state === "working" && <Working />}

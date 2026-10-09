@@ -9,7 +9,7 @@ import { primaryDomain, resolveBranding } from "@/lib/tenant";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { originForHost } from "@/lib/tenantHost";
 import { renderBrandedEmail } from "@/lib/emailTemplate";
-import { resolveSmtpHost } from "@/lib/smtp";
+import { envSmtpConfig, resolveSmtpHost } from "@/lib/smtp";
 import { DEFAULT_EMAIL_FEATURE } from "@/data/emailFeatures";
 import { sendMail as transportSend } from "../nodeMailerServer/nodemailerServer";
 
@@ -208,15 +208,12 @@ export async function sendTenantMail({
     }
 
     // Nothing configured anywhere — the pre-multi-tenant behaviour.
-    if (!process.env.EMAIL_HOST || !process.env.EMAIL_USERNAME) {
+    const env = envSmtpConfig();
+    if (!env.host || !env.userName) {
       return { success: false, message: "No sender configured" };
     }
     return transportSend({
-      host: process.env.EMAIL_HOST,
-      port: 587,
-      secure: false,
-      userName: process.env.EMAIL_USERNAME,
-      password: process.env.EMAIL_PASSWORD,
+      ...env,
       fromName,
       toEmail: recipients,
       subject,

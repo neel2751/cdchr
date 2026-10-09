@@ -1,11 +1,12 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "HR Management",
+  title: PLATFORM_APP_NAME,
   description: "Hr Management System",
   // Without a manifest declaring display:standalone, iOS cannot install this
   // to the Home Screen — and an installed PWA is the ONLY way Safari delivers

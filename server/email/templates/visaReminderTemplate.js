@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { formatVisaRemaining } from "@/lib/visaMilestones";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 /**
  * Build the subject + HTML body for a visa-expiry reminder email.
@@ -45,7 +46,7 @@ export function visaReminderTemplate({
   const companyLine = companyName
     ? `<p style="margin:4px 0;"><strong>Company:</strong> ${companyName}</p>`
     : "";
-  const signature = companyName ? `${companyName} HR` : "HR Management";
+  const signature = companyName ? `${companyName} HR` : PLATFORM_APP_NAME;
   const footerOrg = companyName ? `from ${companyName}` : "from CDC HR";
 
   const html = `

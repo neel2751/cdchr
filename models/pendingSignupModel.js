@@ -44,6 +44,13 @@ const pendingSignupSchema = new mongoose.Schema(
 
     // Throttles "send it again" without needing a separate counter.
     lastSentAt: { type: Date, default: Date.now },
+
+    // Set when the confirmation email could not be sent, cleared when one
+    // finally goes out. The signup is kept either way — see startSignup() — so
+    // this is what distinguishes someone still waiting on us from someone
+    // sitting on a link they have not clicked, and it is the queue a platform
+    // admin works through with listPendingSignups().
+    emailFailedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

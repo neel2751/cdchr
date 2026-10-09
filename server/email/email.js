@@ -4,22 +4,51 @@ import nodemailer from "nodemailer";
 import { getServerSideProps } from "../session/session";
 import EmailWeekRotaReminderModel from "@/models/weekEmailReminderModel";
 import { getSuperAdmins } from "../officeServer/officeServer";
+import { envSmtpConfig } from "@/lib/smtp";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
+
+/**
+ * A transport for the platform mailbox in the environment.
+ *
+ * All three senders below hardcoded `port: 587, secure: false`, so EMAIL_PORT
+ * was read by nobody and a mailbox on 465 could not connect at all. The port
+ * and the TLS rule that goes with it live in lib/smtp.js, shared with the
+ * fallback in email/tenantMail.js which had the same values written in.
+ */
+function envTransport() {
+  const env = envSmtpConfig();
+  return nodemailer.createTransport({
+    host: env.host,
+    port: env.port,
+    secure: env.secure,
+    auth: { user: env.userName, pass: env.password },
+  });
+}
+
+/**
+ * The From header for mail sent from the environment mailbox.
+ *
+ * All three senders named one specific customer — "Interior Studio Ltd HR" —
+ * which is wrong on a platform serving many companies, and showed up in the
+ * recipient's inbox as the sender of mail that had nothing to do with that
+ * company. The platform name is the only honest answer here: these three
+ * senders predate multi-tenancy and have no tenant to brand themselves as.
+ * Anything that knows its company should go through sendTenantMail() instead,
+ * which resolves the company's own sender name.
+ *
+ * The address is also now in angle brackets. Without them the header read
+ * `"Name" someone@example.com`, which is not a valid address and leaves the
+ * display name entirely at the mail client's discretion.
+ */
+function envFrom() {
+  return `"${PLATFORM_APP_NAME}" <${process.env.EMAIL_USERNAME}>`;
+}
 
 export const sendGlobalMail = async (data) => {
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: 587, // or 465
-    secure: false, // or 'STARTTLS' or 'SSL' or 'TLS' or 'auto' (default)
-    auth: {
-      user: process.env.EMAIL_USERNAME,
-      pass: process.env.EMAIL_PASSWORD,
-    },
-    // add TLS
-    // tls: { rejectUnauthorized: false },
-  });
+  const transporter = envTransport();
   try {
     const mailOptions = {
-      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
+      from: envFrom(),
       to: data?.email ?? "patelneel1732@gmail.com",
       subject: "New Login Attempt",
       // text: "Hello from Node.js",
@@ -33,20 +62,10 @@ export const sendGlobalMail = async (data) => {
 };
 
 export const sendMail = async (data) => {
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: 587, // or 465
-    secure: false, // or 'STARTTLS' or 'SSL' or 'TLS' or 'auto' (default)
-    auth: {
-      user: process.env.EMAIL_USERNAME,
-      pass: process.env.EMAIL_PASSWORD,
-    },
-    // add TLS
-    // tls: { rejectUnauthorized: false },
-  });
+  const transporter = envTransport();
   try {
     const mailOptions = {
-      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
+      from: envFrom(),
       to: data?.email ?? "patelneel1732@gmail.com",
       subject: "New Login Attempt",
       // text: "Hello from Node.js",
@@ -61,22 +80,12 @@ export const sendMail = async (data) => {
 
 export const sendMultipleEmail = async (data) => {
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: 587, // or 465
-      secure: false, // or 'STARTTLS' or 'SSL' or 'TLS' or 'auto' (default)
-      auth: {
-        user: process.env.EMAIL_USERNAME,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-      // add TLS
-      // tls: { rejectUnauthorized: false },
-    });
+    const transporter = envTransport();
     const mailOptions = {
-      from: `"Interior Studio Ltd HR" ${process.env.EMAIL_USERNAME}`,
+      from: envFrom(),
       to: data?.email ?? "patelneel1732@gmail.com",
       subject:
-        data?.subject || "Creative Design & Construction Subject by Default",
+        data?.subject || `A message from ${PLATFORM_APP_NAME}`,
       // text: "Hello from Node.js",
       html: data?.html || templateForSession(data),
     };
@@ -112,7 +121,7 @@ export const emailWeekRotaReminder = async (weekId, weekDate) => {
     <h1>Week Rota Reminder</h1>
     <p>Week Rota Reminder for week ${weekId}</p>
     <p>Week Date: ${weekDate}</p>
-    <p>This is an automated email from Creative Design & Construction</p>
+    <p>This is an automated email from ${PLATFORM_APP_NAME}</p>
     <span>Do not Replay  to this email</span>
     `;
     const data = {
@@ -245,7 +254,7 @@ function templateForSession(data) {
     <div class="container">
         <div class="header">
             <img src="https://res.cloudinary.com/drcjzx0sw/image/upload/v1729507237/cdc_a4jt7u.png" alt="Company Logo">
-            <h2>Creative Design & Construction</h2>
+            <h2>${PLATFORM_APP_NAME}</h2>
         </div>
         <h1>New Login from Your Account</h1>
         <p>We detected a new login to your account:</p>

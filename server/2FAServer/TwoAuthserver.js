@@ -9,6 +9,7 @@ import { createObjectId } from "@/lib/mongodb";
 import { connect } from "@/db/db";
 import { logAuditDirect, withAudit, recordAudit } from "@/lib/audit";
 import { clearLockByEmail } from "@/lib/rateLimit";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 // --- Backup / recovery codes -------------------------------------------------
 // The escape hatch for "the authenticator app is gone". Every admin, super admin
@@ -81,7 +82,7 @@ export async function existEmployee() {
   }
 }
 
-async function generate2FA({ user, service = "HR Management", secret }) {
+async function generate2FA({ user, service = PLATFORM_APP_NAME, secret }) {
   try {
     const otpauth = authenticator.keyuri(user, service, secret);
     const qrCodeUrl = await qrcode.toDataURL(otpauth);
@@ -226,7 +227,7 @@ export async function onEnableChange(check) {
 
     // Enabling Flow
     const user = employee.email;
-    const service = "HR Management"; // Replace with actual service name
+    const service = PLATFORM_APP_NAME;
     const secret = employee.data?.secret || authenticator.generateSecret();
     const qrCodeUrl = await generate2FA({ user, service, secret });
     if (!employee.data) {

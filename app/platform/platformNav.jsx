@@ -3,7 +3,7 @@
 import { signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Building2, LogOut, Nfc, Receipt, Tags } from "lucide-react";
+import { Building2, LogOut, Nfc, Receipt, Tags, UserPlus } from "lucide-react";
 
 const PlatformNav = ({ userName }) => {
   return (
@@ -20,6 +20,12 @@ const PlatformNav = ({ userName }) => {
         </div>
 
         <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/platform/signups">
+              <UserPlus className="size-4" />
+              <span className="hidden sm:inline">Signups</span>
+            </Link>
+          </Button>
           <Button variant="ghost" size="sm" asChild>
             <Link href="/platform/catalogue">
               <Tags className="size-4" />

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 /**
  * Shows a freshly issued set of recovery codes. This is the only time the codes
@@ -21,7 +22,7 @@ export default function BackupCodes({ codes = [], onDone, doneLabel = "Continue"
   const [acknowledged, setAcknowledged] = useState(false);
 
   const asText = [
-    "HR Management — two-factor recovery codes",
+    `${PLATFORM_APP_NAME} — two-factor recovery codes`,
     `Generated: ${new Date().toLocaleString()}`,
     "",
     "Each code can be used once, in place of your authenticator app.",

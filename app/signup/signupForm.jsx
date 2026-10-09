@@ -14,6 +14,7 @@ import {
   EyeOff,
   Loader2,
   MailCheck,
+  MailWarning,
   ShieldCheck,
   Users,
   X,
@@ -27,6 +28,7 @@ import {
   checkWorkspaceAvailability,
   startSignup,
 } from "@/server/authServer/signupServer";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 const MIN_PASSWORD_LENGTH = 8;
 const AVAILABILITY_DEBOUNCE_MS = 450;
@@ -83,6 +85,7 @@ export default function SignupForm({ rootDomain = "" }) {
   const [availability, setAvailability] = useState(null); // {slug, available, message}
   const [showPassword, setShowPassword] = useState(false);
   const [sentTo, setSentTo] = useState("");
+  const [emailPending, setEmailPending] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const set = (field) => (event) =>
@@ -155,6 +158,10 @@ export default function SignupForm({ rootDomain = "" }) {
     startTransition(async () => {
       const res = await startSignup(form);
       if (res?.success) {
+        // The signup is recorded either way; `emailPending` means the link
+        // itself did not go out, so the next screen must not send them off to
+        // watch an inbox nothing is arriving in.
+        setEmailPending(!!res.emailPending);
         setSentTo(form.email.trim());
       } else {
         toast.error(res?.message || "Something went wrong");
@@ -185,7 +192,7 @@ export default function SignupForm({ rootDomain = "" }) {
             width={36}
             className="h-9 w-9"
           />
-          <span className="text-lg font-semibold">HR Management</span>
+          <span className="text-lg font-semibold">{PLATFORM_APP_NAME}</span>
         </div>
 
         <div className="relative max-w-md">
@@ -232,11 +239,15 @@ export default function SignupForm({ rootDomain = "" }) {
               width={32}
               className="h-8 w-8"
             />
-            <span className="font-semibold">HR Management</span>
+            <span className="font-semibold">{PLATFORM_APP_NAME}</span>
           </div>
 
           {sentTo ? (
-            <CheckYourInbox email={sentTo} onBack={() => setSentTo("")} />
+            <CheckYourInbox
+              email={sentTo}
+              emailPending={emailPending}
+              onBack={() => setSentTo("")}
+            />
           ) : (
             <>
               <header className="mb-8">
@@ -479,25 +490,59 @@ function Divider({ children }) {
  * screen has to say so clearly enough that nobody goes looking for a workspace
  * that is not there.
  */
-function CheckYourInbox({ email, onBack }) {
+/**
+ * The screen after a successful signup.
+ *
+ * `emailPending` is the degraded case: the signup is saved but our mailbox
+ * would not send the link. The signup is deliberately not thrown away for
+ * that, so the only honest thing to do is say so — telling someone to watch
+ * an inbox nothing is coming to is how a delivery problem turns into a person
+ * who thinks they registered wrong.
+ */
+function CheckYourInbox({ email, emailPending = false, onBack }) {
   return (
     <div className="text-center">
-      <span className="mx-auto mb-6 flex size-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950">
-        <MailCheck className="size-7 text-emerald-600" />
+      <span
+        className={`mx-auto mb-6 flex size-14 items-center justify-center rounded-full ${
+          emailPending
+            ? "bg-amber-50 dark:bg-amber-950"
+            : "bg-emerald-50 dark:bg-emerald-950"
+        }`}
+      >
+        {emailPending ? (
+          <MailWarning className="size-7 text-amber-600" />
+        ) : (
+          <MailCheck className="size-7 text-emerald-600" />
+        )}
       </span>
 
-      <h2 className="text-2xl font-semibold tracking-tight">Check your inbox</h2>
+      <h2 className="text-2xl font-semibold tracking-tight">
+        {emailPending ? "Your signup is saved" : "Check your inbox"}
+      </h2>
       <p className="text-muted-foreground mt-3 text-sm">
-        We&apos;ve sent a confirmation link to{" "}
-        <strong className="text-foreground">{email}</strong>. Click it and
-        we&apos;ll create your workspace.
+        {emailPending ? (
+          <>
+            We have everything we need for{" "}
+            <strong className="text-foreground">{email}</strong>, but we
+            could not send your confirmation link just yet. Our team will get
+            it to you shortly — you do not need to sign up again.
+          </>
+        ) : (
+          <>
+            We&apos;ve sent a confirmation link to{" "}
+            <strong className="text-foreground">{email}</strong>. Click it and
+            we&apos;ll create your workspace.
+          </>
+        )}
       </p>
 
       <div className="bg-muted/50 mt-6 space-y-3 rounded-lg border p-4 text-left text-sm">
         <p className="flex gap-3">
           <BadgeCheck className="text-muted-foreground mt-0.5 size-4 shrink-0" />
           <span className="text-muted-foreground">
-            The link is valid for 24 hours and works once.
+            {emailPending
+              ? "Your workspace address is noted against your signup."
+              : "The link is valid for 24 hours and works once."}
           </span>
         </p>
         <p className="flex gap-3">
@@ -510,15 +555,31 @@ function CheckYourInbox({ email, onBack }) {
       </div>
 
       <p className="text-muted-foreground mt-6 text-sm">
-        Nothing arrived? Check your spam folder, or{" "}
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-indigo-600 hover:underline"
-        >
-          try a different email
-        </button>
-        .
+        {emailPending ? (
+          <>
+            Need to use a different address?{" "}
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-indigo-600 hover:underline"
+            >
+              Start again
+            </button>
+            .
+          </>
+        ) : (
+          <>
+            Nothing arrived? Check your spam folder, or{" "}
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-indigo-600 hover:underline"
+            >
+              try a different email
+            </button>
+            .
+          </>
+        )}
       </p>
 
       <Button asChild variant="outline" className="mt-6 w-full">

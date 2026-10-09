@@ -1,8 +1,9 @@
 import { platformRootDomain } from "@/lib/tenantHost";
 import SignupForm from "./signupForm";
+import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
 export const metadata = {
-  title: "Create your workspace | HR Management",
+  title: `Create your workspace | ${PLATFORM_APP_NAME}`,
   description: "Set up a new company workspace and start managing your team.",
 };
 

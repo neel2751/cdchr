@@ -13,7 +13,7 @@ import RoleTypesModel from "@/models/roleTypeModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import { logAuditDirect } from "@/lib/audit";
 import { emailButton } from "@/lib/emailTemplate";
-import { startSession } from "@/lib/mongodb";
+import { isValidObjectId, startSession } from "@/lib/mongodb";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import {
   RESERVED_SUBDOMAINS,
@@ -22,6 +22,7 @@ import {
   platformRootDomain,
 } from "@/lib/tenantHost";
 import { hashPassword } from "@/utils/bcrypt";
+import { getServerSideProps } from "../session/session";
 import { sendTenantMail } from "../email/tenantMail";
 import { invalidateTenantCache } from "../tenantServer/tenantServer";
 
@@ -140,6 +141,35 @@ export async function checkWorkspaceAvailability(rawSlug) {
 }
 
 /**
+ * The confirmation email for one pending signup, ready for sendTenantMail().
+ *
+ * Shared by startSignup() and reissueSignupLink() so the two cannot drift —
+ * the reissued link has to describe the same thing as the original.
+ */
+function confirmationMail({ companyName, slug, name, email }, link) {
+  const root = platformRootDomain();
+  const address = root ? `${slug}.${root}` : slug;
+  return {
+    tenantId: null,
+    feature: "All",
+    to: email,
+    subject: `Confirm your email to create ${companyName}`,
+    heading: "Confirm your email",
+    html: `
+        <p>Hi ${name},</p>
+        <p>You are one click away from creating <strong>${companyName}</strong>
+        at <strong>${address}</strong>. Confirm this email address and we will
+        set the workspace up for you.</p>
+        ${emailButton("Confirm and create workspace", link)}
+        <p>If the button does not work, copy and paste this link:</p>
+        <p style="word-break:break-all;color:#4f46e5">${link}</p>
+        <p>The link is valid for ${TOKEN_TTL_HOURS} hours and can be used once.
+        Until you use it, nothing has been created.</p>
+        <p>If you did not request this, you can safely ignore this email.</p>`,
+  };
+}
+
+/**
  * Step one: record the signup and email a confirmation link.
  *
  * Always reports success once the input itself is valid. Saying "that email is
@@ -251,35 +281,29 @@ export async function startSignup(form = {}) {
     });
 
     const link = `${origin}/signup/verify?token=${rawToken}`;
-    const root = platformRootDomain();
-    const address = root ? `${slug}.${root}` : slug;
 
-    const mail = await sendTenantMail({
-      tenantId: null,
-      feature: "All",
-      to: email,
-      subject: `Confirm your email to create ${companyName}`,
-      heading: "Confirm your email",
-      html: `
-        <p>Hi ${name},</p>
-        <p>You are one click away from creating <strong>${companyName}</strong>
-        at <strong>${address}</strong>. Confirm this email address and we will
-        set the workspace up for you.</p>
-        ${emailButton("Confirm and create workspace", link)}
-        <p>If the button does not work, copy and paste this link:</p>
-        <p style="word-break:break-all;color:#4f46e5">${link}</p>
-        <p>The link is valid for ${TOKEN_TTL_HOURS} hours and can be used once.
-        Until you use it, nothing has been created.</p>
-        <p>If you did not request this, you can safely ignore this email.</p>`,
-    });
+    const mail = await sendTenantMail(
+      confirmationMail({ companyName, slug, name, email }, link)
+    );
 
     if (!mail?.success) {
-      // The pending record is useless without the link the person never got.
-      await PendingSignupModel.deleteMany({ email, usedAt: null });
-      console.log("signup email failed:", mail?.message);
+      // A mailbox we cannot reach is our problem, not theirs, and it used to
+      // cost them the signup: the pending record was deleted and the reply was
+      // a flat failure, so while the platform mailbox was down nobody could
+      // register at all. Only the *link* was lost — everything needed to create
+      // the workspace is on the record, so it is kept and stays confirmable
+      // through reissueSignupLink() below. If nobody ever reissues it, the TTL
+      // index clears it in 24 hours exactly as an abandoned signup.
+      await PendingSignupModel.updateOne(
+        { email, usedAt: null },
+        { $set: { emailFailedAt: new Date() } }
+      );
+      console.log("signup email failed, pending signup kept:", email, mail?.message);
       return {
-        success: false,
-        message: "We could not send the confirmation email. Please try again.",
+        success: true,
+        emailPending: true,
+        message:
+          "Your signup is saved. We could not send the confirmation email just yet — we will send your link shortly.",
       };
     }
 
@@ -287,6 +311,136 @@ export async function startSignup(form = {}) {
   } catch (error) {
     console.log("startSignup error:", error?.message);
     return { success: false, message: "Could not start your signup" };
+  }
+}
+
+/**
+ * The platform side of a failed confirmation email.
+ *
+ * Everything above this point runs unauthenticated. These two do not: they read
+ * other people's signups and hand out working links, so they are gated on the
+ * platform role exactly as server/tenantServer/platformServer.js is.
+ */
+async function requirePlatformAdmin() {
+  const { props } = await getServerSideProps();
+  const user = props?.session?.user;
+  if (!user) return { error: "Not signed in" };
+  if (user.role !== "platformAdmin") return { error: "Not authorised" };
+  return { user };
+}
+
+/**
+ * Who is waiting on a confirmation link.
+ *
+ * `emailFailed` is the part worth acting on: those people are waiting on us,
+ * where the rest are simply sitting on a link they have not clicked yet.
+ */
+export async function listPendingSignups() {
+  const auth = await requirePlatformAdmin();
+  if (auth.error) return { success: false, message: auth.error };
+
+  try {
+    await connect();
+    const rows = await escapeTenant("signup: list pending signups", () =>
+      PendingSignupModel.find({ usedAt: null })
+        .select("companyName slug name email emailFailedAt lastSentAt expiresAt")
+        .sort({ emailFailedAt: -1, createdAt: -1 })
+        .lean()
+    );
+
+    return {
+      success: true,
+      data: rows.map((row) => ({
+        _id: String(row._id),
+        companyName: row.companyName,
+        slug: row.slug,
+        name: row.name,
+        email: row.email,
+        emailFailed: !!row.emailFailedAt,
+        lastSentAt: row.lastSentAt,
+        expiresAt: row.expiresAt,
+      })),
+    };
+  } catch (error) {
+    console.log("listPendingSignups error:", error?.message);
+    return { success: false, message: "Could not load pending signups" };
+  }
+}
+
+/**
+ * Issue a fresh confirmation link for an outstanding signup.
+ *
+ * Deliberately not called a resend: it cannot be one. Only a SHA-256 hash of
+ * the token is stored, so the link that failed to send no longer exists
+ * anywhere and the only way to help is to mint a replacement — which also
+ * retires the old one, so this stays safe to click twice.
+ *
+ * Tries to email it, and returns the link either way. That is the point: while
+ * the mailbox is still down the admin can pass the link on by hand, which is
+ * what lets startSignup() keep the signup instead of discarding it.
+ */
+export async function reissueSignupLink(signupId) {
+  const auth = await requirePlatformAdmin();
+  if (auth.error) return { success: false, message: auth.error };
+
+  try {
+    if (!isValidObjectId(signupId)) {
+      return { success: false, message: "Invalid signup" };
+    }
+
+    await connect();
+    const pending = await escapeTenant("signup: reissue a link", () =>
+      PendingSignupModel.findById(signupId)
+    );
+    if (!pending || pending.usedAt) {
+      return { success: false, message: "That signup is no longer outstanding" };
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    pending.tokenHash = hashToken(rawToken);
+    pending.expiresAt = new Date(Date.now() + TOKEN_TTL_HOURS * 60 * 60 * 1000);
+    pending.lastSentAt = new Date();
+    await escapeTenant("signup: store the reissued token", () => pending.save());
+
+    const origin = await signupOrigin();
+    const link = `${origin}/signup/verify?token=${rawToken}`;
+    const mail = await sendTenantMail(confirmationMail(pending, link));
+
+    await escapeTenant("signup: record the reissue outcome", () =>
+      PendingSignupModel.updateOne(
+        { _id: pending._id },
+        { $set: { emailFailedAt: mail?.success ? null : new Date() } }
+      )
+    );
+
+    await logAuditDirect({
+      actor: {
+        _id: auth.user._id,
+        name: auth.user.name,
+        email: auth.user.email,
+        role: "platformAdmin",
+      },
+      action: "Signup.reissueLink",
+      module: "Platform",
+      entityId: String(pending._id),
+      description: `Reissued the confirmation link for ${pending.email}`,
+      status: mail?.success ? "success" : "failure",
+      errorMessage: mail?.success ? undefined : mail?.message,
+      // The link itself is a working credential and is never recorded.
+      metadata: { email: pending.email, slug: pending.slug, emailed: !!mail?.success },
+    });
+
+    return {
+      success: true,
+      emailed: !!mail?.success,
+      link,
+      message: mail?.success
+        ? `A new confirmation link is on its way to ${pending.email}.`
+        : "Still cannot send email — pass this link to them yourself.",
+    };
+  } catch (error) {
+    console.log("reissueSignupLink error:", error?.message);
+    return { success: false, message: "Could not reissue the link" };
   }
 }
 
