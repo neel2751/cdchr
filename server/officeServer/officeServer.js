@@ -3,7 +3,6 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
 import { createObjectId } from "@/lib/mongodb";
-import { getCompanyById } from "../companyServer/companyServer";
 import CompanyModel from "@/models/companyModel";
 import { checkSeats } from "@/lib/tenantPlan";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
@@ -270,8 +269,14 @@ export const handleOfficeEmployee = withAudit(
         const isPreviousEmployee =
           visaEnd && !Number.isNaN(visaEnd.getTime()) && visaEnd < new Date();
         if (!isPreviousEmployee) {
-          const companyData = await getCompanyById(company);
-          const cData = JSON.parse(companyData?.data);
+          // Read directly rather than through getCompanyById(), which is a
+          // server action and now authorises its caller. This is server-to-
+          // server: the company is the one the employee was just created in,
+          // and routing an internal read through a public endpoint means its
+          // authorisation rules decide whether a welcome email gets a name.
+          const cData = await CompanyModel.findById(company)
+            .select("name")
+            .lean();
           // The link has to point at the employee's own company, not at one
           // hardcoded host.
           const appUrl = await resolveTenantAppUrl(company);

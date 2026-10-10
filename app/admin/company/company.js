@@ -1,23 +1,13 @@
 "use client";
 
 import SearchDebounce from "@/components/search/searchDebounce";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { CommonContext } from "@/context/commonContext";
 import { COMPANYFIELD } from "@/data/fields/fields";
 import { useSubmitMutation } from "@/hooks/use-mutate";
 import { useFetchQuery } from "@/hooks/use-query";
 import Pagination from "@/lib/pagination";
-import { Plus } from "lucide-react";
 import { useState } from "react";
-import EmployeeForm from "../officeEmployee/employeeForm";
 import {
   companyDelete,
   companyStatus,
@@ -32,7 +22,6 @@ const Company = ({ searchParams }) => {
   const pagePerData = parseInt(searchParams?.pageSize || "10");
   const query = searchParams?.query;
   const [initialValues, setInitialValues] = useState({});
-  const [open, setOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [alert, setAlert] = useState({});
   const queryKey = ["companies", { query, currentPage, pagePerData }];
@@ -53,10 +42,6 @@ const Company = ({ searchParams }) => {
   const { newData: officeEmployeeData = [], totalCount = 0 } =
     queryResult || {};
 
-  const handleClose = () => {
-    setInitialValues({});
-    setOpen(false);
-  };
   const handleEditClose = () => {
     setInitialValues({});
     setIsEdit(false);
@@ -65,9 +50,8 @@ const Company = ({ searchParams }) => {
   const { mutate: handleSubmit, isPending } = useSubmitMutation({
     mutationFn: async (data) => await handleCompany(data, initialValues._id),
     invalidateKey: queryKey,
-    onSuccessMessage: (response) =>
-      `Company ${initialValues._id ? "Updated" : "Created"} successfully`,
-    onClose: initialValues?._id ? handleEditClose : handleClose,
+    onSuccessMessage: () => "Company updated successfully",
+    onClose: handleEditClose,
   });
   const onSubmit = (data) => {
     handleSubmit(data);
@@ -76,11 +60,6 @@ const Company = ({ searchParams }) => {
   const handleEdit = (item) => {
     setInitialValues(item);
     setIsEdit(true);
-  };
-
-  const handleOpen = () => {
-    setInitialValues({});
-    setOpen(true);
   };
 
   const alertClose = () => {
@@ -128,28 +107,16 @@ const Company = ({ searchParams }) => {
           <Card>
             <CardHeader>
               <div className="mb-4">
-                <CardTitle>Company List</CardTitle>
+                <CardTitle>Your company</CardTitle>
               </div>
-              <div className="flex items-center justify-between">
-                <SearchDebounce />
-                <div className="flex gap-2">
-                  <Button onClick={handleOpen}>
-                    <Plus />
-                    Add
-                  </Button>
-                  <Dialog open={open} onOpenChange={handleClose}>
-                    <DialogContent className="sm:max-w-xl max-h-max">
-                      <DialogHeader>
-                        <DialogTitle>Add Compnay</DialogTitle>
-                        <DialogDescription>
-                          Please fill the form to add new Company
-                        </DialogDescription>
-                      </DialogHeader>
-                      <EmployeeForm />
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </div>
+              {/* No "Add" here any more. A company is created by signing up,
+                  which builds the workspace and its first owner together, or by
+                  the platform team. This button called handleCompany() with no
+                  id, which minted a top-level company on the platform from
+                  inside one tenant's admin area — owned by nobody, reachable by
+                  no one. The server action refuses it now; the button is gone
+                  so nobody is offered an action that cannot work. */}
+              <SearchDebounce />
             </CardHeader>
             <CardContent>
               {isLoading && <div>Loading.....</div>}
