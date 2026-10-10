@@ -51,6 +51,9 @@ export const authConfig = {
         // reads it for authorization yet, and it is null for accounts with no
         // company set.
         token.tenantId = user.tenantId ? String(user.tenantId) : null;
+        // The company's <slug>.<root> address. Read by proxy.js, which runs on
+        // the edge and so cannot look it up — see the platform-host branch.
+        token.tenantSlug = user.tenantSlug || null;
         token.requiresTwoFactor = user.requiresTwoFactor ?? false;
         token.mustSetup2FA = user.mustSetup2FA ?? false;
       }
@@ -71,6 +74,7 @@ export const authConfig = {
         session.user.role = token.role;
         session.user.deviceId = token.deviceId;
         session.user.tenantId = token.tenantId ?? null;
+        session.user.tenantSlug = token.tenantSlug ?? null;
         // Drives the read-only enforcement in lib/tenantContext.js and the
         // banner in the admin shell.
         session.user.impersonation = token.impersonation ?? null;

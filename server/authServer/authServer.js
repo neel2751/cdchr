@@ -10,6 +10,7 @@ import OfficeUserModel from "@/models/officeModel";
 import PlatformUserModel from "@/models/platformUserModel";
 import { escapeTenant } from "@/lib/tenantContext";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
+import CompanyModel from "@/models/companyModel";
 
 export const LoginDataOld = async (email, password) => {
   if (!email || !password)
@@ -465,6 +466,26 @@ export const LoginData = async (email, password, deviceId) => {
       console.log("Membership lookup failed:", error?.message);
     }
   }
+
+  // The company's address, carried on the session so proxy.js can send someone
+  // who signed in on the wrong host to their own workspace. Middleware runs on
+  // the edge and cannot ask the database, so the slug has to travel with the
+  // token or the redirect is impossible to build.
+  //
+  // Best-effort, like the membership lookup above: without it the proxy simply
+  // keeps its old behaviour.
+  user.tenantSlug = null;
+  if (user.tenantId) {
+    try {
+      const company = await escapeTenant("login: workspace address", () =>
+        CompanyModel.findById(user.tenantId).select("slug").lean().exec()
+      );
+      if (company?.slug) user.tenantSlug = company.slug;
+    } catch (error) {
+      console.log("Workspace address lookup failed:", error?.message);
+    }
+  }
+
   return {
     status: true,
     data: user,

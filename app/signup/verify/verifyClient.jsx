@@ -155,10 +155,18 @@ function Success({ result }) {
           </p>
         </div>
 
+        {/* Their workspace's own host, not this one.
+            Signup and this page are served on the shared root domain, and a
+            relative "/auth" therefore signed the founder in THERE. With
+            PLATFORM_APEX_HOST set to that same host, proxy.js then sends every
+            request to /platform — which a superAdmin cannot open — and on to
+            /unauthorized: a brand-new owner locked out of the workspace they
+            had just created, on their very first sign-in. A workspace is
+            reached at its own address, so that is where signing in belongs. */}
         <Button asChild size="lg" className="w-full">
-          <Link href="/auth">
+          <a href={result?.workspaceUrl ? `${result.workspaceUrl}/auth` : "/auth"}>
             Sign in to {result?.companyName} <ArrowRight />
-          </Link>
+          </a>
         </Button>
       </CardContent>
     </Card>

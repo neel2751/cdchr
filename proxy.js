@@ -9,6 +9,7 @@ import {
   isPlatformHost,
   normalizeHost,
   platformApexHost,
+  platformRootDomain,
 } from "./lib/tenantHost";
 
 // Host -> resolution cache. Middleware module scope survives between requests
@@ -202,8 +203,40 @@ async function checkRoleMiddleware(req) {
   }
 
   // The platform host serves the platform dashboard and nothing else.
+  //
+  // It cannot send everyone to /platform, though. PLATFORM_APEX_HOST is often
+  // the same host as PLATFORM_ROOT_DOMAIN — the one serving /signup and /auth —
+  // so a tenant user signing in there arrived with a perfectly good session and
+  // was bounced to /platform, which their role cannot open, and from there to
+  // /unauthorized. A brand-new super admin met that on their first sign-in,
+  // because signup and the confirmation page are on exactly that host.
+  //
+  // A workspace lives at its own address, so that is where they are sent, on
+  // the path they asked for. `tenantSlug` rides on the session (auth.config.js)
+  // because middleware runs on the edge and cannot look it up; a session minted
+  // before that field existed has none, and falls through to the old behaviour.
   if (onPlatformHost) {
-    return NextResponse.redirect(new URL("/platform", req.url));
+    if (userRole === "platformAdmin") {
+      return NextResponse.redirect(new URL("/platform", req.url));
+    }
+
+    const root = platformRootDomain();
+    const slug = user?.tenantSlug;
+    if (root && slug) {
+      // Built from the parts rather than by editing req.url. Behind a proxy
+      // req.url is the INTERNAL address — the same trap noted on the callback
+      // URL in lib/roleHome.js — so reusing it carried a 127.0.0.1 port into a
+      // public redirect. The scheme comes from the edge, defaulting to https:
+      // this branch only runs on a deployment that has been given a dedicated
+      // platform host, and those are not served over http.
+      const proto = req.headers.get("x-forwarded-proto") || "https";
+      const search = req.nextUrl.search || "";
+      return NextResponse.redirect(
+        `${proto}://${slug}.${root}${requestedPath}${search}`
+      );
+    }
+
+    return NextResponse.redirect(new URL("/unauthorized", req.url));
   }
 
   // A platform admin has no place inside a tenant's app — unless a support
