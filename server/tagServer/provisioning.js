@@ -16,7 +16,10 @@ import TagOrderModel from "@/models/tagOrderModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
 import { recordStockMovement } from "./stock";
-import { releaseReservedUnit } from "./reservations";
+import {
+  cancelOrderAndRelease,
+  releaseReservedUnit,
+} from "./reservations";
 import { normaliseUid } from "../clockServer/clockTagStore";
 import { getServerSideProps } from "../session/session";
 
@@ -173,6 +176,80 @@ export async function acceptTagOrder({ orderNumber } = {}) {
   } catch (error) {
     console.log("Error accepting a tag order:", error);
     return { success: false, message: "Could not accept that order" };
+  }
+}
+
+/**
+ * The operator cancels somebody's order.
+ *
+ * The customer can already cancel their own (cancelTagOrder in
+ * server/tagServer/orders.js). This is for the other direction: a line we
+ * cannot source, a duplicate, or a customer who rang up rather than clicking.
+ *
+ * A REASON IS REQUIRED here and optional there. Cancelling your own order
+ * needs no explanation to anybody; cancelling somebody else's is a thing the
+ * customer will ask about, and "cancelled by Platform Ops" with no why is not
+ * an answer.
+ *
+ * The window is the same as the customer's — while nothing has shipped —
+ * deliberately, even though the operator knows more about the real situation.
+ * Once part of an order is in the post, marking the whole thing cancelled
+ * would misrepresent the units that went out, and the status enum has no
+ * "partly cancelled" to say it honestly. A shipped order that goes wrong is a
+ * return, which is what the unit statuses `returned` and `replaced` are for.
+ * The operator's extra power is reach, not a wider window.
+ */
+export async function platformCancelTagOrder({ orderNumber, reason } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+
+    if (!orderNumber) return { success: false, message: "Which order?" };
+    if (!reason?.trim()) {
+      return {
+        success: false,
+        message: "Give a reason — the customer will be told it.",
+      };
+    }
+
+    await connect();
+    const order = await loadOrder(orderNumber);
+    if (!order) return { success: false, message: "Order not found" };
+    if (order.status === "cancelled") {
+      return { success: false, message: "That order is already cancelled" };
+    }
+    if (["shipped", "partially-shipped", "delivered"].includes(order.status)) {
+      return {
+        success: false,
+        message:
+          "Units from this order have already gone out, so it cannot be cancelled — handle it as a return.",
+      };
+    }
+
+    const cancelled = await cancelOrderAndRelease(order, {
+      byName: `${auth.user?.name || "Platform Ops"} (platform)`,
+      reason,
+    });
+    if (!cancelled) {
+      return { success: false, message: "That order is already cancelled" };
+    }
+
+    await logAuditDirect({
+      action: "TagOrder.cancel",
+      module: "TagOrder",
+      entityId: String(order._id),
+      tenantId: order.tenantId,
+      description: `Cancelled ${orderNumber} on the customer's behalf: ${reason.trim()}`,
+      actor: auth.user,
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: `${orderNumber} cancelled and the stock released`,
+    };
+  } catch (error) {
+    console.log("Error cancelling a tag order:", error);
+    return { success: false, message: "Could not cancel that order" };
   }
 }
 

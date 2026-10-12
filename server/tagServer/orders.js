@@ -10,7 +10,7 @@ import TagProductModel from "@/models/tagProductModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { escapeTenant } from "@/lib/tenantContext";
-import { recountReservations } from "./reservations";
+import { cancelOrderAndRelease } from "./reservations";
 import { outstandingUnits } from "@/lib/tagOrderStatus";
 import {
   availableToOrder,
@@ -430,28 +430,23 @@ export const cancelTagOrder = withAudit(
       }
 
       const before = { status: order.status };
-      const skus = [
-        ...new Set((order.items || []).map((i) => i.productSku).filter(Boolean)),
-      ];
 
-      order.status = "cancelled";
-      order.cancelledBy = createObjectId(user._id);
-      order.cancelledByName = user.name;
-      order.cancelledAt = new Date();
-      if (reason?.trim()) order.cancelReason = reason.trim();
-      await order.save();
-
-      // After the save, so this order is excluded from the recount.
-      for (const sku of skus) {
-        await recountReservations(sku).catch((error) =>
-          console.log("Could not release reservations on cancel:", error?.message)
-        );
+      // The order was found through the tenant-scoped model above, so it is
+      // this company's. Marking it and releasing its blanks is shared with the
+      // operator's cancel — see cancelOrderAndRelease().
+      const cancelled = await cancelOrderAndRelease(order, {
+        by: createObjectId(user._id),
+        byName: user.name,
+        reason,
+      });
+      if (!cancelled) {
+        return { success: false, message: "That order is already cancelled" };
       }
 
       recordAudit({
         entityId: order._id,
         before,
-        after: { status: "cancelled", reason: order.cancelReason },
+        after: { status: "cancelled", reason: cancelled.cancelReason },
         description: `Cancelled tag order ${order.orderNumber}`,
       });
 

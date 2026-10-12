@@ -70,3 +70,55 @@ export async function releaseReservedUnit(sku) {
     )
   );
 }
+
+/**
+ * Mark an order cancelled and give its unmade blanks back.
+ *
+ * Shared by the customer's cancel (server/tagServer/orders.js) and the
+ * operator's (server/tagServer/provisioning.js). The sequence has one subtlety
+ * worth not reimplementing twice: the order is marked FIRST, and the counter is
+ * then rebuilt from the orders that are still live. Because this one no longer
+ * is, its unmade units drop out — while units already made stay out of the
+ * count, their blanks having been consumed at key issue and not coming back.
+ * Recounting rather than subtracting also means cancelling twice cannot
+ * double-release.
+ *
+ * Authorisation and FINDING the order belong to the caller, deliberately. The
+ * customer's action looks it up through the tenant-scoped model, so it can only
+ * reach its own; the operator's escapes that scope on purpose. By the time an
+ * order arrives here it has already been established that this caller may
+ * cancel it, so the write is by _id.
+ *
+ * @returns the updated order, or null if it was already cancelled.
+ */
+export async function cancelOrderAndRelease(order, { by, byName, reason } = {}) {
+  const updated = await escapeTenant("tag order: cancel", () =>
+    TagOrderModel.findOneAndUpdate(
+      { _id: order._id, status: { $ne: "cancelled" } },
+      {
+        $set: {
+          status: "cancelled",
+          ...(by ? { cancelledBy: by } : {}),
+          cancelledByName: byName,
+          cancelledAt: new Date(),
+          ...(reason?.trim() ? { cancelReason: reason.trim() } : {}),
+        },
+      },
+      { new: true }
+    ).lean()
+  );
+  if (!updated) return null;
+
+  const skus = [
+    ...new Set((updated.items || []).map((i) => i.productSku).filter(Boolean)),
+  ];
+  for (const sku of skus) {
+    // Never allowed to fail the cancellation: the order IS cancelled either
+    // way, and recountReservations() is itself the repair for a lost write.
+    await recountReservations(sku).catch((error) =>
+      console.log("Could not release reservations on cancel:", error?.message)
+    );
+  }
+
+  return updated;
+}

@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import {
   acceptTagOrder,
+  platformCancelTagOrder,
   fetchUnitKey,
   getProvisioningQueue,
   markUnitFailed,
@@ -47,6 +48,13 @@ import {
   getShipmentPostage,
 } from "@/server/tagServer/carrierLabels";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
+
+/**
+ * The statuses an order may still be cancelled from: nothing has left us.
+ * Same window the customer gets — see platformCancelTagOrder() for why the
+ * operator does not get a wider one.
+ */
+const CANCELLABLE = ["placed", "accepted", "provisioning"];
 import {
   Select,
   SelectContent,
@@ -125,6 +133,7 @@ export default function ProvisioningStation() {
   const { mutate: act, isPending } = useMutation({
     mutationFn: ({ kind, ...args }) => {
       if (kind === "accept") return run(acceptTagOrder(args));
+      if (kind === "cancel") return run(platformCancelTagOrder(args));
       if (kind === "written")
         return run(recordUnitWritten(args), () => {
           setLiveKey(null);
@@ -245,16 +254,46 @@ export default function ProvisioningStation() {
 
             {isOpen ? (
               <CardContent className="space-y-3">
-                {order.status === "placed" ? (
-                  <Button
-                    disabled={isPending}
-                    onClick={() =>
-                      act({ kind: "accept", orderNumber: order.orderNumber })
-                    }
-                  >
-                    Accept &amp; generate keys
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  {order.status === "placed" ? (
+                    <Button
+                      disabled={isPending}
+                      onClick={() =>
+                        act({ kind: "accept", orderNumber: order.orderNumber })
+                      }
+                    >
+                      Accept &amp; generate keys
+                    </Button>
+                  ) : null}
+
+                  {/* Cancelling on the customer's behalf: a line we cannot
+                      source, a duplicate, or somebody who rang rather than
+                      clicking. Offered only while nothing has shipped — after
+                      that it is a return, not a cancellation — and the reason
+                      is required, because the customer will ask. */}
+                  {CANCELLABLE.includes(order.status) ? (
+                    <Button
+                      variant="outline"
+                      className="text-destructive"
+                      disabled={isPending}
+                      onClick={() => {
+                        const reason = (
+                          window.prompt(
+                            `Why is ${order.orderNumber} being cancelled? The customer is told this.`
+                          ) || ""
+                        ).trim();
+                        if (!reason) return;
+                        act({
+                          kind: "cancel",
+                          orderNumber: order.orderNumber,
+                          reason,
+                        });
+                      }}
+                    >
+                      Cancel order
+                    </Button>
+                  ) : null}
+                </div>
 
                 {liveKey ? (
                   <div className="space-y-2 rounded-md border-2 border-amber-300 bg-amber-50 p-3">
