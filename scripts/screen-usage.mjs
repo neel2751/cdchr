@@ -10,6 +10,14 @@
  * prints: a screen can only look unused once logging has been running long
  * enough for somebody to have had a reason to open it.
  *
+ * That list covers the MENU screens only, which are all /admin. The employee
+ * portal and the reception desk are logged too — both shells mount the same
+ * component — but their screens are declared in the shells themselves rather
+ * than in data/menu.js, so they appear here once visited and cannot be
+ * enumerated beforehand. Deliberately not hardcoded: a list of screens kept in
+ * a script is a list that goes stale, and a stale entry reads as an unused
+ * screen, which is the exact confusion this report exists to end.
+ *
  * Read-only. It writes nothing and is safe against production.
  *
  *   node scripts/screen-usage.mjs
@@ -143,6 +151,11 @@ async function main() {
     for (const p of unseen) console.log(`  ${p}`);
     console.log(
       "\nJudge these against the start date above, not in the abstract."
+    );
+    console.log(
+      "Menu screens only — the employee portal and reception desk are logged,\n" +
+        "but their screens are declared in their shells, so they show up above\n" +
+        "once visited rather than being listed here when they are not."
     );
   }
 

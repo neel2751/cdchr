@@ -6,6 +6,7 @@ import React from "react";
 import Logout from "./logout";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SessionProvider } from "next-auth/react";
+import ScreenViewLogger from "@/components/screenViewLogger";
 
 /**
  * The site-employee portal chrome.
@@ -24,6 +25,10 @@ export default function EmployeeShell({ children }) {
   return (
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
+        {/* Which screens the portal's own users open. The admin shell mounts
+            the same component; with these two shells covered, "no views
+            recorded" means the screen, not a gap in logging. */}
+        <ScreenViewLogger />
         <div className="flex min-h-screen flex-col px-2 sm:py-0 py-2">
           <header className="sticky top-0 z-50 w-full border-b bg-white">
             <div className="container flex h-16 items-center justify-between mx-auto">

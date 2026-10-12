@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SessionProvider } from "next-auth/react";
 import ReceptionLogout from "./logout";
 import { brandCompanyName } from "@/lib/tenant";
+import ScreenViewLogger from "@/components/screenViewLogger";
 
 /**
  * The reception desk chrome.
@@ -26,6 +27,8 @@ export default function ReceptionShell({ children, branding = null }) {
   return (
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
+        {/* Which screens the desk opens. See the admin shell. */}
+        <ScreenViewLogger />
         <div className="flex min-h-screen flex-col px-2 sm:py-0 py-2">
           <header className="sticky top-0 z-50 w-full border-b bg-white flex items-center justify-between">
             <div className="container flex h-16 items-center justify-center mx-auto">
