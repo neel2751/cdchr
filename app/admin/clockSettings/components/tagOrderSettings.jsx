@@ -246,8 +246,22 @@ export default function TagOrderSettings() {
                 </Select>
                 {chosen ? (
                   <p className="text-xs text-neutral-500">
-                    Minimum {chosen.minQuantity}. About {chosen.leadTimeDays}{" "}
-                    days.
+                    {/* The minimum is a batch minimum, so say which situation
+                        this product is in rather than quoting a number that
+                        may not apply. A company opening its sixth office
+                        should not be told it must buy five. */}
+                    {chosen.availableNow > 0 ? (
+                      <>
+                        {chosen.availableNow} in stock — order any number up to
+                        that, or {chosen.minQuantity}+ for a new batch (about{" "}
+                        {chosen.leadTimeDays} days).
+                      </>
+                    ) : (
+                      <>
+                        Out of stock, so this is a new batch: minimum{" "}
+                        {chosen.minQuantity}, about {chosen.leadTimeDays} days.
+                      </>
+                    )}
                     {chosen.chipType === "ntag424"
                       ? " Each tap is uniquely signed, so a copied link is useless."
                       : " Pair these with the location check for sites."}
@@ -260,7 +274,7 @@ export default function TagOrderSettings() {
                 <Input
                   id="tagQuantity"
                   type="number"
-                  min={chosen?.minQuantity || 1}
+                  min={chosen?.availableNow > 0 ? 1 : chosen?.minQuantity || 1}
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
                 />

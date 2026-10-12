@@ -10,6 +10,7 @@ import TagProductModel from "@/models/tagProductModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { outstandingUnits } from "@/lib/tagOrderStatus";
+import { escapeTenant } from "@/lib/tenantContext";
 import { getServerSideProps } from "../session/session";
 
 /**
@@ -25,6 +26,54 @@ import { getServerSideProps } from "../session/session";
  * See CLOCK_LOCATION_PLAN.md §6.3 and §6.8.
  */
 
+/**
+ * How many of a product could ship today without making more.
+ *
+ * stockOnHand, minus everything already promised and not yet made. A unit
+ * consumes stock at the moment its key is issued (recordStockMovement in
+ * provisioning.js), so anything still `pending` — which is every unit of every
+ * order at placement, since units are created empty — is demand the shelf has
+ * not yet paid for.
+ *
+ * Counted across EVERY tenant, deliberately. TagOrder is tenant-scoped, but
+ * the shelf is not: two companies each ordering the last unit in stock is
+ * precisely the case this exists to prevent, and a scoped query would let both
+ * through.
+ *
+ * Cancelled orders are excluded — their pending units will never be made.
+ * Shipped and delivered orders need no special case: their units are all past
+ * pending, so they contribute nothing.
+ *
+ * Units are not recorded per line, so "made" is attributed to the order as a
+ * whole. That is exact for a single-product order, which is what the ordering
+ * screen produces, and it is the same assumption provisioning.js already makes
+ * when it books the movement against items[0]. A mixed order would be counted
+ * conservatively, which errs towards quoting a batch rather than promising
+ * stock that is not there.
+ */
+async function availableToShip(product) {
+  const onHand = Number(product?.stockOnHand) || 0;
+  if (onHand <= 0) return 0;
+
+  const orders = await escapeTenant("tag stock: demand already promised", () =>
+    TagOrderModel.find(
+      { status: { $ne: "cancelled" }, "items.productSku": product.sku },
+      { items: 1, units: 1 }
+    ).lean()
+  );
+
+  let promised = 0;
+  for (const order of orders) {
+    const ordered = (order.items || [])
+      .filter((item) => item.productSku === product.sku)
+      .reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    const made = (order.units || []).filter((u) => u.status !== "pending").length;
+    promised += Math.max(ordered - made, 0);
+  }
+
+  return Math.max(onHand - promised, 0);
+}
+
 /** The shop. Readable by any signed-in admin; it is a price list. */
 export async function getTagProducts() {
   try {
@@ -38,7 +87,16 @@ export async function getTagProducts() {
       .sort({ chipType: 1, unitPrice: 1 })
       .lean();
 
-    return { success: true, data: JSON.stringify(rows) };
+    // `availableNow` rather than letting the screen read stockOnHand and work
+    // it out: the rule about what may be ordered belongs on one side of the
+    // wire, and the raw figure is not the answer anyway — it does not account
+    // for what other companies have already ordered and nobody has made yet.
+    const withAvailability = [];
+    for (const row of rows) {
+      withAvailability.push({ ...row, availableNow: await availableToShip(row) });
+    }
+
+    return { success: true, data: JSON.stringify(withAvailability) };
   } catch (error) {
     console.log("Error loading the tag catalogue:", error);
     return { success: false, message: "Could not load the catalogue" };
@@ -173,10 +231,28 @@ export const placeTagOrder = withAudit(
         if (!Number.isFinite(quantity) || quantity < 1) {
           return { success: false, message: `Invalid quantity for ${product.name}` };
         }
-        if (quantity < product.minQuantity) {
+        // The minimum is a PRODUCTION minimum, so it only applies to an order
+        // that needs production.
+        //
+        // It used to apply to every order, which read as arbitrary from the
+        // customer's side and was: a company with five offices that opens a
+        // sixth had to buy five more tags to get one. Printing and encoding a
+        // single tag does have a setup cost that one unit's price will not
+        // cover — that is what the minimum is protecting — but shipping one
+        // off the shelf does not. Blanks on the shelf are the whole reason
+        // stockOnHand and reorderLevel exist, and until now nothing at the
+        // point of sale consulted either.
+        //
+        // So: any quantity we can ship from stock, or the configured minimum
+        // when a batch has to be made. Restocking in bulk stays the platform's
+        // job, which is what reorderLevel is for.
+        const available = await availableToShip(product);
+        if (quantity > available && quantity < product.minQuantity) {
           return {
             success: false,
-            message: `${product.name} has a minimum order of ${product.minQuantity}.`,
+            message: available
+              ? `${product.name}: ${available} in stock. Order up to ${available}, or ${product.minQuantity}+ for a new batch.`
+              : `${product.name} is out of stock, so this is a new batch — minimum ${product.minQuantity}.`,
           };
         }
 
