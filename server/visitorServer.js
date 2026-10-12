@@ -2,8 +2,29 @@
 
 import { connect } from "@/db/db";
 import VisitorModel from "@/models/visitorModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * Visitors. The book is kept on /admin/visitors — not in data/menu.js, so
+ * proxy.js finds no menu item and only a super admin reaches the page today.
+ *
+ * Signing a visitor in is the exception: app/hr renders the same dialog, and a
+ * reception account is a different user type with no RoleBased row to hold a
+ * permission, so that one action names the role as well. The reception desk
+ * exists to do exactly this, and rolePathMap in proxy.js already gives that
+ * role /hr and nothing else.
+ *
+ * Everything here is somebody's name, employer, car registration and who they
+ * came to see, and all nine actions were callable by any signed-in account:
+ * read the book, rewrite an entry, or delete one.
+ */
+const OWNS = ["/admin/visitors"];
+const SIGN_IN_ROLES = { roles: ["reception"] };
 
 export async function handleOrUpdateVisitor(data) {
+  const denied = await permissionRefusal(OWNS, SIGN_IN_ROLES);
+  if (denied) return denied;
+
   if (
     !data ||
     !data.visitorName ||
@@ -104,6 +125,9 @@ export async function handleOrUpdateVisitor(data) {
 }
 
 export async function getAllVisitors(params) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const filter = {};
@@ -159,6 +183,9 @@ export async function getAllVisitors(params) {
 }
 
 export async function updateVisitor(visitorId, updateData) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const updatedVisitor = await VisitorModel.findByIdAndUpdate(
@@ -177,6 +204,9 @@ export async function updateVisitor(visitorId, updateData) {
 }
 
 export async function updateVisitorPurpose(purposeId, updateData) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const visitor = await VisitorModel.findOne({
@@ -201,6 +231,9 @@ export async function updateVisitorPurpose(purposeId, updateData) {
 }
 
 export async function getVisitorById(visitorId) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const visitor = await VisitorModel.findById(visitorId);
@@ -215,6 +248,9 @@ export async function getVisitorById(visitorId) {
 }
 
 export async function deleteVisitorPurpose(purposeId) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const visitor = await VisitorModel.findOne({
@@ -235,6 +271,9 @@ export async function deleteVisitorPurpose(purposeId) {
 }
 
 export async function deleteVisitor(visitorId) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const result = await VisitorModel.findByIdAndDelete(visitorId);
@@ -250,6 +289,9 @@ export async function deleteVisitor(visitorId) {
 
 // we show count by visitor type
 export async function getVisitorCountByType() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const counts = await VisitorModel.aggregate([
@@ -278,6 +320,9 @@ export async function getVisitorCountByType() {
 }
 
 export async function getVisitorCountByPurpose() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const counts = await VisitorModel.aggregate([
