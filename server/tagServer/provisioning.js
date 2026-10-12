@@ -12,6 +12,13 @@ import {
 } from "@/lib/tagKeys";
 import ClockTagModel from "@/models/clockTagModel";
 import CompanyModel from "@/models/companyModel";
+import OfficeEmployeeModel from "@/models/officeEmployeeModel";
+import {
+  resolveTenantAppUrl,
+  resolveTenantFeatureMailbox,
+  sendTenantMail,
+} from "../email/tenantMail";
+import { tagOrderCancelledTemplate } from "../email/templates/tagOrderCancelledTemplate";
 import TagOrderModel from "@/models/tagOrderModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
@@ -180,6 +187,88 @@ export async function acceptTagOrder({ orderNumber } = {}) {
 }
 
 /**
+ * Tell the customer we cancelled their order.
+ *
+ * FROM THE PLATFORM, not from their own mailbox — `tenantId: null`, which is
+ * what makes sendTenantMail resolve our sender rather than theirs. The same
+ * reasoning as platformMailer() in billingServer/dunningJob.js: this is us
+ * writing to them about something we decided, and arriving from their own
+ * branded address it would read as a company cancelling its own order.
+ *
+ * To the person who placed it. They are the one waiting for the parcel, and
+ * their address is not on the order — only their name is — so it is looked up.
+ * Falling back to whatever mailbox the company has configured means a customer
+ * whose placer has since left still hears about it.
+ *
+ * Best-effort: the order IS cancelled and the stock IS released whether or not
+ * this sends, and a failure here must never turn into a refusal there. But it
+ * reports whether it managed, because the operator's confirmation says the
+ * customer was told and that has to be true — an order with no placer and a
+ * company with no configured mailbox leaves nobody to tell.
+ *
+ * @returns {Promise<boolean>} whether a message actually went out
+ */
+async function emailCustomerAboutCancellation(order, reason) {
+  try {
+    const tenantId = order.tenantId ? String(order.tenantId) : null;
+
+    let to = "";
+    if (order.placedBy) {
+      const placer = await escapeTenant("tag order: who placed it", () =>
+        OfficeEmployeeModel.findById(order.placedBy).select("email").lean()
+      );
+      to = placer?.email || "";
+    }
+    if (!to && tenantId) {
+      to = await resolveTenantFeatureMailbox(tenantId, "All");
+    }
+    if (!to) {
+      console.log(
+        `No address to tell anyone about ${order.orderNumber} being cancelled`
+      );
+      return false;
+    }
+
+    const [appUrl, company] = await Promise.all([
+      tenantId ? resolveTenantAppUrl(tenantId) : "",
+      tenantId
+        ? escapeTenant("tag order: the customer's name", () =>
+            CompanyModel.findById(order.tenantId).select("name").lean()
+          )
+        : null,
+    ]);
+
+    const { subject, heading, html } = tagOrderCancelledTemplate({
+      orderNumber: order.orderNumber,
+      items: order.items || [],
+      reason,
+      companyName: company?.name,
+      orderUrl: appUrl,
+      supportEmail: process.env.EMAIL_USERNAME || "",
+    });
+
+    const sent = await sendTenantMail({
+      tenantId: null,
+      feature: "All",
+      to,
+      subject,
+      heading,
+      html,
+    });
+    if (!sent?.success) {
+      console.log(
+        `Could not email ${to} about ${order.orderNumber}:`,
+        sent?.message
+      );
+    }
+    return !!sent?.success;
+  } catch (error) {
+    console.log("Could not email about a cancellation:", error?.message);
+    return false;
+  }
+}
+
+/**
  * The operator cancels somebody's order.
  *
  * The customer can already cancel their own (cancelTagOrder in
@@ -243,9 +332,17 @@ export async function platformCancelTagOrder({ orderNumber, reason } = {}) {
       actor: auth.user,
     }).catch(() => {});
 
+    // Somebody is waiting for tags that are not coming; being told is the whole
+    // point of requiring a reason. But the confirmation only claims it when it
+    // happened — an operator who reads "the customer told" and then finds out
+    // otherwise has been given worse than no information.
+    const told = await emailCustomerAboutCancellation(cancelled, reason.trim());
+
     return {
       success: true,
-      message: `${orderNumber} cancelled and the stock released`,
+      message: told
+        ? `${orderNumber} cancelled, the stock released and the customer emailed`
+        : `${orderNumber} cancelled and the stock released — but nobody could be emailed, so tell them yourself`,
     };
   } catch (error) {
     console.log("Error cancelling a tag order:", error);
