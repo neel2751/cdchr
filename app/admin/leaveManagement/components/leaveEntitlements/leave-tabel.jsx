@@ -52,7 +52,34 @@ export default function LeaveEntitlementTable({
                     : "Not Available"}
                 </TableCell>
                 <TableCell>{item?.employeType || "Not Available"}</TableCell>
-                <TableCell>{item?.dayPerWeek || "5"} days</TableCell>
+                {/* "Not set", not a fabricated 5.
+
+                    This read `item?.dayPerWeek || "5"`, so an employee with no
+                    contracted days stored was shown as "5 days" — and the edit
+                    button beside it appears precisely BECAUSE the value is
+                    missing. The table said the record was complete while the
+                    dialog, correctly, opened with the field empty, and the
+                    dialog took the blame for it.
+
+                    Five is not even the fallback. Pay and hours fall back to
+                    the company's defaultDaysPerWeek (effectiveDaysPerWeek in
+                    lib/workHours.js), which is configurable; statutory
+                    entitlement does not fall back at all —
+                    statutoryEntitlementDays returns 0 without it. So the one
+                    reading nobody should be given is a number that looks
+                    settled. */}
+                <TableCell>
+                  {item?.dayPerWeek ? (
+                    `${item.dayPerWeek} days`
+                  ) : (
+                    <span
+                      className="text-amber-600"
+                      title="No contracted days recorded. Statutory entitlement is calculated from this and accrues as zero until it is set — use the edit button on this row."
+                    >
+                      Not set
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <div className="space-x-3">
                     {(!item?.employeType || !item?.dayPerWeek) && (
