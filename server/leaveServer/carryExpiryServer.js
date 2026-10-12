@@ -557,11 +557,31 @@ export async function recomputeCarryForwardForMany({
 /**
  * Every company, one at a time. For the nightly job.
  *
- * Deliberately not exported as something a tenant's admin can call: it writes
- * across companies, so it is reached only from the cron route, which
+ * It writes across companies, so it is reached only from the cron route, which
  * authenticates with the cron secret.
+ *
+ * THAT COMMENT USED TO SAY "deliberately not exported as something a tenant's
+ * admin can call", and the code did not back it up. This is an export of a
+ * "use server" module, which makes it a public HTTP endpoint — called directly,
+ * so the route's secret check was never in the way. An unauthenticated request
+ * could run a cross-company sweep that takes carried-over days off every
+ * employee in every company. The other four all-tenant jobs (visaReminderJob,
+ * announcementScheduler, shiftCloser, dunningJob) live in plain modules and
+ * are therefore not reachable this way; this file cannot, because the leave
+ * screens import its per-tenant actions.
+ *
+ * So the caller proves it is the cron route by presenting the same secret that
+ * route checks. The secret is the existing trust boundary for this job, not a
+ * new one — there is no session to check, because the scheduler has none.
  */
-export async function expireCarryForwardForAllTenants({ on } = {}) {
+export async function expireCarryForwardForAllTenants({ on, secret } = {}) {
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return {
+      success: false,
+      message: "This job runs on a schedule and cannot be started here.",
+    };
+  }
+
   await connect();
 
   const companies = await escapeTenant(

@@ -6,6 +6,7 @@ import {
   outwardCode,
   townsAgree,
 } from "@/lib/postcode";
+import { getServerSideProps } from "../session/session";
 
 /**
  * Checking a postcode against the real list.
@@ -74,6 +75,16 @@ function remember(key, value) {
  * reports "that postcode does not exist" on the strength of a timeout.
  */
 export async function lookupPostcode({ postcode, town } = {}) {
+  // Signed-in callers only. Not because the answer is sensitive — a postcode
+  // is public — but because resolving one spends our PAF licence (see
+  // addressServer/paf.js), and as a public endpoint this was a metered,
+  // billable service anybody could run up a bill on. Its only caller is an
+  // admin screen, so a session is all it needs to ask for.
+  const { props } = await getServerSideProps();
+  if (!props?.session?.user?._id) {
+    return { success: false, message: "Not signed in" };
+  }
+
   const normalised = normalisePostcode(postcode);
 
   if (!normalised) {

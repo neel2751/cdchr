@@ -11,195 +11,23 @@ import PlatformUserModel from "@/models/platformUserModel";
 import { escapeTenant } from "@/lib/tenantContext";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import CompanyModel from "@/models/companyModel";
+import {
+  checkLoginRateLimit,
+  clearLoginAttempts,
+  recordFailedLogin,
+} from "@/lib/rateLimit";
 
-export const LoginDataOld = async (email, password) => {
-  if (!email || !password)
-    return { status: false, message: "Please Provide  all details" };
-  password = password.trim();
-  email = email.trim();
-  email = email.toLowerCase();
-  try {
-    await connect();
-    const foundData = await OfficeEmployeeModel.findOne({ email })
-      .lean()
-      .exec();
-    if (!foundData)
-      return {
-        status: false,
-        message: "Email  Not Found",
-      };
-    if (foundData.isActive === false || foundData.delete === true)
-      return {
-        status: false,
-        message: "Your account is Inactive! Please contact Admin...",
-      };
-    // we have to check if british check endDate other wise check endDate and visaEndDate
-    if (foundData.immigrationType === "British") {
-      if (foundData.endDate < new Date()) {
-        return {
-          status: false,
-          message: "Your EndDate has expired. Please contact Admin...",
-        };
-      }
-    } else {
-      if (
-        foundData.endDate < new Date() ||
-        foundData.visaEndDate < new Date()
-      ) {
-        return {
-          status: false,
-          message: "Your visa has expired. Please contact Admin...",
-        };
-      }
-    }
 
-    // Check Password
-    const isMatch = await isMatchedPassword(password, foundData.password);
-    if (!isMatch)
-      return {
-        status: false,
-        message: "Invalid Password! Try  Again...",
-      };
-    if (foundData?.isSuperAdmin) {
-      foundData["role"] = "superAdmin";
-    } else if (foundData?.isAdmin) {
-      foundData["role"] = "admin";
-    } else {
-      foundData["role"] = "user";
-    }
-    delete foundData["password"];
-    foundData["employeType"] = "OfficeEmploye";
-    // store the login Token in to DB
-    // const token = await storeToken(foundData);
-    // if (token.success) {
-    // foundData["loginToken"] = token.token;
-    return {
-      status: true,
-      data: foundData,
-    };
-    // }
-    // return {
-    //   status: fal,
-    //   data: foundData,
-    // };
-  } catch (error) {
-    console.log(error);
-    return {
-      status: false,
-      message: "Something Went Wrong! Please Try Again...",
-    };
-  }
-};
-
-export const LoginDataNew = async (email, password) => {
-  if (!email || !password)
-    return { status: false, message: "Please provide all details" };
-
-  email = email.trim();
-  password = password.trim();
-
-  await connect();
-
-  // Try OfficeEmployeeModel first
-  let user = await OfficeEmployeeModel.findOne({
-    email,
-    delete: { $ne: true },
-  }).lean();
-  let userType = "office";
-
-  if (!user) {
-    // Then try SiteEmployeeModel
-    user = await EmployeModel.findOne({ email, delete: { $ne: true } }).lean();
-    userType = "site";
-  }
-
-  if (!user) {
-    user = await OfficeUserModel.findOne({
-      email,
-      delete: { $ne: true },
-    }).lean();
-    userType = "reception";
-  }
-
-  // No user found
-  if (!user) {
-    return { status: false, message: "Email not found" };
-  }
-
-  // Check active status
-  if (!user.isActive) {
-    return {
-      status: false,
-      message: "Your account is inactive. Please contact admin.",
-    };
-  }
-
-  // Date/visa checks only for Office Employee
-  if (userType === "office") {
-    if (user.immigrationType === "British") {
-      if (new Date(user.endDate) < new Date()) {
-        return {
-          status: false,
-          message: "Your EndDate has expired. Please contact Admin.",
-        };
-      }
-    } else if (userType === "site") {
-      if (
-        new Date(user.endDate) < new Date() ||
-        new Date(user.visaEndDate) < new Date()
-      ) {
-        return {
-          status: false,
-          message: "Your visa has expired. Please contact Admin.",
-        };
-      }
-    }
-  }
-
-  // Password check
-  const isMatch = await isMatchedPassword(password, user.password);
-  if (!isMatch) {
-    return {
-      status: false,
-      message: "Invalid password. Try again.",
-    };
-  }
-
-  // Set role based on user type
-  if (userType === "office") {
-    if (user.isSuperAdmin) user.role = "superAdmin";
-    else if (user.isAdmin) user.role = "admin";
-    else user.role = "user";
-    // const siteAssignment = await SiteAssignManagerModel.findOne({
-    //   email,
-    //   isActive: true,
-    //   isDelete: false,
-    // });
-    // if (siteAssignment && siteAssignment.projectSiteID) {
-    //   user.siteId = siteAssignment?.projectSiteID;
-    // }
-  } else if (userType === "site") {
-    user.role = "siteEmployee";
-  } else {
-    user.role = "reception";
-    //
-  }
-
-  delete user.password;
-  // Set employeType based on user type
-  user.employeType =
-    userType === "office"
-      ? "OfficeEmployee"
-      : userType === "site"
-      ? "SiteEmployee"
-      : "ReceptionEmployee";
-  // user.employeType = userType === "office" ? "OfficeEmployee" : "SiteEmployee";
-  user.name = user.name || user.firstName || "User";
-  return {
-    status: true,
-    data: user,
-  };
-};
+/**
+ * LoginDataOld and LoginDataNew used to sit here.
+ *
+ * Two earlier credential checks, both dead — nothing in the app, the scripts
+ * or the tests called either — and both still exported from a "use server"
+ * module, which is to say both were still public endpoints that would check a
+ * password for anyone who asked. The throttle added to LoginData below does
+ * nothing for a caller who knocks on a different door, so the doors are gone.
+ * Git has them if the superseded logic is ever wanted.
+ */
 
 /**
  * What to do when one email matches several accounts.
@@ -305,7 +133,10 @@ async function reportDuplicateLogin(email, matches) {
   }
 }
 
-export const LoginData = async (email, password, deviceId) => {
+/**
+ * The credential check itself. Private — see LoginData below for why.
+ */
+const verifyCredentials = async (email, password, deviceId) => {
   if (!email || !password)
     return { status: false, message: "Please provide all details" };
 
@@ -490,6 +321,52 @@ export const LoginData = async (email, password, deviceId) => {
     status: true,
     data: user,
   };
+};
+
+/**
+ * Check someone's password, throttled.
+ *
+ * THE THROTTLE LIVES HERE, not in the caller. It used to sit entirely in the
+ * `authorize()` callback in auth.js: check the limit, call LoginData, record
+ * the failure. But this is an exported "use server" function, which makes it a
+ * public endpoint reachable directly — so auth.js was guarding one of two doors
+ * into the same credential check, and the other one counted nothing and refused
+ * nobody. An unlimited password-guessing oracle, one POST away, for any email
+ * address.
+ *
+ * Moved rather than duplicated: had both layers recorded failures, every real
+ * failed login would have counted twice and locked people out in half the
+ * attempts.
+ *
+ * A wrapper around the implementation rather than edits inside it, because the
+ * check has a dozen separate refusal paths and a throttle that forgets one of
+ * them is not a throttle. `ip` is passed by auth.js, which has the request;
+ * a direct caller supplies nothing and is limited on the email alone.
+ */
+export const LoginData = async (email, password, deviceId, ip = "") => {
+  const rate = await checkLoginRateLimit(email, ip);
+  if (!rate.allowed) {
+    return {
+      status: false,
+      message: "RATE_LIMITED",
+      retryAfterSec: rate.retryAfterSec,
+    };
+  }
+
+  const result = await verifyCredentials(email, password, deviceId);
+
+  if (!result?.status) {
+    // An unrecognised device is a known user on new hardware, handled by the
+    // approval flow — not a guess, so it is not counted as one. Same judgement
+    // auth.js made before this moved.
+    if (result?.message !== "DEVICE_UNAUTHORIZED") {
+      await recordFailedLogin(email, ip);
+    }
+    return result;
+  }
+
+  await clearLoginAttempts(email, ip);
+  return result;
 };
 
 export const isMatchedPassword = async (password, hashword) => {

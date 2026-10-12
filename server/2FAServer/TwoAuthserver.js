@@ -194,7 +194,18 @@ export async function enable2FA(code, secret) {
   }
 }
 
-export async function disable2FA(employeeId, check) {
+/**
+ * NOT exported, deliberately.
+ *
+ * It takes the employeeId to act on from its caller, which is fine for a
+ * private helper and was a hole as an export: every export of a "use server"
+ * module is a public endpoint, so an unauthenticated request naming any
+ * employee id could switch that account's two-factor off and clear its
+ * recovery codes — a platform admin's included. Nothing imported it; its only
+ * caller is onEnableChange() below, which resolves the employee from the
+ * session via existEmployee().
+ */
+async function disable2FA(employeeId, check) {
   try {
     // Turning 2FA off retires the recovery codes with it, so a code printed
     // under the old enrolment can never unlock a later one.

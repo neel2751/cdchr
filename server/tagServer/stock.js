@@ -78,6 +78,15 @@ export async function recordStockMovement({
   note,
   byName,
 } = {}) {
+  // Guarded like every other export here, even though its only caller
+  // (fetchUnitKey in provisioning.js) is already behind the same check. It is
+  // an export of a "use server" module, so it is also its own public endpoint:
+  // unguarded, an anonymous request could write movements for any SKU straight
+  // into the stock ledger, which this function deliberately reaches outside
+  // tenant scope.
+  const auth = await requirePlatformAdmin();
+  if (auth.error) return null;
+
   if (!sku || !delta) return null;
 
   await connect();

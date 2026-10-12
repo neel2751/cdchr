@@ -1,5 +1,18 @@
-"use server";
-
+/**
+ * NOT a "use server" module, deliberately.
+ *
+ * It was one, and every export of a "use server" module is a public HTTP
+ * endpoint — callable directly, so neither the route guard in proxy.js nor a
+ * screen's role list is in the way. None of these check a caller, because none
+ * of them has one: they are helpers for other server code. As actions they
+ * meant an anonymous request could send arbitrary HTML to any address through
+ * ANY company's configured sender (`raw: true` even skips the branded shell),
+ * and could read back any company's feature mailbox and hostnames.
+ *
+ * Nothing imports this from the client, so removing the directive costs no
+ * call site. Do not add it back: if a screen ever needs to send mail, give it
+ * its own action that authorises the caller and then calls in here.
+ */
 import { connect } from "@/db/db";
 import CompanyModel from "@/models/companyModel";
 import EmailAccountModel from "@/models/emailAccountmodel";

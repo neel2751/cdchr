@@ -12,11 +12,6 @@ import { passwordSecurityState } from "@/server/authServer/passwordSecurity";
 import { assertCanSwitchTenant } from "@/server/tenantServer/membershipServer";
 import { activeSupportSession } from "@/server/tenantServer/supportServer";
 import {
-  checkLoginRateLimit,
-  recordFailedLogin,
-  clearLoginAttempts,
-} from "@/lib/rateLimit";
-import {
   LOGIN_ERROR,
   codeForLoginMessage,
   encodeLoginError,
@@ -67,15 +62,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { email, password, deviceId } = credentials;
 
-        // Brute-force protection: block further attempts once this email/IP
-        // pair has exceeded the failed-attempt threshold.
-        const rate = await checkLoginRateLimit(email, ip);
-        if (!rate.allowed) {
-          const minutes = Math.max(1, Math.ceil(rate.retryAfterSec / 60));
-          throw new LoginError(LOGIN_ERROR.RATE_LIMITED, minutes);
-        }
-
-        const response = await LoginData(email, password, deviceId);
+        // Brute-force protection now lives inside LoginData, with the
+        // credential check it is protecting. It had to: LoginData is an
+        // exported "use server" function and therefore a public endpoint, so
+        // throttling it from here left a second, uncounted door into the same
+        // check. The IP travels with the call because only this side has the
+        // request to read it from.
+        const response = await LoginData(email, password, deviceId, ip);
 
         if (!response?.status) {
           if (response?.message === "DEVICE_UNAUTHORIZED") {
@@ -87,14 +80,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             );
           }
 
-          // Count this failure (wrong password, unknown email, etc.) and, once
-          // the threshold is reached, the account/IP will be locked.
-          await recordFailedLogin(email, ip);
+          if (response?.message === "RATE_LIMITED") {
+            const minutes = Math.max(
+              1,
+              Math.ceil((response.retryAfterSec || 60) / 60)
+            );
+            throw new LoginError(LOGIN_ERROR.RATE_LIMITED, minutes);
+          }
+
           throw new LoginError(codeForLoginMessage(response?.message));
         }
-
-        // Successful login — reset the failed-attempt counter.
-        await clearLoginAttempts(email, ip);
 
         // Optional: record where the login came from. Best-effort — a failure
         // to geolocate or to write the session must never block signing in.

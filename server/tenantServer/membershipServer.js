@@ -19,7 +19,15 @@ import { getServerSideProps } from "../session/session";
  */
 
 /** Memberships for an account, newest first, with the company attached. */
-export async function listMembershipsFor(userId) {
+/**
+ * Not exported: it takes the user id to look up from its caller, and reads
+ * TenantMembership and Companie, both of which sit outside tenant scoping. As
+ * an export of a "use server" module it was a public endpoint, so an anonymous
+ * request naming any user id learned every company that account belongs to, by
+ * name. Its callers are in this file (assertCanSwitchTenant and
+ * listMyTenants), which authorise first.
+ */
+async function listMembershipsFor(userId) {
   await connect();
   const rows = await TenantMembershipModel.find({
     userId: createObjectId(userId),
@@ -58,7 +66,7 @@ export async function listMembershipsFor(userId) {
  * Confirm an account may act as a company, and with what role.
  * Returns null when there is no active membership.
  */
-export async function resolveMembership(userId, tenantId) {
+async function resolveMembership(userId, tenantId) {
   if (!isValidObjectId(userId) || !isValidObjectId(tenantId)) return null;
   await connect();
   const row = await TenantMembershipModel.findOne({

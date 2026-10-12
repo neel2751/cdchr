@@ -1,4 +1,14 @@
-"use server";
+/**
+ * NOT a "use server" module, deliberately — see email/tenantMail.js.
+ *
+ * Every export of such a module is a public endpoint, and none of the senders
+ * below authorises anyone: as actions they let an anonymous request send
+ * arbitrary HTML to any address from the platform's own mailbox.
+ *
+ * These predate multi-tenancy and only `sendGlobalMail` and `checkip` still
+ * have a caller (deviceServer.js). Anything that knows its company should go
+ * through sendTenantMail() instead.
+ */
 import { connect } from "@/db/db";
 import nodemailer from "nodemailer";
 import { getServerSideProps } from "../session/session";

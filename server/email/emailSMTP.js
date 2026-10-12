@@ -13,6 +13,30 @@ import {
 import { resolveSmtpHost, smtpConfigError } from "@/lib/smtp";
 
 /**
+ * Mail senders are company-wide credentials, so only a super admin may touch
+ * them.
+ *
+ * Eighteen of the twenty-one actions in this file asked nobody anything. The
+ * /admin/email screens are super-admin-only, but a screen's role list is not a
+ * check — a "use server" export is a public endpoint, reached directly rather
+ * than navigated to, so proxy.js and the menu are both out of the way. Any
+ * signed-in employee could add a sender, re-point an existing one at a mailbox
+ * they controlled, or deactivate the one the company actually uses.
+ *
+ * `testSMTPConnection` was the sharpest: it connects to whatever host and port
+ * its caller names, which as a public endpoint is a way to make this server
+ * knock on arbitrary addresses.
+ */
+async function requireSuperAdmin() {
+  const { props } = await getServerSideProps();
+  if (props?.session?.user?.role !== "superAdmin") {
+    return { success: false, message: "Not authorised" };
+  }
+  return null;
+}
+
+
+/**
  * An SMTP id in whichever form the caller has.
  *
  * The detail URL carries the id encrypted (lib/algo), while the edit form has
@@ -33,6 +57,8 @@ function resolveSmtpId(value) {
 }
 
 export async function addSMTPAdvance(data, smtpId) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   return withTransaction(async (sesssion) => {
     const {
       host,
@@ -122,6 +148,8 @@ export async function addSMTPAdvance(data, smtpId) {
   });
 }
 export async function setPrimarySMTPAdvance(smtpId, feature) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     if (!smtpId || !feature) {
       return { success: false, message: "smtpId and feature are required" };
@@ -265,6 +293,8 @@ export async function getUsedEmailFeatures() {
 }
 
 export async function updateSMTPStatusAdvance(smtpId, updateFields) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     if (!smtpId) {
       return { success: false, message: "SMTP ID is required" };
@@ -311,6 +341,8 @@ export async function updateSMTPStatusAdvance(smtpId, updateFields) {
   }
 }
 export async function updateSMTPAdvance(smtpId, data) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   if (!smtpId || !data) {
     return { success: false, message: "SMTP ID and data are required" };
   }
@@ -411,6 +443,8 @@ export async function updateSMTPAdvance(smtpId, data) {
   }
 }
 export async function updateSMTPPassword(newData) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   const { id: smtpId, newPassword } = newData;
 
   try {
@@ -458,6 +492,8 @@ export async function updateSMTPPassword(newData) {
   }
 }
 export async function getPrimarySMTPAdvance() {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const primarySMTP = await EmailAccountModel.findOne({
       isPrimary: true,
@@ -480,6 +516,8 @@ export async function getPrimarySMTPAdvance() {
   }
 }
 export async function testSMTPEmailAdvance(smtpId) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const smtp = await EmailAccountModel.findById(smtpId);
     if (!smtp) {
@@ -511,6 +549,7 @@ export async function testSMTPEmailAdvance(smtpId) {
   }
 }
 export async function getSMTPForFeature(feature) {
+  if (await requireSuperAdmin()) return null;
   await connect();
   // Prefer the account marked primary for this feature.
   let smtp = await EmailAccountModel.findOne({
@@ -589,6 +628,8 @@ export async function getOneSMTPEmail(smtpId) {
   }
 }
 export async function testSMTPConnection(smtp) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const data = {
       host: resolveSmtpHost(smtp),
@@ -614,6 +655,8 @@ export async function testSMTPConnection(smtp) {
   }
 }
 export async function addSMTP(data) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const { host, userName, password, port, icon } = data;
 
@@ -648,6 +691,8 @@ export async function addSMTP(data) {
   }
 }
 export async function setPrimarySMTP(smtpId) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     // First, set all SMTPs to not primary
     await EmailAccountModel.updateMany({}, { isPrimary: false });
@@ -670,6 +715,8 @@ export async function setPrimarySMTP(smtpId) {
   }
 }
 export async function getAllSMTPs() {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const smtps = await EmailAccountModel.find({ isDeleted: false }).sort({
       createdAt: -1,
@@ -681,6 +728,8 @@ export async function getAllSMTPs() {
   }
 }
 export async function updateSMTPstatus(smtpId, status) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const updatedSMTP = await EmailAccountModel.findByIdAndUpdate(
       smtpId,
@@ -699,6 +748,8 @@ export async function updateSMTPstatus(smtpId, status) {
   }
 }
 export async function deleteSMTP(smtpId) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const deletedSMTP = await EmailAccountModel.findByIdAndUpdate(
       smtpId,
@@ -717,6 +768,8 @@ export async function deleteSMTP(smtpId) {
   }
 }
 export async function updateSMTP(smtpId, data) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const { host, userName, password, port, icon } = data;
 
@@ -763,6 +816,8 @@ export async function updateSMTP(smtpId, data) {
   }
 }
 export async function getPrimarySMTP() {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const primarySMTP = await EmailAccountModel.findOne({
       isPrimary: true,
@@ -779,6 +834,8 @@ export async function getPrimarySMTP() {
   }
 }
 export async function testSMTPEmil(smtpId) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const smtp = await EmailAccountModel.findById(smtpId);
     if (!smtp) {
@@ -834,6 +891,8 @@ export async function testSMTPEmil(smtpId) {
   }
 }
 export async function userRegisterEmail(smtp) {
+  const denied = await requireSuperAdmin();
+  if (denied) return denied;
   try {
     const data = {
       host: resolveSmtpHost(smtp),

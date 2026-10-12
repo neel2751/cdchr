@@ -1,4 +1,14 @@
-"use server";
+/**
+ * NOT a "use server" module, deliberately.
+ *
+ * `sendMail` takes the host, port, username and password to connect with from
+ * its caller — which is right for an internal transport helper and
+ * indefensible for a public endpoint, which is what a "use server" export is.
+ * It let an anonymous request open an SMTP connection from this server to any
+ * host and port it named, and send whatever it liked through it.
+ *
+ * Only server code imports this. Keep it that way.
+ */
 import nodemailer from "nodemailer";
 
 export async function sendMail(data) {

@@ -23,7 +23,10 @@ export async function POST(req) {
   }
 
   try {
-    const results = await expireCarryForwardForAllTenants();
+    // The secret travels on, because the sweep is an exported server action and
+    // so is reachable without going through this route at all. Checking it here
+    // only protects this door; the job has to check it too.
+    const results = await expireCarryForwardForAllTenants({ secret });
     return NextResponse.json({ success: true, results });
   } catch (error) {
     console.error("[leave-carry-expiry] route error:", error);
