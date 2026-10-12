@@ -173,38 +173,61 @@ export default function WorkHoursSettings() {
               />
             </div>
 
-            {/* Only asked once the answer matters. The three gov.uk lists are
-                genuinely different — Scotland takes 2 January and not Easter
-                Monday — so a company on the wrong one is told to work days it
-                is closed and charged for days it is not. */}
-            {observes ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="bankHolidayRegion">
-                  Which bank holidays do you follow?
-                </Label>
-                <Select
-                  value={region}
-                  disabled={isPending}
-                  onValueChange={setRegion}
-                >
-                  <SelectTrigger id="bankHolidayRegion" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BANK_HOLIDAY_REGIONS.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-neutral-500">
-                  The published lists differ by nation. Scotland has 2 January
-                  and St Andrew&apos;s Day but not Easter Monday; Northern
-                  Ireland adds St Patrick&apos;s Day and the Twelfth.
-                </p>
-              </div>
-            ) : null}
+            {/* Shown always, disabled until it applies, rather than hidden
+                until then.
+
+                It used to render only when the switch above was on, and the
+                switch defaults to off — so for a company that had never
+                enabled it, the only place in the product that names Scotland
+                or Northern Ireland was a tab strip in Leave that changes
+                nothing. The capability was invisible to exactly the people who
+                needed to find it. A control that is present and greyed out
+                says "this exists, and here is what turns it on"; a control
+                that is absent says nothing at all.
+
+                The three gov.uk lists are genuinely different — Scotland takes
+                2 January and not Easter Monday — so a company on the wrong one
+                is told to work days it is closed and charged for days it is
+                not. */}
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="bankHolidayRegion"
+                className={observes ? undefined : "text-neutral-400"}
+              >
+                Which bank holidays do you follow?
+              </Label>
+              <Select
+                value={region}
+                disabled={isPending || !observes}
+                onValueChange={setRegion}
+              >
+                <SelectTrigger id="bankHolidayRegion" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BANK_HOLIDAY_REGIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-neutral-500">
+                {observes ? (
+                  <>
+                    The published lists differ by nation. Scotland has 2 January
+                    and St Andrew&apos;s Day but not Easter Monday; Northern
+                    Ireland adds St Patrick&apos;s Day and the Twelfth.
+                  </>
+                ) : (
+                  <>
+                    Turn on &ldquo;Close on UK bank holidays&rdquo; above to
+                    choose a nation. Until then every bank holiday is an
+                    ordinary working day, whichever list you pick.
+                  </>
+                )}
+              </p>
+            </div>
 
             <Button disabled={isPending} onClick={() => mutate()}>
               {isPending ? (

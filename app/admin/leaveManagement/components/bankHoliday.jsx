@@ -21,6 +21,8 @@ import { format, getYear, isPast } from "date-fns";
 import { StarIcon } from "lucide-react";
 import Image from "next/image";
 import React from "react";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
 
 export const BankHoliday = ({ className }) => {
   // Which list is being *looked at*. Purely a view control: it starts on the
@@ -29,6 +31,8 @@ export const BankHoliday = ({ className }) => {
   // setting that decides whether the office closes — and which list the leave
   // engine charges against — lives in Settings and is untouched by this.
   const { observes, region: configuredRegion } = useBankHolidayRule();
+  const { data: session } = useSession();
+  const isSuperAdmin = session?.user?.role === "superAdmin";
   const [viewRegion, setViewRegion] = React.useState(null);
   const region = viewRegion ?? configuredRegion;
   // Viewing a nation that is not this company's. The cards are tinted for it so
@@ -55,29 +59,74 @@ export const BankHoliday = ({ className }) => {
   }, {});
 
 
+  /**
+   * What the company is actually set to, and where that is decided.
+   *
+   * The caption above says switching a tab changes nothing, which is true and
+   * was not enough: somebody looking for how to follow Scotland was told what
+   * does not work and never told what does. Three nations are on screen as
+   * tabs, so the screen reads like the place the choice is made.
+   *
+   * The link is only offered to a super admin, because Attendance Settings is
+   * theirs alone (data/menu.js) — sending an admin to /unauthorized would be a
+   * worse answer than naming the screen in words.
+   */
+  const configuredLabel = BANK_HOLIDAY_REGIONS.find(
+    (r) => r.value === configuredRegion
+  )?.label;
+
+  const whereItIsSet = (
+    <p className="text-xs text-muted-foreground">
+      Your company follows{" "}
+      <span className="text-foreground font-medium">{configuredLabel}</span>
+      {observes ? "" : ", and works bank holidays rather than closing"}.{" "}
+      {isSuperAdmin ? (
+        <>
+          Change it in{" "}
+          <Link
+            href="/admin/clockSettings"
+            className="text-indigo-600 hover:underline"
+          >
+            Attendance Settings
+          </Link>{" "}
+          under Working Time.
+        </>
+      ) : (
+        <>
+          A super admin can change it in Attendance Settings, under Working
+          Time.
+        </>
+      )}
+    </p>
+  );
+
   // Rendered on every branch below — including the loading, error and empty
   // states. A switcher that disappears when a list fails to load would strand
   // whoever used it to get there.
   const regionSwitcher = (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <Tabs value={region} onValueChange={setViewRegion}>
-        <TabsList>
-          {BANK_HOLIDAY_REGIONS.map((r) => (
-            <TabsTrigger key={r.value} value={r.value} className="text-xs">
-              {r.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-      <p className="text-xs text-muted-foreground">
-        {region === configuredRegion
-          ? observes
-            ? "The days your company is closed."
-            : "For reference — your company works bank holidays, so these are ordinary working days."
-          : "Viewing another nation's dates. This does not change your settings."}
-      </p>
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Tabs value={region} onValueChange={setViewRegion}>
+          <TabsList>
+            {BANK_HOLIDAY_REGIONS.map((r) => (
+              <TabsTrigger key={r.value} value={r.value} className="text-xs">
+                {r.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        <p className="text-xs text-muted-foreground">
+          {region === configuredRegion
+            ? observes
+              ? "The days your company is closed."
+              : "For reference — your company works bank holidays, so these are ordinary working days."
+            : "Viewing another nation's dates. This does not change your settings."}
+        </p>
+      </div>
+      {whereItIsSet}
     </div>
   );
+
 
   if (isLoading) {
     return (
