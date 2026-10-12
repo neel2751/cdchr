@@ -15,6 +15,10 @@ import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/** The site staff list, read only by /admin/employee and its leavers screen. */
+const STAFF_LIST = ["/admin/employee", "/admin/previousEmployee"];
 
 // The form only asks for a country when the employee is not British.
 /**
@@ -81,6 +85,9 @@ const stripRightToWorkFields = ({
 }) => rest;
 
 export const getAllEmployees = async (filterData) => {
+  const denied = await permissionRefusal(STAFF_LIST);
+  if (denied) return denied;
+
   const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
   // const searchRegex = new RegExp(sanitizedSearch, "i"); // Create a case-ins ensitive regex
   const validPage = parseInt(filterData?.page || 1);

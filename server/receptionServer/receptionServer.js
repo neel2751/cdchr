@@ -403,6 +403,17 @@ export async function checkPassword(password) {
 
 // fetch user by email
 export async function getReceptionUserByEmail(email) {
+  // Only about yourself. Its one caller, /api/reception/check-active, already
+  // passes `session.user.email` — it asks "is my own account still active?".
+  // Taking the address from the caller instead made it an existence oracle for
+  // any email, answerable by anyone with a session.
+  const { props } = await getServerSideProps();
+  const me = props?.session?.user?.email;
+  if (!me) return { success: false, message: "Not signed in" };
+  if (!email || String(email).toLowerCase() !== String(me).toLowerCase()) {
+    return { success: false, message: "You can only check your own account" };
+  }
+
   try {
     await connect();
     const userData = await OfficeUserModel.findOne({

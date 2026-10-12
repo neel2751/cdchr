@@ -21,8 +21,23 @@ import mongoose from "mongoose";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { createObjectId } from "@/lib/mongodb";
 import FormTemplateModel from "@/models/formTemplateModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * The shared dropdown sources. Guarded as "administers something" rather than
+ * against a list of paths: these appear on a dozen admin screens, one of them
+ * through components/filters/selectFilter, and a path list would break a
+ * screen the day somebody reuses that component. See permissionRefusal().
+ *
+ * The employee pickers are the ones that matter — unguarded, any signed-in
+ * account could enumerate every colleague's name and id.
+ */
+const ADMINISTERS_SOMETHING = { anyPermission: true };
 
 export const getSelectRoleType = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     // we have to create index on roleTypeModel
@@ -83,6 +98,9 @@ export const getSelectProjects = async () => {
 };
 
 export const getAllProjects = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     const roles = await ProjectSiteModel.aggregate([
@@ -118,6 +136,9 @@ export const getAllProjects = async () => {
 };
 
 export const getEmployeeAssignedProjects = async (employeeId) => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     const assignSite = await SiteAssignManagerModel.aggregate([
@@ -169,6 +190,9 @@ export const getEmployeeAssignedProjects = async (employeeId) => {
 };
 
 export const getSelectOfficeEmployee = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     const now = new Date();
@@ -225,6 +249,9 @@ export const getSelectOfficeEmployee = async () => {
  * staff — picking an office employee there would always return nothing.
  */
 export const getSelectSiteEmployee = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     const employees = await EmployeModel.aggregate([
@@ -247,6 +274,9 @@ export const getSelectSiteEmployee = async () => {
 };
 
 export const getSelectEmployee = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     // await connect();
     const employee = await EmployeModel.aggregate(
@@ -351,6 +381,9 @@ export const getSelectCompanies = async () => {
 };
 
 export const getSelectAttendanceCategory = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     const categories = await AttendanceCategoryModel.aggregate([
       {
@@ -454,6 +487,9 @@ export const getEmployeeMenu = async () => {
 // };
 
 export const getSelectLeaveCategories = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     const leaveTypes = await LeaveCategoryModel.aggregate([
       {
@@ -560,6 +596,9 @@ export const getSelectLeaveRequestForEmployee = async () => {
 // module a company's plan can exclude.
 
 export const getSelectFormTemplates = async () => {
+  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
+  if (denied) return denied;
+
   try {
     await connect();
     const templates = await FormTemplateModel.aggregate([

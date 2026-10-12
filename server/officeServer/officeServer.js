@@ -38,6 +38,17 @@ import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getServerSideProps } from "../session/session";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * The office staff list and its headcount, both read only by
+ * /admin/officeEmployee. Unguarded, the list itself — names, emails, job
+ * titles, start dates — was readable by any signed-in account.
+ *
+ * The leavers screen is included because it is the same list seen through a
+ * different filter, and someone granted one is granted the records.
+ */
+const STAFF_LIST = ["/admin/officeEmployee", "/admin/previousOfficeEmployee"];
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
 import {
   getEmployeeManageAccess,
@@ -324,6 +335,9 @@ export const handleOfficeEmployee = withAudit(
 );
 
 export const getOfficeEmployee = async (filterData) => {
+  const denied = await permissionRefusal(STAFF_LIST);
+  if (denied) return denied;
+
   try {
     await connect();
     const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
@@ -913,6 +927,9 @@ export const getSuperAdmins = async () => {
  * @param {{ company?: string }} [filter]
  */
 export const countCompanyWiseEmployees = async (filter) => {
+  const denied = await permissionRefusal(STAFF_LIST);
+  if (denied) return denied;
+
   try {
     await connect();
 
