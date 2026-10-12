@@ -22,9 +22,15 @@ const roleBasedSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Menu PATHS, not menu names: "/admin/officeEmployee", not "Office
+    // Management". The comment here said names for a long time and the stored
+    // data never did — proxy.js matches `menuItem.path` against this list, and
+    // so do lib/employeeAccess.js and lib/actionAccess.js. A reader who
+    // believed the comment and wrote a name would have built a permission that
+    // grants nothing and silently refuses everyone.
     permissions: [
       {
-        type: String, // Store menu names directly (e.g., "Office Management")
+        type: String,
         required: true,
       },
     ],

@@ -1,5 +1,15 @@
-"use server";
-
+/**
+ * NOT a "use server" module, deliberately — and nothing imports it at all.
+ *
+ * Every export here is unreferenced: no screen, no server module, no script.
+ * They were still public endpoints, and two of them write and delete
+ * attendance, which is what payroll is calculated from. A door nobody uses is
+ * still a door.
+ *
+ * Left in place rather than deleted because that is a product call, not a
+ * security one — but as far as the running application is concerned this file
+ * is dead and could go.
+ */
 import AttendanceModel from "@/models/attendanceModel";
 import EmployeModel from "@/models/employeModel";
 import { parseISO, startOfDay } from "date-fns";

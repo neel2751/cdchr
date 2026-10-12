@@ -1,8 +1,24 @@
 "use server";
 
 import RoleTypesModel from "@/models/roleTypeModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * Departments. Reached only from /admin/roleType, which the sidebar shows to
+ * super admins — and the sidebar is not a check: every action below was
+ * callable by any signed-in employee, so one could rename or delete the
+ * departments the whole company's employee records are filed against.
+ *
+ * `delete` here is a soft delete, but OfficeEmploye.department is required, so
+ * retiring one out from under the records that point at it is still a mess
+ * somebody has to unpick by hand.
+ */
+const OWNS = ["/admin/roleType"];
 
 export async function getRoleTypes(filterData) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     const sanitizedSearch = filterData?.query?.trim() || ""; // Ensure search is a string
     // const searchRegex = new RegExp(sanitizedSearch, "i"); // Create a case-ins ensitive regex
@@ -33,6 +49,9 @@ export async function getRoleTypes(filterData) {
 }
 
 export const handleRoleType = async (roleData, id) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   if (!roleData) return { success: false, message: "No Data Provided" };
   try {
     if (id) {
@@ -72,6 +91,9 @@ export const handleRoleType = async (roleData, id) => {
 };
 
 export const roletypeStatus = async (data) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   try {
     const id = data?.id;
@@ -88,6 +110,9 @@ export const roletypeStatus = async (data) => {
 };
 
 export const roletypeDelete = async (data) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   try {
     const id = data?.id;

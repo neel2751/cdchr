@@ -5,6 +5,23 @@ import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import ClockLocationModel from "@/models/clockLocationModel";
 import ProjectSiteModel from "@/models/siteProjectModel";
 import { featureRefusal } from "@/lib/requireFeature";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * Project sites. Maintained on /admin/siteProject, which the sidebar shows to
+ * super admins only — and the sidebar guards the page, not the action behind
+ * its buttons. Any signed-in employee could rename, deactivate or delete the
+ * sites that every site assignment and clock record is filed against.
+ */
+const OWNS = ["/admin/siteProject"];
+
+/**
+ * getSiteById is read by the Assign Site screen too, through
+ * siteAssignServer.handleSiteAssignManager, so it accepts either. Narrowing it
+ * to the sites screen alone would refuse somebody who legitimately holds
+ * assignment but not site maintenance.
+ */
+const OWNS_OR_ASSIGN = ["/admin/siteProject", "/admin/siteAssign"];
 
 // Every export here is a POST endpoint. proxy.js keeps a company without the
 // module off /admin/siteProject, but that is navigation only — these were
@@ -12,6 +29,9 @@ import { featureRefusal } from "@/lib/requireFeature";
 
 // # THIS IS THE WORKING ON THE NEW VERSION
 export const searchSiteProjectByKeywordNew = async (filterData) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
   try {
@@ -125,6 +145,9 @@ async function siteNameTaken(name, exceptId = null) {
 
 // # UPDATE A SPECIFIC SITE PROJECT INFORMATION BY ID
 export const updateSiteProjectById = async (data, id) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
   try {
@@ -195,6 +218,9 @@ export const updateSiteProjectById = async (data, id) => {
 };
 
 export const getSiteById = async (siteId) => {
+  const denied = await permissionRefusal(OWNS_OR_ASSIGN);
+  if (denied) return denied;
+
   console.log("Site Id", siteId);
   if (!siteId) return { success: false, message: "Site Id is required." };
   const refusal = await featureRefusal("siteProjects");
@@ -212,6 +238,9 @@ export const getSiteById = async (siteId) => {
 };
 
 export const siteProjectStatus = async (data) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
@@ -234,6 +263,9 @@ export const siteProjectStatus = async (data) => {
 };
 
 export const siteProjectDelete = async (data) => {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;

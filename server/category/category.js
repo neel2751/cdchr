@@ -5,10 +5,32 @@ import { currentLeaveYear } from "@/lib/leaveYear";
 import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import LeaveCategoryModel from "@/models/leaveCategoryModel";
+import { permissionRefusal } from "@/lib/actionAccess";
 
+/**
+ * The screens these categories belong to.
+ *
+ * Leave types are maintained on Leave Management; the attendance categories a
+ * rota is built from are maintained on Weekly Rota (components/addCategory).
+ * Split rather than pooled so holding one screen does not hand over the other:
+ * they are different settings, granted separately.
+ *
+ * Until now neither asked. A leave type carries the entitlement rules every
+ * employee's allowance is calculated from, so any signed-in account could
+ * retire the company's annual-leave type or quietly change what it is worth.
+ */
+const OWNS_LEAVE = ["/admin/leaveManagement"];
+const OWNS_ROTA = ["/admin/weeklyRota"];
+
+// Never implemented and never called — an empty body returning undefined.
+// Left as a stub rather than quietly given a guard, because guarding a
+// function that does nothing only makes it look finished.
 export async function getAttendanceCategories(filterData) {}
 
 export async function handleAttendanceCategory(data, id) {
+  const denied = await permissionRefusal(OWNS_ROTA);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "No data provided" };
   try {
     await connect();
@@ -43,6 +65,9 @@ export async function handleAttendanceCategory(data, id) {
   }
 }
 export async function fetchLeaveCategory() {
+  const denied = await permissionRefusal(OWNS_LEAVE);
+  if (denied) return denied;
+
   try {
     await connect();
     const leaveCategories = await LeaveCategoryModel.find({
@@ -58,6 +83,9 @@ export async function fetchLeaveCategory() {
 }
 
 export async function handleLeaveCategory(data, id) {
+  const denied = await permissionRefusal(OWNS_LEAVE);
+  if (denied) return denied;
+
   // we have to make this session because if anything happen so we have to do maunally
   // To do make a session with transaction
 
@@ -173,6 +201,9 @@ export async function handleLeaveCategory(data, id) {
 }
 
 export const leaveCategoryStatus = async (data) => {
+  const denied = await permissionRefusal(OWNS_LEAVE);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   try {
     const id = data?.id;
@@ -189,6 +220,9 @@ export const leaveCategoryStatus = async (data) => {
 };
 
 export const leaveCategoryDelete = async (data) => {
+  const denied = await permissionRefusal(OWNS_LEAVE);
+  if (denied) return denied;
+
   if (!data) return { success: false, message: "Not found" };
   try {
     const id = data?.id;

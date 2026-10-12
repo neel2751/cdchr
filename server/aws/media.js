@@ -1,5 +1,18 @@
-"use server";
-
+/**
+ * NOT a "use server" module, deliberately.
+ *
+ * Media rows are HR documents — contracts, right-to-work evidence, profile
+ * images. Only server code imports this (profileImageServer, qrServer), yet
+ * every function was an export of a "use server" module and therefore a public
+ * endpoint: deleteMediaById and getMediaById took an id from the caller and
+ * had no check at all, and getMediaById/deleteMediaById/getAllMedia have no
+ * caller anywhere — three doors onto other people's documents that nothing
+ * walks through.
+ *
+ * Tenant enforcement stops a signed-out caller and stops reaching another
+ * company's rows; it says nothing about which employee of a company may
+ * delete whose document. Not being an endpoint does.
+ */
 import { connect } from "@/db/db";
 import MediaModel from "@/models/document/mediaModel";
 
