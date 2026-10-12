@@ -9,6 +9,10 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { decrypt } from "@/lib/algo";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { withAudit, recordAudit } from "@/lib/audit";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/** The rota table on /admin/weeklyRota. */
+const OWNS_ROTA = ["/admin/weeklyRota"];
 
 // Future to need this function for the Approved and Rejected rota right now this feature is not implemented
 export async function handleWeeklyRota(data, weekStartDate, weekId) {
@@ -236,6 +240,9 @@ function summarizeRotaChange(before, after) {
  Step:4 Sort the date wise
 */
 export async function getWeeklyRotaForSuperAdmin(filterData) {
+  const denied = await permissionRefusal(OWNS_ROTA);
+  if (denied) return denied;
+
   try {
     const validPage = Number.isInteger(parseInt(filterData?.page))
       ? parseInt(filterData.page)

@@ -20,6 +20,19 @@ import { featureRefusal } from "@/lib/requireFeature";
 import { toDayKey } from "@/lib/bankHolidays";
 import { getWorkSettings } from "../settingsServer/workSettings";
 import { getBankHolidays } from "../holidayServer/holidayServer";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * fetchFilterClockRecordData backs /admin/filterAttendance — everybody's clock
+ * records for a date range, which any signed-in account could read.
+ *
+ * The three fetchClockRecordsTest* / fetchAssignedWithClocksNew readers above
+ * are deliberately NOT guarded: app/hr/employeeScan and the employee portal's
+ * generateCode both call them, so the scanner works for reception and for the
+ * employee doing the scanning. The honest bar there is a session, which tenant
+ * enforcement already supplies.
+ */
+const OWNS_FILTER = ["/admin/filterAttendance"];
 
 // Assign or update today's site assignment
 export const assignEmployeesToSite = withAudit(
@@ -1539,6 +1552,9 @@ export async function fetchFilterClockRecordData({
   query = null,
   paymentType = null,
 }) {
+  const denied = await permissionRefusal(OWNS_FILTER);
+  if (denied) return denied;
+
   await connect();
 
   const today = getWorkingDate();

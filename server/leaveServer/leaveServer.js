@@ -10,6 +10,15 @@ import { currentLeaveYear, resolveLeaveYear } from "@/lib/leaveYear";
 import { createObjectId } from "@/lib/mongodb";
 import { decrypt } from "@/lib/algo";
 import { resolveEmployeeTarget } from "@/lib/employeeAccess";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * isDateOverLapping is kept exported (see the note below on why it survived
+ * the deletions) but guarded: it takes an employeeId and reports whether that
+ * person already has leave over a date range, which is an answer about a
+ * colleague's whereabouts.
+ */
+const OWNS_LEAVE = ["/admin/leaveManagement"];
 
 /** decrypt() throws on a malformed token; a bad slug should just mean "me". */
 function safeDecryptId(value) {
@@ -268,7 +277,11 @@ export async function getEmployeeLeaveData(input) {
  *   and a calendar year number matches nothing.
  * @param {boolean} [server] return the document itself rather than JSON.
  */
-export async function getLeaveData(employeeId, leaveYear, server) {
+/**
+ * Not exported. Used only by fetchCommonLeave above, in this file — it was an
+ * endpoint that took an employeeId and returned that person's leave balances.
+ */
+async function getLeaveData(employeeId, leaveYear, server) {
   try {
     const data = await CommonLeaveModel.findOne({ employeeId, leaveYear });
     if (data)
@@ -314,6 +327,9 @@ export async function getLeaveData(employeeId, leaveYear, server) {
 // has no caller at the moment.
 
 export async function isDateOverLapping(employeeId, data, id) {
+  const denied = await permissionRefusal(OWNS_LEAVE);
+  if (denied) return denied;
+
   try {
     await connect();
     const requestId = id && { _id: { $ne: new mongoose.Types.ObjectId(id) } };

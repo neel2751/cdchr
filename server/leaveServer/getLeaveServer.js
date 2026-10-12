@@ -19,6 +19,10 @@ import { normalizeDateToUTC } from "@/lib/formatDate";
 import { getLeaveSettings } from "../leaveSettingServer";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { withAudit, recordAudit } from "@/lib/audit";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/** The holiday planner, on Leave Management's settings. */
+const OWNS_PLANNER = ["/admin/leaveManagement"];
 
 export async function getLeaveRequestData(leaveYear) {
   try {
@@ -1252,6 +1256,9 @@ function toUtcRangeBound(value) {
 }
 
 export async function holidayPlannerNew({ startDate, endDate }) {
+  const denied = await permissionRefusal(OWNS_PLANNER);
+  if (denied) return denied;
+
   await connect();
   const leaves = await LeaveRequestModel.find({
     leaveStatus: "Approved",

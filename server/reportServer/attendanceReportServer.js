@@ -3,8 +3,20 @@
 import { connect } from "@/db/db";
 import { createObjectId } from "@/lib/mongodb";
 import ClockRecordModel from "@/models/clockInModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * The reporting screens under /admin/report. There is no menu entry for them,
+ * so proxy.js finds no menu item and sends everyone but a super admin to the
+ * dashboard — super-admin-only in practice, which is what this reproduces.
+ * These return every employee's attendance or leave for a date range.
+ */
+const OWNS = ["/admin/report"];
 
 export async function getAttendanceReportData(params) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   let query = { isDeleted: false };
   if (params) {
     const { startDate, endDate, employeeId, leaveYear } = params;

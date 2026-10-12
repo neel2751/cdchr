@@ -3,7 +3,8 @@
 import AttendanceModel from "@/models/attendanceModel";
 import mongoose from "mongoose";
 
-export async function getAssignSiteData(filterData) {
+/** Not exported: no caller anywhere. */
+async function getAssignSiteData(filterData) {
   const siteQuery = filterData?.siteId ? { siteId: filterData.siteId } : {};
   const monthQuery = filterData?.month
     ? { $expr: { $eq: [{ $month: "$attendanceDate" }, filterData.month] } }
@@ -121,7 +122,8 @@ export async function getAssignSiteData(filterData) {
   }
 }
 
-export async function getEmployeeAttendanceData(filterData) {
+/** Not exported: no caller anywhere. */
+async function getEmployeeAttendanceData(filterData) {
   const siteId = filterData?.siteId;
   const month = filterData?.month;
 

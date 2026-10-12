@@ -387,7 +387,11 @@ export const archiveClockLocation = withAudit(
 );
 
 /** Sites that do not have a location yet — what the "add" picker offers. */
-export async function getSitesWithoutLocation() {
+/**
+ * Not exported: no caller anywhere. It listed the sites with no clock location
+ * configured, which is a map of where the company works.
+ */
+async function getSitesWithoutLocation() {
   try {
     await connect();
     const [sites, locations] = await Promise.all([

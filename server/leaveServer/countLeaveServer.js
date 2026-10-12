@@ -589,7 +589,11 @@ export async function storeCommonLeaveNew(joinDate, dayPerWeek, employeeId) {
  *   and a calendar year number matches nothing.
  * @param {boolean} [server] return the document itself rather than JSON.
  */
-export async function getLeaveData(employeeId, leaveYear, server) {
+/**
+ * Not exported. Used only within this file (syncLeaveAllEmployees...), and as
+ * an endpoint it returned any employee's leave balances to any caller.
+ */
+async function getLeaveData(employeeId, leaveYear, server) {
   try {
     const data = await CommonLeaveModel.findOne({ employeeId, leaveYear });
     if (data)

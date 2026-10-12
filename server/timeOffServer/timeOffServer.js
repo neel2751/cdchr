@@ -745,7 +745,11 @@ export async function fetchLiveOfficeClock({
   - Fetch that single employee with their latest ClockRecord
   - If no employeeId, fetch all employees from both collections, attach latest ClockRecord, merge results, and paginate in JS
  */
-export async function fetchLiveClockRecords({
+/**
+ * Not exported: nothing calls it, and as an export of a "use server" module it
+ * was a public endpoint returning live clock records.
+ */
+async function fetchLiveClockRecords({
   siteId = null,
   employeeId = null,
   fromDate = null,

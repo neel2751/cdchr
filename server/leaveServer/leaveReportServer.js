@@ -2,8 +2,15 @@
 
 import { connect } from "@/db/db";
 import LeaveRequestModel from "@/models/leaveRequestModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/** The leave report on /admin/leaveManagement. */
+const OWNS = ["/admin/leaveManagement"];
 
 export async function getDepartmentWiseLeaveCount() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const pipeline = [
@@ -83,6 +90,9 @@ export async function getDepartmentWiseLeaveCount() {
 }
 
 export async function getMonthWiseLeaveCount() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const pipeline = [
@@ -145,6 +155,9 @@ export async function getMonthWiseLeaveCount() {
 }
 
 export async function getMonthWiseLeaveCountWithType() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const pipeline = [
