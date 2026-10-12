@@ -189,16 +189,27 @@ export default function WorkHoursSettings() {
                 2 January and not Easter Monday — so a company on the wrong one
                 is told to work days it is closed and charged for days it is
                 not. */}
+            {/* Always editable, and not conditional on the switch above.
+
+                Where a company operates is a FACT about it, not a consequence
+                of whether it closes. Gating the question on the closing policy
+                told a Scottish company that works bank holidays it had no
+                nation to state — and it does, because this setting still does
+                something with the switch off: it decides which nation's
+                calendar the Leave screen shows as reference. Staff in Glasgow
+                ask for 2 January; Easter Monday is an ordinary day there. A
+                setting that has an effect must not be disabled.
+
+                It also means the answer is already right on the day somebody
+                turns closing on, instead of being asked for at the one moment
+                it changes everybody's balance. */}
             <div className="space-y-1.5">
-              <Label
-                htmlFor="bankHolidayRegion"
-                className={observes ? undefined : "text-neutral-400"}
-              >
+              <Label htmlFor="bankHolidayRegion">
                 Which bank holidays do you follow?
               </Label>
               <Select
                 value={region}
-                disabled={isPending || !observes}
+                disabled={isPending}
                 onValueChange={setRegion}
               >
                 <SelectTrigger id="bankHolidayRegion" className="w-full">
@@ -213,17 +224,21 @@ export default function WorkHoursSettings() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-neutral-500">
+                The published lists differ by nation. Scotland has 2 January and
+                St Andrew&apos;s Day but not Easter Monday; Northern Ireland
+                adds St Patrick&apos;s Day and the Twelfth.
+              </p>
+              <p className="text-xs text-neutral-500">
                 {observes ? (
                   <>
-                    The published lists differ by nation. Scotland has 2 January
-                    and St Andrew&apos;s Day but not Easter Monday; Northern
-                    Ireland adds St Patrick&apos;s Day and the Twelfth.
+                    These are the days your office is closed, and they are
+                    removed from leave requests rather than deducted.
                   </>
                 ) : (
                   <>
-                    Turn on &ldquo;Close on UK bank holidays&rdquo; above to
-                    choose a nation. Until then every bank holiday is an
-                    ordinary working day, whichever list you pick.
+                    Set this whether or not you close. With closing off these
+                    are ordinary working days, but it is still the calendar the
+                    Leave screen shows you for reference.
                   </>
                 )}
               </p>
