@@ -15,7 +15,7 @@ import CompanyModel from "@/models/companyModel";
 import TagOrderModel from "@/models/tagOrderModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
-import { recordStockMovement } from "./stock";
+import { recordStockMovement, releaseReservedUnit } from "./stock";
 import { normaliseUid } from "../clockServer/clockTagStore";
 import { getServerSideProps } from "../session/session";
 
@@ -231,6 +231,19 @@ export async function fetchUnitKey({ orderNumber, index } = {}) {
         byName: auth.user.name,
       }).catch((error) =>
         console.log("Could not record stock for a key issue:", error?.message),
+      );
+
+      // The promise is now kept, so stop counting it as one. This unit has
+      // just come off the shelf in the movement above; leaving the reservation
+      // standing would subtract it twice and quietly tell the next customer we
+      // hold less than we do.
+      //
+      // Same rule as that movement: never allowed to fail the fetch. The
+      // operator is at the bench with the chip in their hand, and
+      // recountReservations() in stock.js repairs the counter if this is the
+      // write that was lost.
+      await releaseReservedUnit(sku).catch((error) =>
+        console.log("Could not release a reservation:", error?.message),
       );
     }
 

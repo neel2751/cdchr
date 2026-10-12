@@ -6,6 +6,7 @@ import { logAuditDirect } from "@/lib/audit";
 import TagOrderModel from "@/models/tagOrderModel";
 import TagProductModel from "@/models/tagProductModel";
 import TagStockMovementModel from "@/models/tagStockModel";
+import { availableUnits } from "@/lib/tagStock";
 import { getServerSideProps } from "../session/session";
 
 /**
@@ -60,6 +61,60 @@ async function recountStock(sku) {
   const total = row?.total || 0;
   await TagProductModel.updateOne({ sku }, { $set: { stockOnHand: total } });
   return total;
+}
+
+/**
+ * Rebuild reservedUnits from the orders, the way recountStock() rebuilds
+ * stockOnHand from the ledger.
+ *
+ * The truth is "pending units on orders that are still live". The counter is a
+ * cache of it, kept so a reservation can be made in one atomic update, and a
+ * cache needs a way back to the truth: the release at key issue is deliberately
+ * allowed to fail rather than block the bench, so this is what fixes the drift
+ * that failure leaves.
+ *
+ * `pending` only. A unit past that has already had its blank deducted from
+ * stockOnHand — see lib/tagStock.js.
+ */
+export async function recountReservations(sku) {
+  return escapeTenant("tag stock: recount reservations", async () => {
+    const orders = await TagOrderModel.find({
+      status: { $in: ["placed", "accepted", "provisioning", "partially-shipped"] },
+      "items.productSku": sku,
+    })
+      .select("items units")
+      .lean();
+
+    let pending = 0;
+    for (const order of orders) {
+      // Attributed to the first item, the same assumption getStockLevels() and
+      // provisioning.js already make: one product per order in practice, and a
+      // coarse attribution beats a wrong one.
+      if (order.items?.[0]?.productSku !== sku) continue;
+      const made = (order.units || []).filter((u) => u.status !== "pending").length;
+      const ordered = Number(order.items[0].quantity) || 0;
+      pending += Math.max(ordered - made, 0);
+    }
+
+    await TagProductModel.updateOne({ sku }, { $set: { reservedUnits: pending } });
+    return pending;
+  });
+}
+
+/**
+ * One kept promise. Called when a key is issued and the blank leaves the shelf.
+ *
+ * Floored at zero rather than allowed to go negative: a negative reservation
+ * would make us look like we hold MORE than we do, which is the error that
+ * oversells. recountReservations() is the way back if it ever drifts.
+ */
+export async function releaseReservedUnit(sku) {
+  return escapeTenant("tag stock: keep a promise", () =>
+    TagProductModel.updateOne(
+      { sku, reservedUnits: { $gt: 0 } },
+      { $inc: { reservedUnits: -1 } }
+    )
+  );
 }
 
 /**
@@ -120,40 +175,26 @@ export async function getStockLevels() {
     await connect();
     const products = await escapeTenant("tag stock: products", () =>
       TagProductModel.find({})
-        .select("sku name stockOnHand reorderLevel leadTimeDays isActive")
+        .select(
+          "sku name stockOnHand reservedUnits reorderLevel leadTimeDays isActive"
+        )
         .sort({ name: 1 })
         .lean(),
     );
 
-    // Units on live orders that have not taken a blank yet. An order that is
-    // cancelled, or delivered, or whose units are already written, commits
-    // nothing.
-    const openOrders = await escapeTenant("tag stock: open orders", () =>
-      TagOrderModel.find({
-        status: {
-          $in: ["placed", "accepted", "provisioning", "partially-shipped"],
-        },
-      })
-        .select("items units status")
-        .lean(),
-    );
-
-    const committed = new Map();
-    for (const order of openOrders) {
-      // One product per order in practice, but the model allows several, so
-      // the commitment is attributed to the first item rather than guessed
-      // across all of them — a wrong attribution is worse than a coarse one.
-      const sku = order.items?.[0]?.productSku;
-      if (!sku) continue;
-      const waiting = (order.units || []).filter((u) =>
-        ["pending", "keyed"].includes(u.status),
-      ).length;
-      if (waiting) committed.set(sku, (committed.get(sku) || 0) + waiting);
-    }
-
+    // Commitment is read from reservedUnits rather than recomputed here.
+    //
+    // This used to walk the open orders and count units in `pending` OR
+    // `keyed`, which subtracted a keyed unit twice: issuing its key already
+    // wrote a -1 movement, so stockOnHand no longer includes it. The figure was
+    // pessimistic by whatever was on the bench, and the ordering screen — which
+    // has to answer the same question — would have quoted a batch minimum for
+    // stock we were holding. One definition now, in lib/tagStock.js, used by
+    // both. recountReservations() rebuilds the counter from these same orders
+    // if it ever drifts.
     const levels = products.map((p) => {
-      const spokenFor = committed.get(p.sku) || 0;
-      const available = (p.stockOnHand || 0) - spokenFor;
+      const spokenFor = Number(p.reservedUnits) || 0;
+      const available = availableUnits(p);
       return {
         ...p,
         committed: spokenFor,

@@ -47,6 +47,24 @@ const tagProductSchema = new mongoose.Schema(
     // gets slow enough that somebody caches it badly later.
     stockOnHand: { type: Number, default: 0 },
 
+    // Blanks promised to an order and not yet taken off the shelf.
+    //
+    // A CACHE too, of the pending units on live orders —
+    // recountReservations() in server/tagServer/stock.js rebuilds it the same
+    // way recountStock() rebuilds stockOnHand. It exists as a stored counter
+    // rather than a query because it is what makes a reservation ATOMIC: an
+    // order is accepted by a single conditional update on this document, so two
+    // customers cannot both be promised the last blank.
+    //
+    // Only `pending` units count. A unit past that has already had its blank
+    // deducted from stockOnHand by the movement provisioning.js writes when it
+    // issues the key, so counting it here as well would subtract it twice.
+    //
+    // Released in exactly one place today — key issue. If order cancellation is
+    // ever implemented it has to release the remainder too, or availability
+    // drifts down for stock nobody is waiting for.
+    reservedUnits: { type: Number, default: 0, min: 0 },
+
     // Below this, say so. Lead times are long enough that finding out at the
     // moment of need is finding out too late.
     reorderLevel: { type: Number, default: 0, min: 0 },

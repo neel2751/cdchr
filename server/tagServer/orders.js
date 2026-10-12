@@ -9,8 +9,12 @@ import TagOrderModel from "@/models/tagOrderModel";
 import TagProductModel from "@/models/tagProductModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
-import { outstandingUnits } from "@/lib/tagOrderStatus";
 import { escapeTenant } from "@/lib/tenantContext";
+import { outstandingUnits } from "@/lib/tagOrderStatus";
+import {
+  availableToOrder,
+  orderQuantityRefusal,
+} from "@/lib/tagStock";
 import { getServerSideProps } from "../session/session";
 
 /**
@@ -27,51 +31,58 @@ import { getServerSideProps } from "../session/session";
  */
 
 /**
- * How many of a product could ship today without making more.
+ * Promise blanks to an order, atomically.
  *
- * stockOnHand, minus everything already promised and not yet made. A unit
- * consumes stock at the moment its key is issued (recordStockMovement in
- * provisioning.js), so anything still `pending` — which is every unit of every
- * order at placement, since units are created empty — is demand the shelf has
- * not yet paid for.
+ * This is the whole reason reservedUnits is a stored counter rather than a
+ * query over the open orders: acceptance is ONE conditional update on the
+ * product document, so two customers ordering the last blank at the same
+ * moment cannot both be told yes. Checking availability and then writing an
+ * order are two steps, and between them is exactly where the second customer
+ * gets a promise we cannot keep.
  *
- * Counted across EVERY tenant, deliberately. TagOrder is tenant-scoped, but
- * the shelf is not: two companies each ordering the last unit in stock is
- * precisely the case this exists to prevent, and a scoped query would let both
- * through.
+ * `requireStock` is the stock-served case, where the condition does the work.
+ * A batch order does not need the condition — it is being made, not picked —
+ * but it is still recorded, because those units will come off the shelf when
+ * their keys are issued and the next customer should see that.
  *
- * Cancelled orders are excluded — their pending units will never be made.
- * Shipped and delivered orders need no special case: their units are all past
- * pending, so they contribute nothing.
- *
- * Units are not recorded per line, so "made" is attributed to the order as a
- * whole. That is exact for a single-product order, which is what the ordering
- * screen produces, and it is the same assumption provisioning.js already makes
- * when it books the movement against items[0]. A mixed order would be counted
- * conservatively, which errs towards quoting a batch rather than promising
- * stock that is not there.
+ * Returns false only when the shelf moved under a stock-served order.
  */
-async function availableToShip(product) {
-  const onHand = Number(product?.stockOnHand) || 0;
-  if (onHand <= 0) return 0;
-
-  const orders = await escapeTenant("tag stock: demand already promised", () =>
-    TagOrderModel.find(
-      { status: { $ne: "cancelled" }, "items.productSku": product.sku },
-      { items: 1, units: 1 }
-    ).lean()
-  );
-
-  let promised = 0;
-  for (const order of orders) {
-    const ordered = (order.items || [])
-      .filter((item) => item.productSku === product.sku)
-      .reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-    const made = (order.units || []).filter((u) => u.status !== "pending").length;
-    promised += Math.max(ordered - made, 0);
+async function reserveUnits(sku, quantity, { requireStock }) {
+  if (!requireStock) {
+    await escapeTenant("tag stock: reserve for a batch", () =>
+      TagProductModel.updateOne({ sku }, { $inc: { reservedUnits: quantity } })
+    );
+    return true;
   }
 
-  return Math.max(onHand - promised, 0);
+  const claimed = await escapeTenant("tag stock: claim from the shelf", () =>
+    TagProductModel.findOneAndUpdate(
+      {
+        sku,
+        $expr: {
+          $gte: [
+            {
+              $subtract: [
+                { $ifNull: ["$stockOnHand", 0] },
+                { $ifNull: ["$reservedUnits", 0] },
+              ],
+            },
+            quantity,
+          ],
+        },
+      },
+      { $inc: { reservedUnits: quantity } },
+      { new: true }
+    )
+  );
+  return !!claimed;
+}
+
+/** Give back what reserveUnits() took, when the order does not go ahead. */
+async function releaseUnits(sku, quantity) {
+  await escapeTenant("tag stock: release a reservation", () =>
+    TagProductModel.updateOne({ sku }, { $inc: { reservedUnits: -quantity } })
+  );
 }
 
 /** The shop. Readable by any signed-in admin; it is a price list. */
@@ -83,7 +94,15 @@ export async function getTagProducts() {
     }
 
     await connect();
+    // Selected, not the whole document. This is a price list for customers, and
+    // it used to hand every tenant our inventory: stockOnHand and reorderLevel
+    // say how much of each line we hold and when we reorder, which is nobody's
+    // business but ours. They are read here to compute availability and do not
+    // leave the server.
     const rows = await TagProductModel.find({ isActive: true })
+      .select(
+        "sku name chipType onMetal unitPrice currency minQuantity leadTimeDays stockOnHand reservedUnits"
+      )
       .sort({ chipType: 1, unitPrice: 1 })
       .lean();
 
@@ -91,12 +110,19 @@ export async function getTagProducts() {
     // it out: the rule about what may be ordered belongs on one side of the
     // wire, and the raw figure is not the answer anyway — it does not account
     // for what other companies have already ordered and nobody has made yet.
-    const withAvailability = [];
-    for (const row of rows) {
-      withAvailability.push({ ...row, availableNow: await availableToShip(row) });
-    }
+    const catalogue = rows.map((row) => ({
+      sku: row.sku,
+      name: row.name,
+      chipType: row.chipType,
+      onMetal: row.onMetal,
+      unitPrice: row.unitPrice,
+      currency: row.currency,
+      minQuantity: row.minQuantity,
+      leadTimeDays: row.leadTimeDays,
+      availableNow: availableToOrder(row),
+    }));
 
-    return { success: true, data: JSON.stringify(withAvailability) };
+    return { success: true, data: JSON.stringify(catalogue) };
   } catch (error) {
     console.log("Error loading the tag catalogue:", error);
     return { success: false, message: "Could not load the catalogue" };
@@ -246,13 +272,18 @@ export const placeTagOrder = withAudit(
         // So: any quantity we can ship from stock, or the configured minimum
         // when a batch has to be made. Restocking in bulk stays the platform's
         // job, which is what reorderLevel is for.
-        const available = await availableToShip(product);
-        if (quantity > available && quantity < product.minQuantity) {
+        const refusal = orderQuantityRefusal(product, quantity);
+        if (refusal === "below-minimum-with-stock") {
+          const available = availableToOrder(product);
           return {
             success: false,
-            message: available
-              ? `${product.name}: ${available} in stock. Order up to ${available}, or ${product.minQuantity}+ for a new batch.`
-              : `${product.name} is out of stock, so this is a new batch — minimum ${product.minQuantity}.`,
+            message: `${product.name}: ${available} in stock. Order up to ${available}, or ${product.minQuantity}+ for a new batch.`,
+          };
+        }
+        if (refusal === "below-minimum-no-stock") {
+          return {
+            success: false,
+            message: `${product.name} is out of stock, so this is a new batch — minimum ${product.minQuantity}.`,
           };
         }
 
@@ -270,6 +301,33 @@ export const placeTagOrder = withAudit(
       }
 
       const currency = products[0]?.currency || "GBP";
+
+      // Reserve before writing the order, so an order that cannot be honoured
+      // is never created. Each line is claimed on its own and anything already
+      // claimed is given back if a later line fails — a partial promise is
+      // worse than a refusal, because nobody is waiting on a refusal.
+      const reserved = [];
+      for (const line of lines) {
+        const product = bySku.get(line.productSku);
+        const fromStock = line.quantity <= availableToOrder(product);
+        const ok = await reserveUnits(line.productSku, line.quantity, {
+          requireStock: fromStock,
+        });
+        if (!ok) {
+          for (const done of reserved) {
+            await releaseUnits(done.productSku, done.quantity);
+          }
+          // Only reachable when another order claimed the same blanks between
+          // the check above and this write. Saying so is better than a generic
+          // failure: the quantity was fine a moment ago and the customer has
+          // done nothing wrong.
+          return {
+            success: false,
+            message: `${product.name} was just taken by another order. Try a smaller number, or ${product.minQuantity}+ for a new batch.`,
+          };
+        }
+        reserved.push(line);
+      }
 
       const order = await TagOrderModel.create({
         orderNumber: orderNumber(),
