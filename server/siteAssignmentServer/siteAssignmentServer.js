@@ -2009,7 +2009,17 @@ export async function fetchFilterClockRecordData({
   // This is what stops a quiet fortnight reading as absence: when the company
   // closes on bank holidays there is no clock record and no leave request for
   // those days, so without naming them the hours simply look low.
-  const bankHolidays = await bankHolidaysInRange(startDate, endDate);
+  // `start` and `end`, not `startDate`/`endDate` — names that have never
+  // existed in this scope. The parameters are `fromDate` and `toDate`, and the
+  // normalised dates they become are the two locals above. Because this call
+  // is unconditional, the ReferenceError took the whole report down rather than
+  // just the annotation: Filter Attendance returned nothing at all.
+  //
+  // `end`, not `endExclusive`: the filter inside bankHolidaysInRange compares
+  // day keys inclusively, so the exclusive upper bound — which exists for the
+  // Mongo range, where leave dates are not guaranteed to sit on UTC midnight —
+  // would pull in a holiday falling the day after the range.
+  const bankHolidays = await bankHolidaysInRange(start, end);
 
   return {
     success: true,
