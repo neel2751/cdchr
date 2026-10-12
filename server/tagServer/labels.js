@@ -62,6 +62,8 @@ export async function saveDispatchSettings({
   dispatchFromAddress,
   dispatchContact,
   dispatchReturnNote,
+  tagPostage,
+  tagFreePostageOver,
 } = {}) {
   try {
     const auth = await requirePlatformAdmin();
@@ -77,6 +79,13 @@ export async function saveDispatchSettings({
             dispatchFromAddress: (dispatchFromAddress || "").trim(),
             dispatchContact: (dispatchContact || "").trim(),
             dispatchReturnNote: (dispatchReturnNote || "").trim(),
+            // Postage lives with the dispatch details because it is the same
+            // decision seen from the other side: what it costs us to put a
+            // parcel in the post. Negatives are floored rather than rejected —
+            // a typed minus sign is not a policy, and refusing the whole save
+            // over it would lose the other four fields.
+            tagPostage: Math.max(Number(tagPostage) || 0, 0),
+            tagFreePostageOver: Math.max(Number(tagFreePostageOver) || 0, 0),
           },
           $setOnInsert: { singleton: "only" },
         },

@@ -7,6 +7,7 @@ import { createObjectId } from "@/lib/mongodb";
 import { withAudit, recordAudit } from "@/lib/audit";
 import TagOrderModel from "@/models/tagOrderModel";
 import TagProductModel from "@/models/tagProductModel";
+import PlatformSettingModel from "@/models/platformSettingModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { escapeTenant } from "@/lib/tenantContext";
@@ -16,6 +17,7 @@ import {
   availableToOrder,
   orderQuantityRefusal,
 } from "@/lib/tagStock";
+import { postageFor } from "@/lib/tagPostage";
 import { getServerSideProps } from "../session/session";
 
 /**
@@ -84,6 +86,46 @@ async function releaseUnits(sku, quantity) {
   await escapeTenant("tag stock: release a reservation", () =>
     TagProductModel.updateOne({ sku }, { $inc: { reservedUnits: -quantity } })
   );
+}
+
+/**
+ * Our postage policy. One set of numbers, not one per customer, so it lives on
+ * PlatformSetting beside the dispatch details — see models/platformSettingModel.
+ *
+ * Read outside tenant scope because it is ours, and defaulted to zero so a
+ * deployment that has never configured it quotes no postage at all.
+ */
+async function postagePolicy() {
+  const settings = await escapeTenant("tag orders: postage policy", () =>
+    PlatformSettingModel.findOne({ singleton: "only" })
+      .select("tagPostage tagFreePostageOver")
+      .lean()
+  );
+  return {
+    tagPostage: Number(settings?.tagPostage) || 0,
+    tagFreePostageOver: Number(settings?.tagFreePostageOver) || 0,
+  };
+}
+
+/**
+ * What postage this customer will be quoted, for the order screen.
+ *
+ * Its own action rather than a field on getTagProducts, because postage is a
+ * property of an order and not of a product — and because that payload is an
+ * array the select-query hook maps over.
+ */
+export async function getTagOrderPolicy() {
+  try {
+    const { props } = await getServerSideProps();
+    if (!props?.session?.user?._id) {
+      return { success: false, message: "Not signed in" };
+    }
+    await connect();
+    return { success: true, data: JSON.stringify(await postagePolicy()) };
+  } catch (error) {
+    console.log("Error loading the postage policy:", error);
+    return { success: false, message: "Could not load postage" };
+  }
 }
 
 /** The shop. Readable by any signed-in admin; it is a price list. */
@@ -303,6 +345,12 @@ export const placeTagOrder = withAudit(
 
       const currency = products[0]?.currency || "GBP";
 
+      // Added after the lines are priced, because the free-over threshold is
+      // judged on the value of the goods rather than on the total including
+      // the postage it is deciding about.
+      const postage = postageFor(total, await postagePolicy());
+      total += postage;
+
       // Reserve before writing the order, so an order that cannot be honoured
       // is never created. Each line is claimed on its own and anything already
       // claimed is given back if a later line fails — a partial promise is
@@ -336,6 +384,7 @@ export const placeTagOrder = withAudit(
         items: lines,
         units: [],
         currency,
+        postage,
         total,
         shippingAddress: shippingAddress.trim(),
         shipTo: {

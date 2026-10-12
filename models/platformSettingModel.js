@@ -35,6 +35,24 @@ const platformSettingSchema = new mongoose.Schema(
     // box back rather than binned.
     dispatchReturnNote: { type: String, default: "" },
 
+    // Postage on a tag order.
+    //
+    // ZERO BY DEFAULT, and that default is the point: shipping this with a
+    // figure in it would start quoting customers a charge nobody decided.
+    // At 0 there is no postage line at all and totals read exactly as before.
+    //
+    // It exists because a tag may now be bought one at a time (the minimum is
+    // a batch minimum — see server/tagServer/orders.js), and a single £1.20
+    // sticker does not cover picking it, packing it and posting it. Charged
+    // per order rather than per unit, because that is what a parcel costs.
+    tagPostage: { type: Number, default: 0, min: 0 },
+
+    // Order value at or above which postage is free. 0 means there is no such
+    // threshold, so postage is charged on every order — the stricter reading,
+    // chosen so a half-configured policy cannot accidentally give everything
+    // away.
+    tagFreePostageOver: { type: Number, default: 0, min: 0 },
+
     // Billing identity. Separate from the dispatch fields above because an
     // invoice is a legal document and a parcel label is not: a UK VAT invoice
     // has to carry the supplier's name, address and VAT number, and those are

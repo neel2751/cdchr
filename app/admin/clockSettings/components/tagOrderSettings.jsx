@@ -27,10 +27,12 @@ import { useFetchSelectQuery } from "@/hooks/use-query";
 import { formatCurrency } from "@/utils/time";
 import {
   cancelTagOrder,
+  getTagOrderPolicy,
   getTagOrders,
   getTagProducts,
   placeTagOrder,
 } from "@/server/tagServer/orders";
+import { postageFor, postageNote } from "@/lib/tagPostage";
 import { markShipmentDelivered } from "@/server/tagServer/provisioning";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
 
@@ -70,6 +72,13 @@ export default function TagOrderSettings() {
   const { data: orders = [] } = useFetchSelectQuery({
     queryKey: ["tagOrders"],
     fetchFn: getTagOrders,
+  });
+  // Defaults to [] from the hook before it loads, which reads as "no policy"
+  // and therefore no postage — the same answer as a deployment that has not
+  // configured any.
+  const { data: policy } = useFetchSelectQuery({
+    queryKey: ["tagOrderPolicy"],
+    fetchFn: getTagOrderPolicy,
   });
 
   // Confirming receipt is the customer's own word that the box is in their
@@ -221,8 +230,13 @@ export default function TagOrderSettings() {
       }),
   });
 
-  const total =
+  // Goods, postage and the sum, from the same function the server charges
+  // with — a quoted postage that disagrees with the one on the order is the
+  // kind of difference somebody notices on an invoice.
+  const goods =
     chosen && Number(quantity) > 0 ? chosen.unitPrice * Number(quantity) : 0;
+  const postage = postageFor(goods, policy);
+  const total = goods + postage;
 
   return (
     <Card>
@@ -422,14 +436,33 @@ export default function TagOrderSettings() {
             </div>
 
             {total > 0 ? (
-              <p className="rounded-md border bg-neutral-50 p-2 text-sm">
-                {quantity} × {chosen.name} ={" "}
-                <strong>{formatCurrency(total, chosen.currency)}</strong>
+              <div className="space-y-1 rounded-md border bg-neutral-50 p-2 text-sm">
+                <p className="flex justify-between gap-4">
+                  <span>
+                    {quantity} × {chosen.name}
+                  </span>
+                  <span>{formatCurrency(goods, chosen.currency)}</span>
+                </p>
+                {/* Only shown when there is one to show. A "Postage £0.00"
+                    line invites the question of why it is there. */}
+                {postage > 0 ? (
+                  <p className="flex justify-between gap-4">
+                    <span>Postage</span>
+                    <span>{formatCurrency(postage, chosen.currency)}</span>
+                  </p>
+                ) : null}
+                <p className="flex justify-between gap-4 border-t pt-1 font-medium">
+                  <span>Total</span>
+                  <strong>{formatCurrency(total, chosen.currency)}</strong>
+                </p>
                 <span className="block text-xs text-neutral-500">
+                  {postageNote(policy, (n) =>
+                    formatCurrency(n, chosen.currency)
+                  )}{" "}
                   We will confirm and invoice separately — nothing is charged
                   here.
                 </span>
-              </p>
+              </div>
             ) : null}
 
             <Button

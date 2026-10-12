@@ -53,6 +53,8 @@ export default function DispatchSettings() {
         dispatchFromAddress: value("dispatchFromAddress"),
         dispatchContact: value("dispatchContact"),
         dispatchReturnNote: value("dispatchReturnNote"),
+        tagPostage: value("tagPostage"),
+        tagFreePostageOver: value("tagFreePostageOver"),
       }).then((res) => {
         if (!res?.success) {
           toast.error(res?.message || "Could not save those details");
@@ -136,6 +138,48 @@ export default function DispatchSettings() {
               disabled={isPending}
               onChange={set("dispatchReturnNote")}
             />
+          </div>
+
+          {/* What a parcel costs us, which is the same decision as the
+              addresses above seen from the other side. Both default to 0, and
+              at 0 no postage line appears on a customer's order at all — so
+              this screen is where the charge begins to exist, not where it is
+              switched on. */}
+          <div className="grid gap-3 border-t pt-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="tagPostage">Postage per order</Label>
+              <Input
+                id="tagPostage"
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                value={value("tagPostage")}
+                disabled={isPending}
+                onChange={set("tagPostage")}
+              />
+              <p className="text-xs text-neutral-500">
+                Added once per order, not per tag — a parcel is a parcel. Leave
+                at 0 to charge nothing and show no postage line.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tagFreePostageOver">Free postage over</Label>
+              <Input
+                id="tagFreePostageOver"
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="0.00"
+                value={value("tagFreePostageOver")}
+                disabled={isPending}
+                onChange={set("tagFreePostageOver")}
+              />
+              <p className="text-xs text-neutral-500">
+                Orders of this value or more pay no postage. 0 means there is
+                no threshold, so every order pays.
+              </p>
+            </div>
           </div>
 
           <Button disabled={isPending} onClick={() => save()}>

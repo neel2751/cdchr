@@ -183,6 +183,10 @@ const tagOrderSchema = new mongoose.Schema(
     units: [unitSchema],
 
     currency: { type: String, default: "GBP" },
+    // What postage was quoted when the order was placed, in the same units as
+    // unitPrice. Stored rather than recomputed, because the policy can change
+    // and an old order has to keep saying what it said.
+    postage: { type: Number, default: 0 },
     total: Number,
 
     // Free text, as the customer typed it. Kept for display and for a
