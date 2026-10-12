@@ -10,6 +10,7 @@ import TagProductModel from "@/models/tagProductModel";
 import { carrierName, trackingUrl } from "@/data/carriers";
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { escapeTenant } from "@/lib/tenantContext";
+import { recountReservations } from "./reservations";
 import { outstandingUnits } from "@/lib/tagOrderStatus";
 import {
   availableToOrder,
@@ -369,6 +370,98 @@ export const placeTagOrder = withAudit(
     } catch (error) {
       console.log("Error placing a tag order:", error);
       return { success: false, message: "Could not place that order" };
+    }
+  },
+  { module: "TagOrder" },
+);
+
+/**
+ * Cancel an order, and give back the blanks it was holding.
+ *
+ * Cancellation is why reservedUnits needed a release path that was not just
+ * "a key got issued": an order abandoned at `placed` would otherwise hold its
+ * promise for ever, and availability would drift down for stock nobody is
+ * waiting for. It is the gap the model's own note asked to be closed.
+ *
+ * WHO. The same bar as placing one: a super admin of the company that owns it.
+ * The order is loaded through the tenant-scoped model, so another company's
+ * order number simply is not found — the id in the request is not a way to
+ * reach it.
+ *
+ * WHEN. While nothing has gone out. Once a parcel is in the post, cancelling
+ * in the app would say the order never happened while a box is in transit, so
+ * that case is a conversation rather than a button. `provisioning` is still
+ * cancellable: chips may be made, but nothing has been sent.
+ *
+ * HOW THE RELEASE IS COMPUTED. By recounting, not by subtracting. The order is
+ * marked cancelled first, and recountReservations() then rebuilds the counter
+ * from the orders that are still live — which no longer includes this one. So
+ * the arithmetic exists once, the units already made are correctly left out
+ * (their blanks were consumed at key issue and are not coming back), and
+ * cancelling twice cannot double-release.
+ */
+export const cancelTagOrder = withAudit(
+  "TagOrder.cancel",
+  async ({ orderNumber, reason } = {}) => {
+    try {
+      const { props } = await getServerSideProps();
+      const user = props?.session?.user;
+      if (!user?._id) return { success: false, message: "Not signed in" };
+      if (user.role !== "superAdmin") {
+        return { success: false, message: "Not authorized" };
+      }
+      if (!orderNumber) {
+        return { success: false, message: "Which order?" };
+      }
+
+      await connect();
+      const order = await TagOrderModel.findOne({ orderNumber });
+      if (!order) return { success: false, message: "Order not found" };
+
+      if (order.status === "cancelled") {
+        return { success: false, message: "That order is already cancelled" };
+      }
+      if (["shipped", "partially-shipped", "delivered"].includes(order.status)) {
+        return {
+          success: false,
+          message:
+            "Part of this order has already been sent, so it cannot be cancelled here — get in touch and we will sort it out.",
+        };
+      }
+
+      const before = { status: order.status };
+      const skus = [
+        ...new Set((order.items || []).map((i) => i.productSku).filter(Boolean)),
+      ];
+
+      order.status = "cancelled";
+      order.cancelledBy = createObjectId(user._id);
+      order.cancelledByName = user.name;
+      order.cancelledAt = new Date();
+      if (reason?.trim()) order.cancelReason = reason.trim();
+      await order.save();
+
+      // After the save, so this order is excluded from the recount.
+      for (const sku of skus) {
+        await recountReservations(sku).catch((error) =>
+          console.log("Could not release reservations on cancel:", error?.message)
+        );
+      }
+
+      recordAudit({
+        entityId: order._id,
+        before,
+        after: { status: "cancelled", reason: order.cancelReason },
+        description: `Cancelled tag order ${order.orderNumber}`,
+      });
+
+      return {
+        success: true,
+        message: `Order ${order.orderNumber} cancelled`,
+      };
+    } catch (error) {
+      console.log("Error cancelling a tag order:", error);
+      return { success: false, message: "Could not cancel that order" };
     }
   },
   { module: "TagOrder" },

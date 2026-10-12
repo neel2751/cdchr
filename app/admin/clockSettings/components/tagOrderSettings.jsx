@@ -25,9 +25,21 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import { formatCurrency } from "@/utils/time";
-import { getTagOrders, getTagProducts, placeTagOrder } from "@/server/tagServer/orders";
+import {
+  cancelTagOrder,
+  getTagOrders,
+  getTagProducts,
+  placeTagOrder,
+} from "@/server/tagServer/orders";
 import { markShipmentDelivered } from "@/server/tagServer/provisioning";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
+
+/**
+ * The statuses a customer may still cancel from: nothing has left us yet.
+ * Chips may already be made at `provisioning` — that is our cost to carry, not
+ * a reason to make somebody keep tags they no longer need.
+ */
+const CANCELLABLE = ["placed", "accepted", "provisioning"];
 import { isValidUkPostcode, normalisePostcode } from "@/lib/postcode";
 import { lookupPostcode } from "@/server/addressServer/postcode";
 import {
@@ -73,6 +85,28 @@ export default function TagOrderSettings() {
         queryClient.invalidateQueries({ queryKey: ["tagOrders"] });
       }),
   });
+
+  // Which order is mid-cancel, so one row's button can be busy without
+  // disabling the rest.
+  const [cancelling, setCancelling] = React.useState("");
+
+  const cancelOrder = async (orderNumber) => {
+    setCancelling(orderNumber);
+    try {
+      const res = await cancelTagOrder({ orderNumber });
+      if (!res?.success) {
+        toast.error(res?.message || "Could not cancel that order");
+        return;
+      }
+      toast.success(res.message);
+      // The catalogue too, not just the orders: cancelling gives the blanks
+      // back, so what the quantity field will accept has just changed.
+      queryClient.invalidateQueries({ queryKey: ["tagOrders"] });
+      queryClient.invalidateQueries({ queryKey: ["tagProducts"] });
+    } finally {
+      setCancelling("");
+    }
+  };
 
   const [onMetal, setOnMetal] = React.useState(false);
   const [sku, setSku] = React.useState("");
@@ -427,11 +461,30 @@ export default function TagOrderSettings() {
                         <Package className="size-3.5 text-neutral-400" />
                         {o.orderNumber}
                       </span>
-                      <span className="text-neutral-500">
+                      <span className="flex items-center gap-2 text-neutral-500">
                         {o.unitCount
                           ? `${o.readyCount}/${o.unitCount} ready · `
                           : ""}
                         {ORDER_STATUS_LABEL[o.status] || o.status}
+                        {/* Offered only while nothing has gone out. Once a box
+                            is in the post, cancelling here would say the order
+                            never happened while a parcel is in transit — the
+                            server refuses that case and says so, and a button
+                            that exists to be refused is not worth showing. */}
+                        {CANCELLABLE.includes(o.status) ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-1.5 text-xs text-destructive hover:text-destructive"
+                            disabled={cancelling === o.orderNumber}
+                            onClick={() => cancelOrder(o.orderNumber)}
+                          >
+                            {cancelling === o.orderNumber
+                              ? "Cancelling…"
+                              : "Cancel"}
+                          </Button>
+                        ) : null}
                       </span>
                     </div>
 

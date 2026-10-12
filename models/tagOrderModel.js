@@ -212,6 +212,16 @@ const tagOrderSchema = new mongoose.Schema(
     placedByName: String,
     placedAt: Date,
 
+    // Cancellation is the one status that cannot be derived from units and
+    // shipments, so it is stored — and recomputeOrderStatus() returns early on
+    // it, which is what makes it stick once set. Recorded with a who and a why
+    // because it releases reserved stock and somebody will ask later which
+    // order freed it.
+    cancelledBy: mongoose.Schema.Types.ObjectId,
+    cancelledByName: String,
+    cancelledAt: Date,
+    cancelReason: String,
+
     shipments: [shipmentSchema],
 
     fulfilledByName: String,

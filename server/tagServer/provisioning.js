@@ -15,7 +15,8 @@ import CompanyModel from "@/models/companyModel";
 import TagOrderModel from "@/models/tagOrderModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
-import { recordStockMovement, releaseReservedUnit } from "./stock";
+import { recordStockMovement } from "./stock";
+import { releaseReservedUnit } from "./reservations";
 import { normaliseUid } from "../clockServer/clockTagStore";
 import { getServerSideProps } from "../session/session";
 
