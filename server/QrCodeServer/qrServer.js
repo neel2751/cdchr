@@ -8,6 +8,20 @@ import { generatePreSignedUrl, getPublicUrl } from "../aws/upload";
 import axios from "axios";
 import { addMedia, archiveMedia } from "../aws/media";
 import { createSlug } from "@/helper/createSlug";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * QR codes are maintained on /admin/qr. Note that its menu entry is commented
+ * out in data/menu.js, so proxy.js finds no menu item for the path and sends
+ * everyone but a super admin to the dashboard — the screen is super-admin-only
+ * in practice today. The path is still what gets passed here, so the actions
+ * track the product's intent rather than the current state of one comment: if
+ * the entry is restored, whoever is granted it can use these again.
+ *
+ * getQrCodeBySlug stays open deliberately — app/visitor/[slug] is a public
+ * page and resolving the code in the URL is the whole point of it.
+ */
+const OWNS = ["/admin/qr"];
 
 export async function createQrCode(data) {
   if (!data) {
@@ -213,6 +227,9 @@ export async function myLeads() {
 
 // Edit Qr Code
 export async function editQrCode(data, id) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     if (!id) {
       return { success: false, message: "QR code ID is required" };
@@ -357,6 +374,9 @@ export async function editQrCode(data, id) {
 }
 
 export async function deleteQrCode(id) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     // we have todo isDeleted: true

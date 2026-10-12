@@ -738,7 +738,15 @@ export async function editLeaveRequestAdvanced({
 
 
 // ---------------------- Half-Day Edit ----------------------
-export async function editHalfDayLeave({ data, requestId, adminId }) {
+/**
+ * Not exported. Superseded by editLeaveRequestAdvanced, which is what the
+ * screen calls; the only remaining caller is editLeaveRequest below.
+ *
+ * It took `requestId` and `adminId` from its caller and rewrote that leave
+ * request, so as an endpoint any signed-in employee could edit a colleague's
+ * leave and attribute the change to whichever admin id they named.
+ */
+async function editHalfDayLeave({ data, requestId, adminId }) {
   return await withTransaction(async (session) => {
     await connect();
     const { leaveDates, leaveReason } = data;
@@ -923,7 +931,13 @@ export async function editHalfDayLeave({ data, requestId, adminId }) {
 }
 
 // ---------------------- Main Edit ----------------------
-export async function editLeaveRequest({ data, requestId, adminId }) {
+/**
+ * Not exported, for the same reason as editHalfDayLeave above, and dead for the
+ * same reason: its call site at the top of this file is commented out in favour
+ * of editLeaveRequestAdvanced. Kept rather than deleted because unlike the five
+ * functions removed from leaveServer.js it is not broken — only superseded.
+ */
+async function editLeaveRequest({ data, requestId, adminId }) {
   return await withTransaction(async (session) => {
     await connect();
 

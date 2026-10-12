@@ -4,6 +4,49 @@ import webpush from "web-push";
 import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
+import { permissionRefusal } from "@/lib/actionAccess";
+import { getServerSideProps } from "../session/session";
+
+/**
+ * Push notifications, and who may aim one at whom.
+ *
+ * All three actions here took the employee id to act on from their caller and
+ * checked nobody, which for an addressable endpoint meant: anyone could attach
+ * THEIR OWN browser as a colleague's push endpoint and start receiving that
+ * person's notifications, and anyone could push arbitrary text to any employee
+ * — a notification from the company's own app is about as credible a phishing
+ * surface as this product has.
+ *
+ * So the two self-service actions are pinned to the session, and sending to
+ * somebody else needs the Office Attendance screen that offers the button.
+ */
+const OWNS = ["/admin/attendance"];
+
+/** The signed-in employee's own id, or null. */
+async function callerId() {
+  try {
+    const { props } = await getServerSideProps();
+    return props?.session?.user?._id || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refuse unless the caller is acting on their own record.
+ *
+ * Subscribing a browser and testing that it works are things you do to
+ * yourself; the id in the argument is a convenience for the client, never a
+ * claim to be honoured.
+ */
+async function refuseUnlessSelf(userId) {
+  const me = await callerId();
+  if (!me) return { success: false, message: "Not signed in" };
+  if (!userId || String(userId) !== String(me)) {
+    return { success: false, message: "You can only do this for yourself" };
+  }
+  return null;
+}
 
 // Guarded: setVapidDetails throws on a missing or malformed key, and at module
 // scope that takes down every route that imports this file rather than just
@@ -52,6 +95,9 @@ async function findAnyEmployee(userId, select) {
  * field employee's subscription.
  */
 export async function saveSubscription(userId, subscription) {
+  const denied = await refuseUnlessSelf(userId);
+  if (denied) return denied;
+
   try {
     if (!userId) return { success: false, message: "Not signed in" };
     if (!subscription?.endpoint) {
@@ -90,7 +136,8 @@ async function dropSubscription(userId) {
  * The subscription had been saved correctly; it was the send that could not
  * find them.
  */
-export async function sendNotification(userId, message, options = {}) {
+/** The send itself. Private: every caller below has already been authorised. */
+async function pushTo(userId, message, options = {}) {
   try {
     if (!vapidReady) {
       return {
@@ -142,8 +189,21 @@ export async function sendNotification(userId, message, options = {}) {
   }
 }
 
+/**
+ * Nudge somebody else — the button on Office Attendance.
+ */
+export async function sendNotification(userId, message, options = {}) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+  return pushTo(userId, message, options);
+}
+
+/** "Check my notifications work", from the banner. Self only. */
 export async function sendTestNotification(userId) {
-  return await sendNotification(
+  const denied = await refuseUnlessSelf(userId);
+  if (denied) return denied;
+
+  return pushTo(
     userId,
     "This is a test notification from the Attendance System.",
   );

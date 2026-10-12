@@ -321,25 +321,17 @@ export async function changeEmployeePassword(data, id) {
   }
 }
 
-export async function deleteOfficeEmployee(id) {
-  if (!id) return { success: false, message: "No Employee ID Provided" };
-  try {
-    await connect();
-    const employeeId = decrypt(id);
-    const updatedEmp = await OfficeEmployeeModel.findOneAndUpdate(
-      { _id: employeeId },
-      { isDeleted: true },
-      { new: true }
-    ).exec();
-    if (!updatedEmp) {
-      return { success: false, message: "Employee Not Found" };
-    }
-    return { success: true, message: "Employee Deleted Successfully" };
-  } catch (error) {
-    console.log(error);
-    return { success: false, message: "Error Deleting Employee" };
-  }
-}
+/**
+ * deleteOfficeEmployee used to sit here.
+ *
+ * Dead (no caller anywhere), unguarded (it took an employee id and soft-
+ * deleted that person, so any signed-in colleague could have called it), a
+ * duplicate of officeEmployeeDelete in officeServer.js — which is audited and
+ * live — and broken: it set `isDeleted`, and the schema field is `delete`, so
+ * Mongoose dropped the update and it reported "Employee Deleted Successfully"
+ * having changed nothing. Guarding a function that lies about what it did is
+ * not worth the lines.
+ */
 
 /**
  * Remove files that reached S3 before the upload was rejected, so a refused

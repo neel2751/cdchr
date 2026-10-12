@@ -4,6 +4,17 @@ import { connect } from "@/db/db";
 import LeadModel from "@/models/leadModel";
 import QrCodeModel from "@/models/QrCodeModel";
 import { getServerSideProps } from "./session/session";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * The marketing screens under /admin/leads. Same note as qrServer: the menu
+ * entry is commented out, so only a super admin reaches the page today.
+ *
+ * addLead stays open — app/visitor/[slug] is the public form a visitor fills
+ * in, and submitting it is the only reason that page exists. exportMarketing
+ * does NOT: it hands back every lead the company holds.
+ */
+const OWNS = ["/admin/leads"];
 
 export async function addLead(data, slug) {
   try {
@@ -84,6 +95,9 @@ export async function performanceOld() {
   }
 }
 export async function performance() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const range = "30"; // days
@@ -125,6 +139,9 @@ export async function performance() {
 }
 
 export async function updateLeadStatus({ leadId, newStatus }) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const validStatuses = ["new", "contacted", "qualified", "lost"];
@@ -148,6 +165,9 @@ export async function updateLeadStatus({ leadId, newStatus }) {
 }
 
 export async function exportMarketing() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   await connect();
 
   // 1. Fetch leads that have potential for marketing (New or Qualified)

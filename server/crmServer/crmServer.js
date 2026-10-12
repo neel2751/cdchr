@@ -3,6 +3,17 @@
 import { connect } from "@/db/db";
 import FormTemplateModel from "@/models/formTemplateModel";
 import { getServerSideProps } from "../session/session";
+import { permissionRefusal } from "@/lib/actionAccess";
+
+/**
+ * Form templates, maintained on /admin/templates (menu entry commented out, so
+ * super admin only in practice — see qrServer for the reasoning).
+ *
+ * "Public" in getAllPublicFormTemplates describes the templates' visibility to
+ * the visitor form, not the audience for this listing: nothing outside the
+ * admin screens calls it, so it is guarded with the rest.
+ */
+const OWNS = ["/admin/templates"];
 
 export async function saveForm(data, id) {
   try {
@@ -34,6 +45,9 @@ export async function getFormTemplatesByEmployee() {
   }
 }
 export async function getAllPublicFormTemplates() {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const templates = await FormTemplateModel.find({ isPublic: true });
@@ -45,6 +59,9 @@ export async function getAllPublicFormTemplates() {
 }
 
 export async function deleteFormTemplate(id) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     await FormTemplateModel.findByIdAndDelete(id);
@@ -56,6 +73,9 @@ export async function deleteFormTemplate(id) {
 }
 
 export async function updateFormTemplate(id, data) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const updatedTemplate = await FormTemplateModel.findByIdAndUpdate(
@@ -75,6 +95,9 @@ export async function updateFormTemplate(id, data) {
 }
 
 export async function getFormTemplateById(id) {
+  const denied = await permissionRefusal(OWNS);
+  if (denied) return denied;
+
   try {
     await connect();
     const template = await FormTemplateModel.findById(id).lean();
