@@ -8,6 +8,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import SidebarWrapper from "@/components/sidebar/sidebarWrapper";
 import SupportBanner from "@/components/supportBanner";
 import AnnouncementBanner from "@/components/announcementBanner";
+import ScreenViewLogger from "@/components/screenViewLogger";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -28,6 +29,9 @@ const AdminProviders = ({ children, branding }) => {
       <QueryClientProvider client={queryClient}>
         <BrandingContext.Provider value={branding || {}}>
           <NuqsAdapter>
+            {/* Records which screen is open. Mounted here so every admin
+                screen is covered by one line rather than thirty. */}
+            <ScreenViewLogger />
             {/* Renders only during a support visit, above everything else. */}
             <SupportBanner />
             {/* Urgent announcements, on every admin page. Below the support

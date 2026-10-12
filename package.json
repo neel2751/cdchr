@@ -57,7 +57,8 @@
     "tag:test:money": "node --import ./scripts/lib/alias-loader.mjs scripts/test-money.mjs",
     "tag:test:webhook": "node --import ./scripts/lib/alias-loader.mjs scripts/test-stripe-webhook.mjs",
     "tag:test:dunning": "node --import ./scripts/lib/alias-loader.mjs scripts/test-dunning.mjs",
-    "tag:test:ledger": "node --import ./scripts/lib/alias-loader.mjs scripts/test-ledger.mjs"
+    "tag:test:ledger": "node --import ./scripts/lib/alias-loader.mjs scripts/test-ledger.mjs",
+    "audit:screens": "node scripts/screen-usage.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",
