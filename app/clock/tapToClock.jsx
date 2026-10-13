@@ -262,7 +262,9 @@ export default function TapToClock({ uid, picc, cmac }) {
           <p className="text-xs text-neutral-500">
             {state?.state === "invalid" || state?.state === "unverifiable"
               ? "This is how the tag was written, not anything to do with your account. Whoever supplied the tag needs to programme it again."
-              : session?.user?.role === "superAdmin"
+              : state?.state === "unregistered"
+                ? "Nothing is wrong with the tag itself — the last step of setting it up was never finished."
+                : session?.user?.role === "superAdmin"
                 ? "You can set this tag up from Leave Management → Settings → Clock-in Tags."
                 : "Your manager can set this up."}
           </p>

@@ -51,6 +51,32 @@ export async function inspectTag({ uid, picc, cmac } = {}) {
 
     const resolved = await resolveTag(uid, { picc, cmac });
 
+    // A CHIP THAT SIGNS ITSELF IS NOT ENROLLED BY TAPPING IT.
+    //
+    // A tap carrying picc and cmac is an NTAG 424 DNA mirroring its encrypted
+    // UID and a signature over it. Those are only checkable against the key the
+    // chip holds, and that key lives on the order it was provisioned against,
+    // not in the customer's company — so enrolling here would create a ClockTag
+    // with no keyRef, and resolveTag skips signature checking entirely when
+    // there is no key. The tag would start working, with its replay protection
+    // silently switched off: the one property a 424 costs extra for.
+    //
+    // So it is refused, and the sentence says who can finish it. The honest
+    // answer, because the customer cannot fix this from any screen they have.
+    if (resolved.status === "unknown" && picc && cmac) {
+      return {
+        success: true,
+        data: JSON.stringify({
+          state: "unregistered",
+          uid: normaliseUid(uid),
+          message:
+            "This tag was programmed but never registered. Whoever supplied " +
+            "it has to record its id before it can be used — it cannot be set " +
+            "up from here, because its security key is held with the order.",
+        }),
+      };
+    }
+
     // A tag nobody has registered is not an error — it is how a new tag gets
     // enrolled. Only a super admin's tap creates the row, or an employee
     // tapping a stray tag would fill the list with other people's hardware.

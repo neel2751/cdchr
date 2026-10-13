@@ -560,6 +560,18 @@ export default function ProvisioningStation() {
                             {unit.uid}
                           </code>
                         ) : null}
+                        {/* THE HALFWAY STATE, said out loud. A unit whose key
+                            has been issued but whose UID was never recorded is
+                            a chip that exists in somebody's hand and nowhere in
+                            the app: no ClockTag row, so every tap on it answers
+                            "this tag has not been set up yet" with a correct
+                            URL and a correct key. The status chip alone says
+                            "keyed", which reads like a finished step. */}
+                        {!unit.uid && unit.keyIssuedAt ? (
+                          <span className="text-[11px] font-medium text-amber-700">
+                            key issued — UID not recorded, so no tag exists yet
+                          </span>
+                        ) : null}
                         {/* The concrete URL for this chip, for checking it by
                             hand: paste it in a browser and the scan should
                             behave as a tap would, minus the signature. Not
