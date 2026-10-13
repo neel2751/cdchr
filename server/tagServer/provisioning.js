@@ -20,6 +20,7 @@ import {
 } from "../email/tenantMail";
 import { tagOrderCancelledTemplate } from "../email/templates/tagOrderCancelledTemplate";
 import TagOrderModel from "@/models/tagOrderModel";
+import TagProductModel from "@/models/tagProductModel";
 import { CARRIER_KEYS, carrierName } from "@/data/carriers";
 import { recomputeOrderStatus } from "@/lib/tagOrderStatus";
 import { recordStockMovement } from "./stock";
@@ -108,11 +109,42 @@ export async function getProvisioningQueue() {
     );
     const nameOf = new Map(companies.map((c) => [String(c._id), c.name]));
 
+    // Each customer's own origin, so the station can show the URL to programme
+    // rather than leaving the operator to work out which host this order's
+    // tags should point at. A tag written with the wrong company's host sends
+    // every tap to a workspace its employees cannot sign into.
+    const origins = new Map();
+    for (const tenantId of new Set(
+      orders.map((o) => (o.tenantId ? String(o.tenantId) : "")).filter(Boolean)
+    )) {
+      origins.set(tenantId, await resolveTenantAppUrl(tenantId));
+    }
+
+    // Which chip each order is for, so the station can show the right URL
+    // template. Stated here rather than inferred on the screen: the obvious
+    // client-side tell would be whether a unit carries a keyRef, and the
+    // select above strips keyRef precisely so sealed key material never
+    // reaches a browser — so that inference would have been quietly wrong for
+    // every order.
+    const skus = [
+      ...new Set(
+        orders.flatMap((o) => (o.items || []).map((i) => i.productSku)).filter(Boolean)
+      ),
+    ];
+    const products = await escapeTenant("tag provisioning: chip types", () =>
+      TagProductModel.find({ sku: { $in: skus } })
+        .select("sku chipType")
+        .lean()
+    );
+    const chipOf = new Map(products.map((p) => [p.sku, p.chipType]));
+
     return {
       success: true,
       data: JSON.stringify(
         orders.map((o) => ({
           ...o,
+          clockBaseUrl: origins.get(String(o.tenantId)) || "",
+          chipType: chipOf.get(o.items?.[0]?.productSku) || "ntag213",
           shipments: (o.shipments || []).map((sh) => ({
             ...sh,
             // The label itself was left behind; whether there is one is what

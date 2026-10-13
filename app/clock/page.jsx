@@ -9,7 +9,10 @@ export const metadata = { title: "Clock in" };
  * Where an NFC tap lands.
  *
  * The tag holds a plain URL — `https://<host>/clock?tag=<uid>` — because that
- * is the one thing both platforms handle with no app installed. An iPhone
+ * is the one thing both platforms handle with no app installed. That format is
+ * built in lib/tagUrl.js and shown on the provisioning station, so the thing
+ * programmed onto a chip and the thing parsed here come from one definition;
+ * this comment used to be the only written record of it. An iPhone
  * (XS or later, iOS 14+) reads the tag in the background and offers a banner
  * that opens it in Safari; Android does the same. Anything cleverer, Web NFC
  * included, is Chrome-on-Android only and cannot be the baseline.

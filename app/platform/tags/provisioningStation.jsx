@@ -48,6 +48,11 @@ import {
   getShipmentPostage,
 } from "@/server/tagServer/carrierLabels";
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
+import {
+  TAG_URL_FIELD_SIZES,
+  clockUrlFor,
+  clockUrlTemplate,
+} from "@/lib/tagUrl";
 
 /**
  * The statuses an order may still be cancelled from: nothing has left us.
@@ -55,6 +60,7 @@ import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
  * operator does not get a wider one.
  */
 const CANCELLABLE = ["placed", "accepted", "provisioning"];
+
 import {
   Select,
   SelectContent,
@@ -162,6 +168,23 @@ export default function ProvisioningStation() {
    * per shipment would be megabytes on a screen that reloads after every
    * action, to show a button.
    */
+  /**
+   * Put a string on the clipboard, or say why not.
+   *
+   * The URL is long, exact, and going into a tag writer by hand — the one
+   * place a transcription slip produces a tag that looks programmed and sends
+   * every tap nowhere. Clipboard access can be refused, so a failure says so
+   * rather than silently doing nothing.
+   */
+  const copy = async (text, what) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${what} copied`);
+    } catch {
+      toast.error("Could not copy — select it and copy by hand");
+    }
+  };
+
   const downloadPostage = async (orderNumber, reference) => {
     const res = await getShipmentPostage({ orderNumber, reference });
     if (!res?.success) {
@@ -346,6 +369,70 @@ export default function ProvisioningStation() {
                   </div>
                 ) : null}
 
+                {/* What to programme onto every tag in this order.
+                
+                    The station's entire job is writing chips and until now it
+                    never said what to write: the format lived in a comment in
+                    app/clock/page.jsx and the plan document described an older
+                    one. The host matters as much as the path — a tag written
+                    with the wrong company's host sends every tap to a
+                    workspace its employees cannot sign into — so it is this
+                    order's customer's own origin, not a guess.
+                
+                    One string for the whole order, because both chips mirror
+                    their own UID into the URL. That is also the safer way
+                    round: no per-tag editing means no chance of tag 14's UID
+                    ending up on tag 15. */}
+                {order.clockBaseUrl ? (
+                  <div className="space-y-1.5 rounded-md border bg-neutral-50 p-2">
+                    <p className="text-xs font-medium">
+                      Programme this onto every tag
+                    </p>
+                    <code className="block overflow-x-auto rounded border bg-white px-2 py-1.5 text-[11px] whitespace-pre">
+                      {clockUrlTemplate({
+                        baseUrl: order.clockBaseUrl,
+                        chipType: order.chipType,
+                      })}
+                    </code>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          copy(
+                            clockUrlTemplate({
+                              baseUrl: order.clockBaseUrl,
+                              chipType: order.chipType,
+                            }),
+                            "URL template"
+                          )
+                        }
+                      >
+                        Copy URL
+                      </Button>
+                      <p className="text-[11px] text-muted-foreground">
+                        {order.chipType === "ntag424" ? (
+                          <>
+                            Turn on the UID mirror and SDM so the chip fills in
+                            the zeroes: {TAG_URL_FIELD_SIZES.uidHexChars} for
+                            the UID, {TAG_URL_FIELD_SIZES.piccHexChars} for{" "}
+                            <code>picc</code>, {TAG_URL_FIELD_SIZES.cmacHexChars}{" "}
+                            for <code>cmac</code>, mirroring UID + read counter.
+                          </>
+                        ) : (
+                          <>
+                            Turn on the UID mirror so the chip fills in the{" "}
+                            {TAG_URL_FIELD_SIZES.uidHexChars} zeroes with its
+                            own UID. A 213 signs nothing, so pair these with a
+                            geofence.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="space-y-1">
                   {units.map((unit) => (
                     <div
@@ -367,6 +454,29 @@ export default function ProvisioningStation() {
                           <code className="text-xs text-muted-foreground">
                             {unit.uid}
                           </code>
+                        ) : null}
+                        {/* The concrete URL for this chip, for checking it by
+                            hand: paste it in a browser and the scan should
+                            behave as a tap would, minus the signature. Not
+                            what gets written — see the template above. */}
+                        {unit.uid && order.clockBaseUrl ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-1.5 text-[11px]"
+                            onClick={() =>
+                              copy(
+                                clockUrlFor({
+                                  baseUrl: order.clockBaseUrl,
+                                  uid: unit.uid,
+                                }),
+                                "Test URL"
+                              )
+                            }
+                          >
+                            Copy test URL
+                          </Button>
                         ) : null}
                         {unit.shipmentRef ? (
                           <span className="text-[11px] text-muted-foreground">
