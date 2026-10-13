@@ -272,11 +272,26 @@ the right chip is bought.
   also exposes the **Web NFC API** (`NDEFReader`), which lets our page scan a tag while
   it is open. That is Android-Chrome only; it is a nice enhancement, never the baseline.
 
-So the baseline is: **tag holds a URL, tap opens it, the URL tells us the location.**
+So the baseline is: **tag holds a URL, tap opens it, and the URL identifies the tag.**
 
 ```
-https://hr.example.com/clock?loc=<locationId>
+https://<the customer's host>/clock?tag=<the chip's UID>
 ```
+
+> **Shipped differently from the first draft of this section, on purpose.** This
+> originally read `?loc=<locationId>` — the URL naming the place. It names the *tag*
+> instead, and the server takes the location from whatever that tag is currently bound
+> to. The reason is reassignment: a tag that moves from Elm Street to the Leeds cabin is
+> a dropdown change, not a trip to the site with a tag writer. It also makes a stock of
+> blank-but-programmed tags possible, since a tag can be written before anyone knows
+> where it will go.
+>
+> The host matters as much as the path: it is the customer's own origin, because a tag
+> written with the wrong company's host sends every tap to a workspace its employees
+> cannot sign into.
+>
+> The format is built in `lib/tagUrl.js`, parsed in `app/clock/page.jsx`, and shown on
+> the provisioning station so nobody has to read either.
 
 **Why a plain tag is not enough.** That URL is static. After one tap it is in the
 employee's browser history and can be revisited from anywhere. A plain NTAG213 is
@@ -290,12 +305,34 @@ computes an AES-CMAC over the counter and its UID using a key held on the chip, 
 injects both into the URL it emits:
 
 ```
-https://hr.example.com/clock?loc=ELM&picc=<encrypted UID+counter>&cmac=<signature>
+https://<host>/clock?tag=<UID>&picc=<encrypted UID+counter>&cmac=<signature>
 ```
+
+What is actually *programmed* onto the chip is that URL with runs of zeroes for the chip
+to overwrite — the mirror writes its UID, the PICC data and the CMAC into them on every
+tap:
+
+```
+https://<host>/clock?tag=00000000000000&picc=00000000000000000000000000000000&cmac=0000000000000000
+```
+
+Those lengths are not cosmetic. `lib/sun.js` refuses anything else: `picc` is 16 bytes
+(32 hex characters), `cmac` is 8 bytes (16 hex), the mirrored UID is 7 bytes (14 hex),
+and the PICC layout byte must be `0xC7` — *UID plus read counter*. A tag programmed with
+a short placeholder is a tag that cannot sign anything, and that failure does not show up
+at the bench; it shows up weeks later as "the scanner says it could not be verified".
+
+One string goes onto every tag of an order, because both chips can mirror their own UID.
+That is also the safer way round: no per-tag editing means no chance of tag 14's UID
+ending up on tag 15.
 
 The server holds the same key, decrypts, verifies the CMAC, and checks the counter is
 **higher than the last one seen for that tag**. A replayed URL fails on the counter. A
 forged URL fails on the CMAC.
+
+It also checks that the UID *inside* the signature is the one in `?tag=`, so a signed
+blob cannot be lifted off one tag and pasted onto another tag's link. Which is why
+`?tag=` is still required on a 424 rather than being derived from the PICC data.
 
 That is the same security property as the rotating QR — unique per tap, unreplayable,
 bound to one location — in a sticker that costs a few pounds, needs no power, no
@@ -445,13 +482,36 @@ minute, is a cloned chip. Both are refusals, not warnings.
 
 ### 5.6 Programming the tags
 
+**The URL to write is on the provisioning station**, per order, with a copy button — the
+customer's own host, the right template for that order's chip, and the placeholder
+lengths the verifier demands. It is built by `lib/tagUrl.js`. Nothing below needs to be
+transcribed from this document.
+
 - **NTAG213** — any phone and NXP TagWriter (free). The chip supports a *UID mirror*, so
   the URL it emits can carry its own UID without per-tag hand-editing. It also has a read
   counter, but that counter is **not signed**, so it identifies a tag without proving
   anything. Fine for the tag-plus-geofence pairing; not a control on its own.
 - **NTAG 424 DNA** — needs key configuration (NXP TagXplorer, a vendor tool, or bought
   pre-programmed with keys supplied). This is a procurement decision more than a coding
-  one; budget for it before ordering twenty tags.
+  one; budget for it before ordering twenty tags. Configure SDM to mirror **UID plus read
+  counter** (PICC layout `0xC7`); any other layout is refused as a chip set up
+  differently from ours.
+
+**The three identifiers, because they are easy to confuse.** Only the first goes in a
+URL:
+
+| | what it is | in the URL? |
+|---|---|---|
+| `uid` | the chip's own hardware UID, factory-set and readable before writing | **yes** — `?tag=` |
+| `keyRef` | a pointer to the *sealed* AES key, never the key itself | no — server-side only, and stripped from the provisioning queue so it never reaches a browser |
+| `tagId` | the `ClockTag` document's `_id` in the customer's registry | no — an internal join from the order unit to the tag record |
+
+**How a chip becomes a usable tag.** Ops accepts the order (a sealed key per unit), writes
+each chip, then taps it on the station: `recordUnitWritten` reads the UID back and creates
+the `ClockTag` in the *customer's* tenant with that UID and keyRef, `status: "unassigned"`.
+The customer then binds it to a location. The UID is read from the tap rather than typed,
+because fourteen hex characters entered by hand is how the wrong tag ends up bound to the
+wrong site.
 
 ### 5.7 Admin screens this needs
 
