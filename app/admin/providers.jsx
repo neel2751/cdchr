@@ -9,6 +9,7 @@ import SidebarWrapper from "@/components/sidebar/sidebarWrapper";
 import SupportBanner from "@/components/supportBanner";
 import AnnouncementBanner from "@/components/announcementBanner";
 import ScreenViewLogger from "@/components/screenViewLogger";
+import CompanyChoicePrompt from "@/components/companyChoicePrompt";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -32,6 +33,11 @@ const AdminProviders = ({ children, branding }) => {
             {/* Records which screen is open. Mounted here so every admin
                 screen is covered by one line rather than thirty. */}
             <ScreenViewLogger />
+            {/* "Which company?" for the handful of people who work for more
+                than one. Here rather than on the login form, so it lands after
+                the two-factor gates and never has to answer which companies an
+                address belongs to before a password is checked. */}
+            <CompanyChoicePrompt />
             {/* Renders only during a support visit, above everything else. */}
             <SupportBanner />
             {/* Urgent announcements, on every admin page. Below the support

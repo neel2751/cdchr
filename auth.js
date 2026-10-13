@@ -224,13 +224,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session?.switchTenantId) {
         const membership = await assertCanSwitchTenant(
           token.id,
-          session.switchTenantId
+          session.switchTenantId,
+          token.email
         );
         if (membership) {
           token.tenantId = membership.tenantId;
           // The role travels with the company: someone can be a super admin in
           // the company they founded and an ordinary admin in another.
           token.role = membership.role;
+          // And so does WHICH RECORD they are.
+          //
+          // The same person added to two companies has a separate employee
+          // record in each, so acting as the first company's id inside the
+          // second means every personal query — their attendance, their leave,
+          // their documents — looks up an id that company has never heard of
+          // and comes back empty. The membership names the right record for
+          // the company being switched to; where it does not (an owner with
+          // one record and membership of several), the id is left alone.
+          if (membership.userId) token.id = membership.userId;
         }
       }
 

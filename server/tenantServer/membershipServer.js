@@ -27,14 +27,27 @@ import { getServerSideProps } from "../session/session";
  * name. Its callers are in this file (assertCanSwitchTenant and
  * listMyTenants), which authorise first.
  */
-async function listMembershipsFor(userId) {
+async function membershipFilter({ userId, email }) {
+  const or = [];
+  if (userId && isValidObjectId(userId)) or.push({ userId: createObjectId(userId) });
+  // By EMAIL as well as by id, because one person does not have one id.
+  //
+  // A membership's userId is an employee record, and the same person added to
+  // two companies has a different record in each — HR creates them separately,
+  // which is the whole situation this supports. Matching on the id alone found
+  // only the company they happened to sign in to, so the switcher was empty for
+  // exactly the people it exists for. The email is what is stable across
+  // companies, and it is already stored on every membership row.
+  const clean = String(email || "").trim().toLowerCase();
+  if (clean) or.push({ email: clean });
+  return or.length ? { $or: or, isActive: true } : null;
+}
+
+async function listMembershipsFor(userId, email) {
   await connect();
-  const rows = await TenantMembershipModel.find({
-    userId: createObjectId(userId),
-    isActive: true,
-  })
-    .lean()
-    .exec();
+  const filter = await membershipFilter({ userId, email });
+  if (!filter) return [];
+  const rows = await TenantMembershipModel.find(filter).lean().exec();
   if (!rows.length) return [];
 
   const tenants = await CompanyModel.find({
@@ -57,6 +70,11 @@ async function listMembershipsFor(userId) {
         appName: tenant.branding?.appName || tenant.name,
         role: r.role,
         isDefault: !!r.isDefault,
+        // Which employee record to act AS in that company. The session swaps
+        // to it on a switch, so personal data — attendance, leave, documents —
+        // resolves against the right company's record rather than coming back
+        // empty under a tenant that has never heard of this id.
+        userId: r.userId ? String(r.userId) : null,
       };
     })
     .filter(Boolean);
@@ -66,13 +84,14 @@ async function listMembershipsFor(userId) {
  * Confirm an account may act as a company, and with what role.
  * Returns null when there is no active membership.
  */
-async function resolveMembership(userId, tenantId) {
-  if (!isValidObjectId(userId) || !isValidObjectId(tenantId)) return null;
+async function resolveMembership({ userId, email }, tenantId) {
+  if (!isValidObjectId(tenantId)) return null;
   await connect();
+  const filter = await membershipFilter({ userId, email });
+  if (!filter) return null;
   const row = await TenantMembershipModel.findOne({
-    userId: createObjectId(userId),
+    ...filter,
     tenantId: createObjectId(tenantId),
-    isActive: true,
   })
     .lean()
     .exec();
@@ -81,7 +100,12 @@ async function resolveMembership(userId, tenantId) {
   const tenant = await CompanyModel.findById(tenantId).lean().exec();
   if (!tenant || !isTenantUsable(tenant)) return null;
 
-  return { tenantId: String(tenantId), role: row.role };
+  return {
+    tenantId: String(tenantId),
+    role: row.role,
+    // The record to act as in that company — see listMembershipsFor.
+    userId: row.userId ? String(row.userId) : null,
+  };
 }
 
 /** The companies the signed-in user can switch between. */
@@ -91,7 +115,7 @@ export async function getMyTenants() {
     const user = props?.session?.user;
     if (!user?._id) return { success: false, message: "Not signed in" };
 
-    const memberships = await listMembershipsFor(user._id);
+    const memberships = await listMembershipsFor(user._id, user.email);
     return {
       success: true,
       data: JSON.stringify({
@@ -110,8 +134,8 @@ export async function getMyTenants() {
  * callback in auth.js, which calls this — a client asserting a tenant id is
  * not enough, exactly as with the 2FA gate.
  */
-export async function assertCanSwitchTenant(userId, tenantId) {
-  return resolveMembership(userId, tenantId);
+export async function assertCanSwitchTenant(userId, tenantId, email) {
+  return resolveMembership({ userId, email }, tenantId);
 }
 
 // --- Platform-side management --------------------------------------------

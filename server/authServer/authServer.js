@@ -87,6 +87,67 @@ async function findAccountsByEmail(email) {
   return found;
 }
 
+/**
+ * Make sure every company this email works for is reachable from one login.
+ *
+ * The same person added to two companies has a separate employee record in
+ * each — HR creates them independently, because that is what the screens
+ * offer. Nothing linked those records, so signing in picked one company
+ * deterministically and the company switcher, which reads memberships, was
+ * empty for exactly the people it exists for.
+ *
+ * So the memberships are written here, from what the records already say:
+ * one row per company, carrying that company's own record id and the role
+ * that record actually has. Done at login rather than as a migration because
+ * it is self-healing — a person added to a third company next month is linked
+ * the next time they sign in, with nobody having to remember.
+ *
+ * Only ever adds. It never deletes a membership and never changes a role that
+ * somebody granted deliberately through the platform console, because an
+ * explicit grant outranks anything inferred from an employee record.
+ *
+ * Best-effort: a failure here must not stop a correct password from signing
+ * somebody in.
+ */
+async function linkCompaniesForEmail(email, matches) {
+  try {
+    const officeMatches = matches.filter(
+      (m) => m.userType === "office" && m.user?.tenantId
+    );
+    if (officeMatches.length < 2) return;
+
+    const normalized = String(email || "").trim().toLowerCase();
+
+    for (const { user } of officeMatches) {
+      const role = user.isSuperAdmin
+        ? "superAdmin"
+        : user.isAdmin
+        ? "admin"
+        : "user";
+
+      await escapeTenant("login: link this email's companies", () =>
+        TenantMembershipModel.updateOne(
+          { email: normalized, tenantId: user.tenantId },
+          {
+            $setOnInsert: {
+              userId: user._id,
+              userModel: "OfficeEmploye",
+              email: normalized,
+              tenantId: user.tenantId,
+              role,
+              isActive: true,
+              isDefault: false,
+            },
+          },
+          { upsert: true }
+        )
+      );
+    }
+  } catch (error) {
+    console.log("[login] could not link companies:", error?.message);
+  }
+}
+
 /** Log a duplicate and record it, without ever failing the login for it. */
 async function reportDuplicateLogin(email, matches) {
   const describe = matches
@@ -172,6 +233,9 @@ const verifyCredentials = async (email, password, deviceId) => {
    */
   if (matches.length > 1) {
     await reportDuplicateLogin(email, matches);
+    // One identity, several companies: link them so the switcher can move
+    // between them after signing in.
+    await linkCompaniesForEmail(email, matches);
     if (DUPLICATE_LOGIN_POLICY === "block") {
       return {
         status: false,
