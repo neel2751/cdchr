@@ -50,8 +50,12 @@ import {
 import { ORDER_STATUS_LABEL } from "@/lib/tagOrderStatus";
 import {
   TAG_URL_FIELD_SIZES,
+  TOKEN_STYLES,
+  clockEndpoint,
   clockUrlFor,
+  clockUrlOffsets,
   clockUrlTemplate,
+  clockUrlTokens,
 } from "@/lib/tagUrl";
 
 /**
@@ -388,12 +392,99 @@ export default function ProvisioningStation() {
                     <p className="text-xs font-medium">
                       Programme this onto every tag
                     </p>
+
+                    {/* Three forms, because writers disagree about how you
+                        tell them where the mirrored fields go, and picking
+                        the wrong one costs a tag.
+                        
+                        Zero-runs are for a writer where you type the offsets.
+                        Tokens are for one that finds the fields itself — and
+                        handed a URL with no marker it recognises, such a tool
+                        looks up -1 and then tries to pack -1 into a byte,
+                        which is exactly the "bytes must be in range (0, 256)"
+                        that sent somebody to read the source. The bare
+                        endpoint is for one that appends its own parameters. */}
+                    <p className="text-[11px] text-muted-foreground">
+                      With offsets you type in — the zeroes are what the chip
+                      overwrites:
+                    </p>
                     <code className="block overflow-x-auto rounded border bg-white px-2 py-1.5 text-[11px] whitespace-pre">
                       {clockUrlTemplate({
                         baseUrl: order.clockBaseUrl,
                         chipType: order.chipType,
                       })}
                     </code>
+
+                    {order.chipType === "ntag424" ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Offsets:{" "}
+                        {(() => {
+                          const o = clockUrlOffsets({
+                            baseUrl: order.clockBaseUrl,
+                            chipType: order.chipType,
+                          });
+                          return (
+                            <>
+                              UID <strong>{o.fromFileStart.uid}</strong>, picc{" "}
+                              <strong>{o.fromFileStart.picc}</strong>, cmac{" "}
+                              <strong>{o.fromFileStart.cmac}</strong> from the
+                              start of the NDEF file — or{" "}
+                              {o.fromUrlText.uid}/{o.fromUrlText.picc}/
+                              {o.fromUrlText.cmac} if your tool counts from the
+                              URL text. Try the first, then the second.
+                            </>
+                          );
+                        })()}
+                      </p>
+                    ) : null}
+
+                    <p className="pt-1 text-[11px] text-muted-foreground">
+                      For a writer that finds the fields itself (NFC Developer
+                      and similar — a URL and a key, no offsets):
+                    </p>
+                    {TOKEN_STYLES.map((style) => (
+                      <div
+                        key={style.label}
+                        className="flex items-center gap-2"
+                      >
+                        <code className="flex-1 overflow-x-auto rounded border bg-white px-2 py-1 text-[11px] whitespace-pre">
+                          {clockUrlTokens({
+                            baseUrl: order.clockBaseUrl,
+                            chipType: order.chipType,
+                            style,
+                          })}
+                        </code>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5 text-[11px]"
+                          onClick={() =>
+                            copy(
+                              clockUrlTokens({
+                                baseUrl: order.clockBaseUrl,
+                                chipType: order.chipType,
+                                style,
+                              }),
+                              `${style.label} URL`
+                            )
+                          }
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-muted-foreground">
+                      Use whichever spelling your writer documents. If it
+                      appends its own parameters instead, give it just{" "}
+                      <code>
+                        {clockEndpoint({ baseUrl: order.clockBaseUrl })}
+                      </code>{" "}
+                      — but the names it appends must be{" "}
+                      <code>tag</code>, <code>picc</code> and <code>cmac</code>,
+                      because those are the only ones this app reads. Write one
+                      tag, tap it, and check the URL that opens.
+                    </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button
                         type="button"
