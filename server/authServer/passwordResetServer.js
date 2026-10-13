@@ -1,5 +1,4 @@
 "use server";
-import crypto from "crypto";
 import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
@@ -10,35 +9,60 @@ import { sendTenantMail, resolveTenantAppUrl } from "../email/tenantMail";
 import { emailButton } from "@/lib/emailTemplate";
 import { clearLockByEmail } from "@/lib/rateLimit";
 import { logAuditDirect } from "@/lib/audit";
+import { escapeTenant } from "@/lib/tenantContext";
+import {
+  RESET_TTL_MIN,
+  hashToken,
+  issuePasswordToken,
+  passwordLink,
+} from "./passwordInvite";
 
-const TOKEN_TTL_MIN = 30;
-
-function hashToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
+const TOKEN_TTL_MIN = RESET_TTL_MIN;
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function findUserByEmail(email) {
+/**
+ * Every account answering to one email address.
+ *
+ * CROSS-TENANT BY NECESSITY, and this is why the whole flow was dead. The
+ * three employee collections are tenant-scoped, and under
+ * TENANT_ENFORCEMENT=enforce a query with no tenant in context throws. Nobody
+ * is signed in when they press "Forgot password", so there was no tenant, so
+ * the lookup threw, so the catch below returned the reassuring generic
+ * message — and no link was ever generated for anybody. Same position as the
+ * login lookup in authServer.js, which escapes the scope for the same reason:
+ * working out which company the account belongs to is the point of the query.
+ *
+ * ALL the matches, not the first. One email can now be an employee of several
+ * companies on purpose, with a separate record in each (see
+ * linkCompaniesForEmail), and each record carries its own password field.
+ * Login checks the first record deterministically, so resetting one record and
+ * leaving the others would set a password that the next sign-in might not be
+ * the one to check — the symptom being a reset that "did not work".
+ *
+ * Office before site before reception, each sorted by creation, so the order
+ * matches the login lookup's.
+ */
+async function findAccountsByEmail(email) {
   const normalized = (email || "").trim().toLowerCase();
-  if (!normalized) return null;
+  if (!normalized) return [];
   const rx = new RegExp(`^${escapeRegex(normalized)}$`, "i");
+  const query = { email: rx, delete: { $ne: true } };
 
-  let user = await OfficeEmployeeModel.findOne({
-    email: rx,
-    delete: { $ne: true },
+  return escapeTenant("password reset: find the account by email", async () => {
+    const found = [];
+    for (const [type, Model] of [
+      ["office", OfficeEmployeeModel],
+      ["site", EmployeModel],
+      ["reception", OfficeUserModel],
+    ]) {
+      const rows = await Model.find(query).sort({ createdAt: 1 });
+      for (const user of rows) found.push({ user, type });
+    }
+    return found;
   });
-  if (user) return { user, type: "office" };
-
-  user = await EmployeModel.findOne({ email: rx, delete: { $ne: true } });
-  if (user) return { user, type: "site" };
-
-  user = await OfficeUserModel.findOne({ email: rx, delete: { $ne: true } });
-  if (user) return { user, type: "reception" };
-
-  return null;
 }
 
 /**
@@ -56,30 +80,24 @@ export async function requestPasswordReset(email) {
       return { success: false, message: "Email is required" };
     }
     await connect();
-    const found = await findUserByEmail(email);
-    if (!found) return generic;
+    const accounts = await findAccountsByEmail(email);
+    if (!accounts.length) return generic;
 
-    const { user, type } = found;
+    // The first, which is the record login checks. Setting the password
+    // applies to every record for this address — see resetPasswordWithToken.
+    const { user, type } = accounts[0];
 
-    // Invalidate any previous outstanding tokens for this account.
-    await PasswordResetTokenModel.deleteMany({
-      userId: user._id,
-      usedAt: null,
-    });
-
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    await PasswordResetTokenModel.create({
+    const rawToken = await issuePasswordToken({
       userId: user._id,
       userType: type,
       email: user.email,
-      tokenHash: hashToken(rawToken),
-      expiresAt: new Date(Date.now() + TOKEN_TTL_MIN * 60 * 1000),
+      ttlMs: TOKEN_TTL_MIN * 60 * 1000,
     });
 
     // The link must point at the user's own company, not at one fixed host.
     const tenantId = user.tenantId ? String(user.tenantId) : null;
     const baseUrl = await resolveTenantAppUrl(tenantId);
-    const link = `${baseUrl}/reset-password?uid=${user._id}&token=${rawToken}`;
+    const link = passwordLink({ baseUrl, userId: user._id, token: rawToken });
     const name = user.name || user.firstName || "there";
     const html = `
         <p>Hi ${name},</p>
@@ -92,7 +110,13 @@ export async function requestPasswordReset(email) {
         <p>If you did not request this, you can safely ignore this email — your
         password will not change.</p>`;
 
-    await sendTenantMail({
+    // Through the company's own sender if it has configured one, and through
+    // the platform's otherwise — resolveAccount() falls back to a
+    // platform-level account and then to the EMAIL_* environment, precisely so
+    // that a company whose admin has set up no mailbox can still get password
+    // resets. A reset the customer cannot send is a customer locked out of
+    // their own workspace with nobody able to let them back in.
+    const sent = await sendTenantMail({
       tenantId,
       feature: "All",
       to: user.email,
@@ -100,6 +124,18 @@ export async function requestPasswordReset(email) {
       heading: "Password reset",
       html,
     });
+
+    // Logged, not returned: the reply stays generic whatever happens, because
+    // a different answer for "sent" and "not sent" tells an attacker which
+    // addresses have accounts. But a failure that leaves no trace at all is
+    // how this flow stayed broken — the token is written and the message is
+    // silently lost, and nothing anywhere says so.
+    if (!sent?.success) {
+      console.log(
+        `Password reset email for ${user.email} was not sent:`,
+        sent?.message,
+      );
+    }
 
     return generic;
   } catch (error) {
@@ -151,15 +187,46 @@ export async function resetPasswordWithToken({ uid, token, newPassword } = {}) {
           ? OfficeUserModel
           : OfficeEmployeeModel;
 
-    const user = await Model.findById(uid);
+    // Outside the tenant scope, like the lookup that sent the link: whoever is
+    // following it is not signed in, so there is no tenant, and under
+    // enforcement a scoped read here threw — the link worked right up to the
+    // moment somebody typed a new password, and then said "Error resetting
+    // password".
+    const user = await escapeTenant("password reset: load the account", () =>
+      Model.findById(uid),
+    );
     if (!user) return { success: false, message: "Account not found" };
 
     const hashed = await hashPassword(String(newPassword));
     if (!hashed) {
       return { success: false, message: "Failed to secure the new password" };
     }
-    user.password = hashed;
-    await user.save();
+
+    // Every record this address owns, not just the one the link named.
+    //
+    // One person can be an employee of several companies, with a separate
+    // record and a separate password field in each. Login checks whichever
+    // record sorts first, so setting the password on one and leaving the
+    // others is a reset that appears to do nothing: the new password is real,
+    // and the record being checked still holds the old one.
+    //
+    // `mustChangePassword` is cleared in the same write. The flag exists to
+    // trap somebody on the change-password screen until they have chosen their
+    // own password, and they have just done exactly that.
+    const siblings = await findAccountsByEmail(user.email);
+    const targets = siblings.length ? siblings : [{ user, type: record.userType }];
+
+    let updated = 0;
+    for (const target of targets) {
+      target.user.password = hashed;
+      if (target.user.schema?.path("mustChangePassword")) {
+        target.user.mustChangePassword = false;
+      }
+      await escapeTenant("password reset: set the password", () =>
+        target.user.save(),
+      );
+      updated += 1;
+    }
 
     record.usedAt = new Date();
     await record.save();
@@ -176,8 +243,14 @@ export async function resetPasswordWithToken({ uid, token, newPassword } = {}) {
       action: "Password.resetSelf",
       module: "Account",
       entityId: uid,
-      description: `Self-service password reset via email link for ${user.email}`,
-      after: { target: user.email, method: "forgot-password-email" },
+      description:
+        `Self-service password reset via email link for ${user.email}` +
+        (updated > 1 ? ` (${updated} company records)` : ""),
+      after: {
+        target: user.email,
+        method: "forgot-password-email",
+        recordsUpdated: updated,
+      },
     });
 
     return {

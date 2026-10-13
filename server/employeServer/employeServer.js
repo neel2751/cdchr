@@ -6,8 +6,10 @@ import { getServerSideProps } from "../session/session";
 import { hashPassword, isMatchedPassword } from "@/utils/bcrypt";
 import { extractData } from "../officeServer/officeEmployeeDetails";
 import { createObjectId } from "@/lib/mongodb";
-import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
-import { emailButton } from "@/lib/emailTemplate";
+import {
+  sendPasswordInvite,
+  unknowablePassword,
+} from "../authServer/passwordInvite";
 import { decrypt } from "@/lib/algo";
 import ClockRecordModel from "@/models/clockInModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
@@ -332,7 +334,10 @@ export const handleEmploye = withAudit(
           data.email,
         );
 
-        const password = await GenerateHashPassword("Interior@1234");
+        // A password nobody knows, replacing the hardcoded "Interior@1234"
+        // every site employee was created with. They choose their own through
+        // the link emailed below.
+        const password = await GenerateHashPassword(unknowablePassword());
         if (!isExists.status) return isExists;
         const addEmploye = await EmployeModel.create({
           ...stripRightToWorkFields(data),
@@ -356,6 +361,11 @@ export const handleEmploye = withAudit(
         const isPreviousEmployee =
           visaExp && !Number.isNaN(visaExp.getTime()) && visaExp < new Date();
 
+        // The old template emailed `password`, which at this point holds the
+        // bcrypt HASH of a password the employee was never told — so they got
+        // a hash labelled as their password and no way to sign in. They now
+        // get a link and choose their own.
+        let invite = { sent: false, message: "" };
         if (!isPreviousEmployee) {
           // `addEmploye`, not `result` — which is not a variable in this
           // function. It threw a ReferenceError the moment a site employee was
@@ -366,40 +376,25 @@ export const handleEmploye = withAudit(
           const tenantId = addEmploye.tenantId
             ? String(addEmploye.tenantId)
             : null;
-          const appUrl = await resolveTenantAppUrl(tenantId);
-          // No password in the message. `password` here is the HASH — the
-          // plaintext is the fixed default set above — so the old template
-          // emailed the employee a bcrypt string labelled as their password,
-          // which is both useless to them and a hash in somebody's inbox.
-          // Same wording as the office side, which already had this right.
-          const html = `<p>Dear ${firstName} ${lastName},</p>
-          <p>Welcome to the team. Your account has been created.</p>
-          <p><strong>Email:</strong> ${newEmail}</p>
-          <p>Use the password your administrator gave you, or reset it from the
-          sign-in page.</p>
-          ${emailButton("Sign in", appUrl)}
-          <p>If the button does not work, open: ${appUrl}</p>`;
-          const sent = await sendTenantMail({
+          invite = await sendPasswordInvite({
+            userId: addEmploye._id,
+            userType: "site",
+            email: newEmail,
+            name: `${firstName} ${lastName}`.trim(),
             tenantId,
-            feature: "HR",
-            to: newEmail,
-            subject: "Welcome to the team",
-            heading: "Your account is ready",
-            html,
           });
-          if (!sent?.success) {
-            console.log(
-              `Employee ${addEmploye._id} created; welcome email failed:`,
-              sent?.message,
-            );
-          }
         }
 
         // The employee exists either way, so this says so either way. The old
         // code returned success ONLY when the email failed and returned
         // nothing at all when it succeeded — inverted, and `undefined` reached
         // the screen as neither a success nor an error.
-        return { success: true, message: "Employee added successfully" };
+        return {
+          success: true,
+          message: invite.message
+            ? `Employee added successfully ${invite.message}`
+            : "Employee added successfully",
+        };
       }
     } catch (error) {
       console.log(error);

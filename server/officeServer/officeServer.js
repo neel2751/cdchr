@@ -31,8 +31,10 @@ async function checkTenantSeats(tenantId) {
     return { allowed: true };
   }
 }
-import { resolveTenantAppUrl, sendTenantMail } from "../email/tenantMail";
-import { emailButton } from "@/lib/emailTemplate";
+import {
+  sendPasswordInvite,
+  unknowablePassword,
+} from "../authServer/passwordInvite";
 import { syncMissingLeaveTypesNew } from "../leaveServer/countLeaveServer";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
@@ -275,7 +277,12 @@ export const handleOfficeEmployee = withAudit(
       // we have check if the email, phone, and password is not return
       if (!email || !phoneNumber)
         return { success: false, message: "Please Provid All Required Fields" };
-      const hashPass = await GenerateHashPassword("Cdc@1234");
+      // A password nobody knows, replacing the hardcoded "Cdc@1234" every
+      // office employee in every company used to be created with — a string
+      // that is in this repository, so it was one guess away from any new
+      // colleague's account. They set their own through the link emailed
+      // below; see sendPasswordInvite.
+      const hashPass = await GenerateHashPassword(unknowablePassword());
       await connect();
       // Case-insensitively, so a capital letter cannot create a second record
       // for one person. Returns the holder's name, so the refusal can say who.
@@ -324,6 +331,13 @@ export const handleOfficeEmployee = withAudit(
         const visaEnd = data?.visaEndDate ? new Date(data.visaEndDate) : null;
         const isPreviousEmployee =
           visaEnd && !Number.isNaN(visaEnd.getTime()) && visaEnd < new Date();
+        // What the welcome message says, and why it changed. It used to tell
+        // the employee to "use the password your administrator gave you" —
+        // which no administrator had, because the password was a constant in
+        // the source nobody is shown. So the only way in was to guess it or to
+        // discover "Forgot password" unprompted. Now the message carries a
+        // link that lets them set their own.
+        let invite = { sent: false, message: "" };
         if (!isPreviousEmployee) {
           // Read directly rather than through getCompanyById(), which is a
           // server action and now authorises its caller. This is server-to-
@@ -333,23 +347,13 @@ export const handleOfficeEmployee = withAudit(
           const cData = await CompanyModel.findById(company)
             .select("name")
             .lean();
-          // The link has to point at the employee's own company, not at one
-          // hardcoded host.
-          const appUrl = await resolveTenantAppUrl(company);
-          const html = `<p>Dear ${name},</p>
-          <p>Welcome to the team. Your account has been created.</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <p>Use the password your administrator gave you, or reset it from the
-          sign-in page.</p>
-          ${emailButton("Sign in", appUrl)}
-          <p>If the button does not work, open: ${appUrl}</p>`;
-          await sendTenantMail({
+          invite = await sendPasswordInvite({
+            userId: employeeId,
+            userType: "office",
+            email,
+            name,
             tenantId: company,
-            feature: "HR",
-            to: email,
-            subject: `Welcome to ${cData?.name || "the team"}`,
-            heading: "Your account is ready",
-            html,
+            companyName: cData?.name,
           });
         }
         recordAudit({
@@ -357,9 +361,14 @@ export const handleOfficeEmployee = withAudit(
           after: result.toObject(),
           description: `Created office employee ${name}`,
         });
+        // HR is told whether the employee can actually get in. A silent
+        // failure here is somebody turning up on Monday with no way to sign
+        // in and nobody aware of it.
         return {
           success: true,
-          message: "Successfully added office employee",
+          message: invite.message
+            ? `Successfully added office employee ${invite.message}`
+            : "Successfully added office employee",
         };
       } else {
         return {

@@ -16,7 +16,7 @@ import {
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-export default function ResetPasswordForm({ uid, token }) {
+export default function ResetPasswordForm({ uid, token, welcome = false }) {
   const router = useRouter();
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -49,16 +49,24 @@ export default function ResetPasswordForm({ uid, token }) {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Set a new password</CardTitle>
+          {/* A new employee following the link in their welcome email has
+              never had a password, so "reset" and "new password" would be
+              describing something they have no memory of. Same page, same
+              token, different sentence. */}
+          <CardTitle>
+            {welcome ? "Choose your password" : "Set a new password"}
+          </CardTitle>
           <CardDescription>
-            Choose a new password for your CDC HR account.
+            {welcome
+              ? "Pick a password and you are ready to sign in."
+              : "Choose a new password for your account."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {invalidLink ? (
             <div className="space-y-4 text-sm">
               <p className="text-rose-600">
-                This reset link is invalid. Please request a new one.
+                This link is invalid. Please request a new one.
               </p>
               <Button asChild variant="outline" className="w-full">
                 <Link href="/forgot-password">Request a new link</Link>
@@ -66,7 +74,11 @@ export default function ResetPasswordForm({ uid, token }) {
             </div>
           ) : done ? (
             <div className="space-y-4 text-sm">
-              <p>Your password has been reset. Redirecting you to sign in…</p>
+              <p>
+                {welcome
+                  ? "Your password is set. Redirecting you to sign in…"
+                  : "Your password has been reset. Redirecting you to sign in…"}
+              </p>
               <Button asChild className="w-full">
                 <Link href="/auth">Go to sign in</Link>
               </Button>
@@ -74,7 +86,9 @@ export default function ResetPasswordForm({ uid, token }) {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="new-password">New password</Label>
+                <Label htmlFor="new-password">
+                  {welcome ? "Password" : "New password"}
+                </Label>
                 <Input
                   id="new-password"
                   type="password"
@@ -90,14 +104,14 @@ export default function ResetPasswordForm({ uid, token }) {
                   id="confirm-password"
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Re-enter new password"
+                  placeholder={welcome ? "Re-enter password" : "Re-enter new password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                 />
               </div>
               <Button type="submit" className="w-full" disabled={isPending}>
                 {isPending && <Loader2 className="animate-spin" />}
-                Reset password
+                {welcome ? "Set password and sign in" : "Reset password"}
               </Button>
             </form>
           )}

@@ -7,6 +7,10 @@ import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import ClockLocationModel from "@/models/clockLocationModel";
 import EmployeModel from "@/models/employeModel";
 import { connect } from "@/db/db";
+import {
+  sendPasswordInvite,
+  unknowablePassword,
+} from "../authServer/passwordInvite";
 
 /**
  * Turn whatever the form sent into a usable office id, or null.
@@ -73,7 +77,11 @@ export async function createReceptionUser(data, userId) {
         };
       }
 
-      const password = await hashPassword("Cdc@1234");
+      // A password nobody knows, replacing the hardcoded "Cdc@1234" — the same
+      // string every reception desk in every company was created with, and a
+      // reception account is the one that signs visitors in and out. Whoever
+      // staffs the desk sets their own through the emailed link below.
+      const password = await hashPassword(unknowablePassword());
       // create the user
       const newUser = new OfficeUserModel({
         ...data,
@@ -88,9 +96,21 @@ export async function createReceptionUser(data, userId) {
         updatedBy: user._id,
       });
       await newUser.save();
+
+      // The desk has to be able to sign in, and nobody has a password to give
+      // them. Best-effort: the account exists either way, and the message says
+      // which happened.
+      const invite = await sendPasswordInvite({
+        userId: newUser._id,
+        userType: "reception",
+        email,
+        name: data?.name,
+        tenantId: newUser.tenantId ? String(newUser.tenantId) : null,
+      });
+
       return {
         success: true,
-        message: "Reception user created successfully",
+        message: `Reception user created successfully ${invite.message}`.trim(),
       };
     } catch (error) {
       console.log("Error creating reception user:", error);
