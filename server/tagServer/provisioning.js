@@ -3,7 +3,7 @@
 import { connect } from "@/db/db";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
-import { platformClockOrigin } from "@/lib/tagUrl";
+import { platformOrigin } from "@/lib/tenantHost";
 import {
   generateTagKey,
   openTagKey,
@@ -127,7 +127,7 @@ export async function getProvisioningQueue() {
     // the signed-in employee's own company (ClockTag is tenant-scoped), so a
     // tap only ever finds a tag their company owns. See the note in
     // lib/tagUrl.js and the /clock branch in proxy.js.
-    const clockBaseUrl = platformClockOrigin();
+    const clockBaseUrl = platformOrigin();
 
     // Which chip each order is for, so the station can show the right URL
     // template. Stated here rather than inferred on the screen: the obvious

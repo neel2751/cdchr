@@ -10,6 +10,7 @@ import {
   normalizeHost,
   platformApexHost,
   platformRootDomain,
+  tenantSubdomainsLive,
 } from "./lib/tenantHost";
 
 // Host -> resolution cache. Middleware module scope survives between requests
@@ -212,17 +213,25 @@ async function checkRoleMiddleware(req) {
   // because signup and the confirmation page are on exactly that host.
   //
   // A workspace lives at its own address, so that is where they are sent, on
-  // the path they asked for. `tenantSlug` rides on the session (auth.config.js)
-  // because middleware runs on the edge and cannot look it up; a session minted
-  // before that field existed has none, and falls through to the old behaviour.
+  // the path they asked for — WHEN that address is being served. `tenantSlug`
+  // rides on the session (auth.config.js) because middleware runs on the edge
+  // and cannot look it up; a session minted before that field existed has
+  // none, and is served here like any other.
   if (onPlatformHost) {
     if (userRole === "platformAdmin") {
       return NextResponse.redirect(new URL("/platform", req.url));
     }
 
+    // ONLY WHEN THOSE SUBDOMAINS ARE ACTUALLY SERVED. PLATFORM_ROOT_DOMAIN
+    // says what a tenant's address would be, not that anything answers there
+    // — and sending somebody to a host that does not resolve is worse than
+    // the problem this branch was added to fix: they arrive at a browser error
+    // page with no way back, having done nothing wrong but sign in. See
+    // tenantSubdomainsLive() for why that needs saying separately (a wildcard
+    // certificate two labels deep is not something a DNS record buys).
     const root = platformRootDomain();
     const slug = user?.tenantSlug;
-    if (root && slug) {
+    if (root && slug && tenantSubdomainsLive()) {
       // Built from the parts rather than by editing req.url. Behind a proxy
       // req.url is the INTERNAL address — the same trap noted on the callback
       // URL in lib/roleHome.js — so reusing it carried a 127.0.0.1 port into a
@@ -236,7 +245,13 @@ async function checkRoleMiddleware(req) {
       );
     }
 
-    return NextResponse.redirect(new URL("/unauthorized", req.url));
+    // No separate address to send them to, so this host IS their workspace —
+    // it already serves /signup and /auth. Deliberately falls THROUGH to the
+    // role-prefix and 2FA checks below rather than returning: this branch is
+    // about which host, and returning here would hand a tenant user every path
+    // on it with no role check at all. Previously this was /unauthorized,
+    // which locked out every user of a deployment whose subdomains are not
+    // live — including the super admin who had just signed up.
   }
 
   // A platform admin has no place inside a tenant's app — unless a support

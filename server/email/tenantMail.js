@@ -20,7 +20,7 @@ import { decrypt } from "@/lib/algo";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { primaryDomain, resolveBranding } from "@/lib/tenant";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
-import { originForHost } from "@/lib/tenantHost";
+import { originForTenant, platformOrigin } from "@/lib/tenantHost";
 import { renderBrandedEmail } from "@/lib/emailTemplate";
 import { envSmtpConfig, resolveSmtpHost } from "@/lib/smtp";
 import { DEFAULT_EMAIL_FEATURE } from "@/data/emailFeatures";
@@ -46,6 +46,9 @@ import { sendMail as transportSend } from "../nodeMailerServer/nodemailerServer"
  *      any of this existed
  *
  * Which feature each kind of message asks for is listed in data/emailFeatures.js.
+ *
+ * The LINKS inside a message are a separate question from which mailbox sends
+ * it, and are answered by originForTenant in lib/tenantHost.js.
  */
 
 /** Decrypt an account's password and shape it for the transport. */
@@ -114,8 +117,16 @@ async function resolveAccount(tenantId, feature) {
 
 /** Branding plus the absolute URL to use in links, for one company. */
 async function resolveSenderIdentity(tenantId) {
+  // No tenant — platform mail, or a message about something that belongs to
+  // nobody's company. Our own host, not an empty string: an empty appUrl used
+  // to reach a template as `${appUrl}/admin/...`, which renders a link
+  // beginning with a slash and opens the wrong thing.
   if (!tenantId || !isValidObjectId(tenantId)) {
-    return { branding: resolveBranding(null), appUrl: "", companyName: "" };
+    return {
+      branding: resolveBranding(null),
+      appUrl: platformOrigin(),
+      companyName: "",
+    };
   }
   await connect();
   const tenant = await escapeTenant("email: sender branding", () =>
@@ -124,19 +135,24 @@ async function resolveSenderIdentity(tenantId) {
       .lean()
   );
   if (!tenant) {
-    return { branding: resolveBranding(null), appUrl: "", companyName: "" };
+    return {
+      branding: resolveBranding(null),
+      appUrl: platformOrigin(),
+      companyName: "",
+    };
   }
-
-  const host =
-    primaryDomain(tenant) ||
-    (tenant.slug && process.env.PLATFORM_ROOT_DOMAIN
-      ? `${tenant.slug}.${process.env.PLATFORM_ROOT_DOMAIN}`
-      : "");
 
   return {
     branding: resolveBranding(tenant),
-    // Falls back to the configured public URL so links are never relative.
-    appUrl: host ? originForHost(host) : process.env.NEXT_PUBLIC_WEB_URL || "",
+    // One basis for every link in every email — see originForTenant. It used
+    // to be assembled here, and the `<slug>.<root>` half assumed that address
+    // was being served. On a deployment where it is not, every link in every
+    // message pointed at a host no phone can open: the welcome email's "if the
+    // button does not work, open:", the password-reset button, announcements.
+    appUrl: originForTenant({
+      primaryHost: primaryDomain(tenant),
+      slug: tenant.slug,
+    }),
     companyName: tenant.name,
   };
 }
@@ -144,13 +160,14 @@ async function resolveSenderIdentity(tenantId) {
 /**
  * The absolute origin to put in a company's links.
  *
- * Its primary verified domain, else its <slug>.<root> address, else the
- * configured public URL. Never NEXTAUTH_URL, which is deliberately unset so
- * Auth.js derives per-request URLs, and which pointed at one fixed host anyway.
+ * Decided by originForTenant in lib/tenantHost.js: a domain the customer has
+ * verified, then their <slug>.<root> address IF those are being served, then
+ * ours. Never NEXTAUTH_URL, which is deliberately unset so Auth.js derives
+ * per-request URLs, and which pointed at one fixed host anyway.
  */
 export async function resolveTenantAppUrl(tenantId) {
   const { appUrl } = await resolveSenderIdentity(tenantId);
-  return appUrl || process.env.NEXT_PUBLIC_WEB_URL || "";
+  return appUrl || platformOrigin();
 }
 
 /**
