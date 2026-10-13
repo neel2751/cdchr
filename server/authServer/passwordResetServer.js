@@ -3,7 +3,9 @@ import { connect } from "@/db/db";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeUserModel from "@/models/officeModel";
+import PlatformUserModel from "@/models/platformUserModel";
 import PasswordResetTokenModel from "@/models/passwordResetTokenModel";
+import { originForHost, platformApexHost } from "@/lib/tenantHost";
 import { hashPassword } from "@/utils/bcrypt";
 import { sendTenantMail, resolveTenantAppUrl } from "../email/tenantMail";
 import { emailButton } from "@/lib/emailTemplate";
@@ -42,9 +44,31 @@ function escapeRegex(str) {
  * leaving the others would set a password that the next sign-in might not be
  * the one to check — the symptom being a reset that "did not work".
  *
- * Office before site before reception, each sorted by creation, so the order
- * matches the login lookup's.
+ * Office, site, reception, then platform — the same order as ACCOUNT_SOURCES
+ * in authServer.js, so the record this flow treats as primary is the one login
+ * will actually check.
+ *
+ * PLATFORM ADMINS ARE INCLUDED, and were not. They are the one kind of account
+ * with nobody above them: there is no administrator who can reset them, and a
+ * deployment usually has exactly one. Leaving them out of the only
+ * self-service recovery there is meant a lost platform password could be fixed
+ * only by editing the database.
  */
+const ACCOUNT_SOURCES = [
+  { type: "office", model: () => OfficeEmployeeModel },
+  { type: "site", model: () => EmployeModel },
+  { type: "reception", model: () => OfficeUserModel },
+  { type: "platform", model: () => PlatformUserModel },
+];
+
+/** The collection a token's userType refers to. */
+function modelForType(type) {
+  return (
+    ACCOUNT_SOURCES.find((s) => s.type === type)?.model() ||
+    OfficeEmployeeModel
+  );
+}
+
 async function findAccountsByEmail(email) {
   const normalized = (email || "").trim().toLowerCase();
   if (!normalized) return [];
@@ -53,13 +77,9 @@ async function findAccountsByEmail(email) {
 
   return escapeTenant("password reset: find the account by email", async () => {
     const found = [];
-    for (const [type, Model] of [
-      ["office", OfficeEmployeeModel],
-      ["site", EmployeModel],
-      ["reception", OfficeUserModel],
-    ]) {
-      const rows = await Model.find(query).sort({ createdAt: 1 });
-      for (const user of rows) found.push({ user, type });
+    for (const source of ACCOUNT_SOURCES) {
+      const rows = await source.model().find(query).sort({ createdAt: 1 });
+      for (const user of rows) found.push({ user, type: source.type });
     }
     return found;
   });
@@ -94,9 +114,18 @@ export async function requestPasswordReset(email) {
       ttlMs: TOKEN_TTL_MIN * 60 * 1000,
     });
 
-    // The link must point at the user's own company, not at one fixed host.
+    // The link must point at the user's own company, not at one fixed host —
+    // and a platform admin has no company, so theirs points at the platform's
+    // own host. Without this their link would be built from
+    // NEXT_PUBLIC_WEB_URL, which on a multi-tenant deployment is somebody
+    // else's workspace.
     const tenantId = user.tenantId ? String(user.tenantId) : null;
-    const baseUrl = await resolveTenantAppUrl(tenantId);
+    const baseUrl =
+      type === "platform"
+        ? originForHost(platformApexHost()) ||
+          process.env.NEXT_PUBLIC_WEB_URL ||
+          ""
+        : await resolveTenantAppUrl(tenantId);
     const link = passwordLink({ baseUrl, userId: user._id, token: rawToken });
     const name = user.name || user.firstName || "there";
     const html = `
@@ -180,12 +209,7 @@ export async function resetPasswordWithToken({ uid, token, newPassword } = {}) {
       };
     }
 
-    const Model =
-      record.userType === "site"
-        ? EmployeModel
-        : record.userType === "reception"
-          ? OfficeUserModel
-          : OfficeEmployeeModel;
+    const Model = modelForType(record.userType);
 
     // Outside the tenant scope, like the lookup that sent the link: whoever is
     // following it is not signed in, so there is no tenant, and under

@@ -58,7 +58,8 @@
     "tag:test:webhook": "node --import ./scripts/lib/alias-loader.mjs scripts/test-stripe-webhook.mjs",
     "tag:test:dunning": "node --import ./scripts/lib/alias-loader.mjs scripts/test-dunning.mjs",
     "tag:test:ledger": "node --import ./scripts/lib/alias-loader.mjs scripts/test-ledger.mjs",
-    "audit:screens": "node scripts/screen-usage.mjs"
+    "audit:screens": "node scripts/screen-usage.mjs",
+    "passwords:retire": "node --import ./scripts/lib/alias-loader.mjs scripts/retire-default-passwords.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1087.0",
