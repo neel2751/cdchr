@@ -348,42 +348,58 @@ export const handleEmploye = withAudit(
           after: addEmploye.toObject(),
           description: `Created field employee ${addEmploye.firstName} ${addEmploye.lastName}`,
         });
-        if (addEmploye) {
-          const { firstName, lastName, email } = addEmploye; // get the employee id
-          // Previous / historical employees are entered with a visa expiry that
-          // is already in the past — we are only recording their data, so we
-          // must NOT email them login credentials.
-          const visaExp = data?.eVisaExp ? new Date(data.eVisaExp) : null;
-          const isPreviousEmployee =
-            visaExp && !Number.isNaN(visaExp.getTime()) && visaExp < new Date();
-          if (!isPreviousEmployee) {
-            // The link points at the employee's own company; the sender and
-            // branding come from that company too.
-            const tenantId = result?.tenantId ? String(result.tenantId) : null;
-            const appUrl = await resolveTenantAppUrl(tenantId);
-            const html = `<p>Dear ${firstName} ${lastName},</p>
+        const { firstName, lastName, email: newEmail } = addEmploye;
+        // Previous / historical employees are entered with a visa expiry that
+        // is already in the past — we are only recording their data, so we
+        // must NOT email them login credentials.
+        const visaExp = data?.eVisaExp ? new Date(data.eVisaExp) : null;
+        const isPreviousEmployee =
+          visaExp && !Number.isNaN(visaExp.getTime()) && visaExp < new Date();
+
+        if (!isPreviousEmployee) {
+          // `addEmploye`, not `result` — which is not a variable in this
+          // function. It threw a ReferenceError the moment a site employee was
+          // added, and the throw landed in the catch below, so every single
+          // add reported "Somthing Went Wrong..." about a record that had in
+          // fact just been created. HR added the person, saw a failure, and
+          // added them again.
+          const tenantId = addEmploye.tenantId
+            ? String(addEmploye.tenantId)
+            : null;
+          const appUrl = await resolveTenantAppUrl(tenantId);
+          // No password in the message. `password` here is the HASH — the
+          // plaintext is the fixed default set above — so the old template
+          // emailed the employee a bcrypt string labelled as their password,
+          // which is both useless to them and a hash in somebody's inbox.
+          // Same wording as the office side, which already had this right.
+          const html = `<p>Dear ${firstName} ${lastName},</p>
           <p>Welcome to the team. Your account has been created.</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Password:</strong> ${password}</p>
+          <p><strong>Email:</strong> ${newEmail}</p>
+          <p>Use the password your administrator gave you, or reset it from the
+          sign-in page.</p>
           ${emailButton("Sign in", appUrl)}
           <p>If the button does not work, open: ${appUrl}</p>`;
-            const sent = await sendTenantMail({
-              tenantId,
-              feature: "HR",
-              to: email,
-              subject: "Welcome to the team",
-              heading: "Your account is ready",
-              html,
-            });
-            if (!sent?.success) {
-              const data = {
-                success: true,
-                message: `Employee added successfully`,
-              };
-              return data;
-            }
+          const sent = await sendTenantMail({
+            tenantId,
+            feature: "HR",
+            to: newEmail,
+            subject: "Welcome to the team",
+            heading: "Your account is ready",
+            html,
+          });
+          if (!sent?.success) {
+            console.log(
+              `Employee ${addEmploye._id} created; welcome email failed:`,
+              sent?.message,
+            );
           }
         }
+
+        // The employee exists either way, so this says so either way. The old
+        // code returned success ONLY when the email failed and returned
+        // nothing at all when it succeeded — inverted, and `undefined` reached
+        // the screen as neither a success nor an error.
+        return { success: true, message: "Employee added successfully" };
       }
     } catch (error) {
       console.log(error);
@@ -393,64 +409,65 @@ export const handleEmploye = withAudit(
   { module: "Employee" },
 );
 
+/**
+ * Is this email already a site employee of THIS company?
+ *
+ * Scoped by the tenant plugin, so "this company" is automatic — the same
+ * person can be on two companies' books, and only a whole new workspace is
+ * judged globally.
+ *
+ * THE PHONE IS NO LONGER CHECKED. It used to refuse any number already on
+ * another record, which blocked the way site work is actually organised: one
+ * cabin landline, or a supervisor whose mobile is the contact number for the
+ * labourers in his van. Nothing here signs in by phone or looks anybody up by
+ * it, and there is no unique index on it — it is contact information, and two
+ * people sharing one is a fact about them, not a mistake to reject. The same
+ * reasoning as the office side; see the note in officeServer/officeServer.js.
+ *
+ * Case-insensitive, which it was not: the create path lowercases nothing, so
+ * "Sam@Example.com" slipped past a record holding "sam@example.com" and became
+ * a second record for one person in one company.
+ *
+ * The holder's name comes back rather than a bare true, because "already in
+ * use" leaves HR searching a staff list for a record that is usually right
+ * there on screen.
+ *
+ * `phone` is still a parameter: the callers pass it, and the signature is left
+ * alone so this stays a two-line diff at both of them.
+ */
 const EmployePhoneAndEmailExists = async (id, phone, email) => {
   try {
-    if (id) {
-      if (email === "") {
-        const phoneExist = await EmployeModel.findOne({
-          phone,
-          _id: { $ne: id },
-        });
-        if (phoneExist)
-          return { status: false, message: "Phone number already exist" };
-        return { status: true, message: "Phone number is available" };
-      } else {
-        const phoneExist = await EmployeModel.findOne({
-          phone,
-          _id: { $ne: id },
-        });
-        const emailExist = await EmployeModel.findOne({
-          email,
-          _id: { $ne: id },
-        });
-        if (phoneExist || emailExist) {
-          return {
-            status: false,
-            message: "This Phone  or Email is already in use.",
-          };
-        } else {
-          return { status: true, message: "Both fields are available" };
-        }
-      }
-    } else {
-      // if email is empty  then only check for the phone otherwise both should be checked $or operator
-      if (email === "") {
-        const phoneCheck = await EmployeModel.findOne({ phone: phone });
-        if (phoneCheck) {
-          return {
-            status: false,
-            message: "The provided phone number is already registered.",
-          };
-        } else {
-          return { status: true };
-        }
-      } else {
-        const combinedCheck = await EmployeModel.findOne({
-          $or: [{ email }, { phone }],
-        });
-        if (combinedCheck) {
-          return {
-            status: false,
-            message:
-              "The provided email or phone number is already registered.",
-          };
-        } else {
-          return { status: true };
-        }
-      }
-    }
+    const clean = String(email || "").trim();
+    // No email to collide with. The phone used to be checked in this case and
+    // is not any more, so there is nothing left to refuse.
+    if (!clean) return { status: true };
+
+    const rx = new RegExp(
+      `^${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+      "i",
+    );
+    const query = { email: rx };
+    if (id) query._id = { $ne: id };
+
+    const holder = await EmployeModel.findOne(query)
+      .select("firstName lastName")
+      .lean();
+    if (!holder) return { status: true };
+
+    const who =
+      [holder.firstName, holder.lastName].filter(Boolean).join(" ") ||
+      "Another employee";
+    return {
+      status: false,
+      message: `${who} already uses that email address at this company`,
+    };
   } catch (err) {
     console.log(err);
+    // Fail closed: an unreadable answer must not be read as "available".
+    return {
+      status: false,
+      message: "Could not check that email address. Please try again.",
+    };
   }
 };
 

@@ -162,18 +162,33 @@ async function emailTakenInCompany(email, exceptId) {
   const rx = new RegExp(`^${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
   const query = { email: rx, delete: { $ne: true } };
   if (exceptId) query._id = { $ne: exceptId };
-  return Boolean(await OfficeEmployeeModel.exists(query));
+  // The holder's name, not just a yes: "already in use" sends HR hunting
+  // through a staff list, and the answer is often a record they can see on
+  // screen — their own, or somebody they archived.
+  const holder = await OfficeEmployeeModel.findOne(query).select("name").lean();
+  return holder ? holder.name || "another employee" : false;
 }
 
-/** The same question for a phone number. Kept separate so the refusal can say which. */
-async function phoneTakenInCompany(phoneNumber, exceptId) {
-  if (phoneNumber === undefined || phoneNumber === null || phoneNumber === "") {
-    return false;
-  }
-  const query = { phoneNumber, delete: { $ne: true } };
-  if (exceptId) query._id = { $ne: exceptId };
-  return Boolean(await OfficeEmployeeModel.exists(query));
-}
+/*
+ * THERE IS NO PHONE CHECK, and that is a decision rather than an omission.
+ *
+ * There was one, refusing any number already on another record in the company.
+ * It blocked real cases and protected nothing. A number is contact
+ * information here, not identity: nothing signs in with it, nothing is looked
+ * up by it, and there is no unique index on it — grep phoneNumber and every
+ * read is a screen printing it or a CSV exporting it.
+ *
+ * What it blocked was ordinary. One switchboard with extensions; a site
+ * manager whose mobile is the number for the two apprentices who ride in his
+ * van; the founder, added at signup with their own mobile, adding themselves
+ * again under a work address. All three got "Another employee at this company
+ * already uses that phone number" — about a record they own, in a company
+ * where sharing a number is how the work is organised.
+ *
+ * Email is still checked, because that one IS identity: it is the sign-in
+ * credential, so two records sharing it in one company is a person who cannot
+ * be told apart from themselves.
+ */
 
 export const handleOfficeEmployee = withAudit(
   "OfficeEmployee.upsert",
@@ -211,26 +226,21 @@ export const handleOfficeEmployee = withAudit(
       if (!updatedEmp) {
         return { success: false, message: "Employee Not Found" };
       }
-      // Each check runs only when the payload actually carries that field:
-      // Mongoose drops undefined keys from a query, so `{ email: undefined }`
-      // would match the first other employee in the company and refuse a
-      // legitimate save.
+      // Only when the payload actually carries the field: Mongoose drops
+      // undefined keys from a query, so `{ email: undefined }` would match the
+      // first other employee in the company and refuse a legitimate save.
       //
-      // Reported separately, because "email or phone" leaves HR guessing which
-      // one to change — and a phone collision is usually a shared office line
-      // rather than a mistake.
-      if (payload.email && (await emailTakenInCompany(payload.email, id))) {
-        throw new Error(
-          "Another employee at this company already uses that email address"
-        );
-      }
-      if (
-        payload.phoneNumber &&
-        (await phoneTakenInCompany(payload.phoneNumber, id))
-      ) {
-        throw new Error(
-          "Another employee at this company already uses that phone number"
-        );
+      // Returned, not thrown. A throw here reached the catch at the bottom and
+      // came back as "Something went wrong on Office Employee", so HR editing
+      // somebody's address onto a colleague's got a generic failure instead of
+      // the one sentence that explains it.
+      const emailHolder =
+        payload.email && (await emailTakenInCompany(payload.email, id));
+      if (emailHolder) {
+        return {
+          success: false,
+          message: `${emailHolder} already uses that email address at this company`,
+        };
       }
       // if the email is changing we have to convert it to lowercase
       if (payload.email) payload.email = payload.email.toLowerCase();
@@ -267,12 +277,10 @@ export const handleOfficeEmployee = withAudit(
         return { success: false, message: "Please Provid All Required Fields" };
       const hashPass = await GenerateHashPassword("Cdc@1234");
       await connect();
-      // Asked as two questions so the refusal below can say which field, and
-      // case-insensitively so a capital letter cannot create a second record
-      // for one person.
+      // Case-insensitively, so a capital letter cannot create a second record
+      // for one person. Returns the holder's name, so the refusal can say who.
       const emailTaken = await emailTakenInCompany(email);
-      const phoneTaken = emailTaken ? false : await phoneTakenInCompany(phoneNumber);
-      if (!emailTaken && !phoneTaken) {
+      if (!emailTaken) {
         // Seat limit. Unlimited unless the platform team has set a number, so
         // this caps nobody who has not been given one.
         const { props: sessionProps } = await getServerSideProps();
@@ -356,9 +364,7 @@ export const handleOfficeEmployee = withAudit(
       } else {
         return {
           success: false,
-          message: emailTaken
-            ? "Another employee at this company already uses that email address"
-            : "Another employee at this company already uses that phone number",
+          message: `${emailTaken} already uses that email address at this company`,
         };
       }
     }
