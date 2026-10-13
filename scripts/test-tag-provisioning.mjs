@@ -223,7 +223,12 @@ async function main() {
       }),
     );
     assert.equal(res.success, false);
-    assert.match(res.message, /minimum order/i);
+    // The refusal stopped saying "minimum order" when the minimum became a
+    // BATCH minimum that only applies when stock has run out — it now names
+    // the product and the batch size, because "minimum order quantity is 5"
+    // was untrue for a customer buying the sixth tag off a shelf that has
+    // four left. See orderQuantityRefusal in lib/tagStock.js.
+    assert.match(res.message, /minimum \d+/i);
   });
 
   await check("an ordinary admin cannot place an order", async () => {

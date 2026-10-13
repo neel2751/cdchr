@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useSession } from "next-auth/react";
 import {
   Clock4,
@@ -29,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useFetchQuery } from "@/hooks/use-query";
+import { homePathForRole } from "@/lib/roleHome";
 import { collectClockEvidence } from "@/lib/clockEvidence";
 import { flushQueue, queueTap, queuedCount } from "@/lib/offlineQueue";
 import { syncOfflineTaps } from "@/server/clockServer/offlineSync";
@@ -251,12 +253,27 @@ export default function TapToClock({ uid, picc, cmac }) {
               (isError ? "Could not read that tag." : "Unknown tag.")}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {/* What to do next depends on who can actually fix it. "Your manager
+              can set this up" is right for a tag nobody has registered and
+              wrong for a tag that was programmed badly — no manager can fix
+              that from a screen, and sending an employee to ask makes them
+              chase something nobody on their side can do. */}
           <p className="text-xs text-neutral-500">
-            {session?.user?.role === "superAdmin"
-              ? "You can set this tag up from Leave Management → Settings → Clock-in Tags."
-              : "Your manager can set this up, or you can clock in the usual way."}
+            {state?.state === "invalid" || state?.state === "unverifiable"
+              ? "This is how the tag was written, not anything to do with your account. Whoever supplied the tag needs to programme it again."
+              : session?.user?.role === "superAdmin"
+                ? "You can set this tag up from Leave Management → Settings → Clock-in Tags."
+                : "Your manager can set this up."}
           </p>
+          {/* Always offered, because the point of this screen is somebody
+              standing at a door trying to start their shift. A dead end that
+              mentions "the usual way" without being it is not help. */}
+          <Button asChild variant="outline" size="sm" className="w-full">
+            <Link href={homePathForRole(session?.user?.role)}>
+              Clock in the usual way
+            </Link>
+          </Button>
         </CardContent>
       </Card>
     );

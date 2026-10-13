@@ -17,7 +17,55 @@ export function normaliseUid(raw) {
   // 4-byte and 7-byte UIDs are the common ones; allow a little either side
   // rather than rejecting a chip nobody anticipated.
   if (cleaned.length < 8 || cleaned.length > 32) return null;
+  // All zeros is the URL TEMPLATE, not a chip. The zero-run in the programmed
+  // URL is what the chip's UID mirror overwrites, so zeros arriving here mean
+  // the mirror was never switched on and the chip is sending the placeholder
+  // back verbatim.
+  //
+  // It had to be rejected rather than merely reported: it is a well-formed
+  // hex string of the right length, so it used to go straight to the lookup
+  // and come back "unknown" — and a super admin tapping it would ENROL it,
+  // creating a tag whose UID is zeros. Every badly written chip in the
+  // company would then match that one tag and clock people in at its
+  // location. No real UID is zeros; NXP chips begin with 0x04.
+  if (/^0+$/.test(cleaned)) return null;
   return cleaned;
+}
+
+/**
+ * Why a link arrived with no readable tag id.
+ *
+ * Every one of these is a chip that was written wrong, not an employee who did
+ * anything wrong, and each has a different fix:
+ *
+ *   {UID} still in the URL  — the example URL was programmed verbatim and the
+ *                             placeholder was never substituted. Whoever wrote
+ *                             the tag has to write it again.
+ *   all zeros               — the zero-run template went on, but the chip's
+ *                             UID mirror was never switched on, so the chip is
+ *                             not filling it in. Also a rewrite, in the
+ *                             writer's settings rather than the URL.
+ *   anything else           — truncated or mangled, usually a link that was
+ *                             typed or copied by hand.
+ */
+function unreadableUidMessage(raw) {
+  const value = String(raw || "");
+  if (!value) {
+    return "That link did not include a tag id. Tap the tag rather than opening a saved link.";
+  }
+  if (/[{}%<>]/.test(value) || /^(uid|tag)$/i.test(value)) {
+    return (
+      "This tag was programmed with the example URL — the {UID} placeholder " +
+      "is still in it. It needs writing again with a real tag id."
+    );
+  }
+  if (/^0+$/.test(value.replace(/[^0-9a-fA-F]/g, ""))) {
+    return (
+      "This tag is not filling in its own id — it was written without the " +
+      "UID mirror switched on. It needs writing again."
+    );
+  }
+  return "That tag id could not be read. Tap the tag again, or tell your manager.";
 }
 
 /**
@@ -37,7 +85,15 @@ export async function resolveTag(rawUid, { picc, cmac } = {}) {
 
   const uid = normaliseUid(rawUid);
   if (!uid) {
-    return { ok: false, status: "invalid", message: "That tag could not be read." };
+    // Why it could not be read, because the three causes need different people
+    // to do different things and "that tag could not be read" sent everybody
+    // to their manager — including the operator at the bench who had just
+    // written the chip wrong and was the only one who could fix it.
+    return {
+      ok: false,
+      status: "invalid",
+      message: unreadableUidMessage(rawUid),
+    };
   }
 
   const tag = await ClockTagModel.findOne({ uid }).lean();

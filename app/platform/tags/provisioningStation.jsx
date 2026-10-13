@@ -380,19 +380,31 @@ export default function ProvisioningStation() {
                     The station's entire job is writing chips and until now it
                     never said what to write: the format lived in a comment in
                     app/clock/page.jsx and the plan document described an older
-                    one. The host matters as much as the path — a tag written
-                    with the wrong company's host sends every tap to a
-                    workspace its employees cannot sign into — so it is this
-                    order's customer's own origin, not a guess.
+                    one.
                 
-                    One string for the whole order, because both chips mirror
-                    their own UID into the URL. That is also the safer way
-                    round: no per-tag editing means no chance of tag 14's UID
-                    ending up on tag 15. */}
+                    THE HOST IS OURS, not the customer's. It used to be their
+                    own <slug>.<root> address, which needs a wildcard DNS
+                    record and a certificate a wildcard two labels deep —
+                    neither of which a new deployment has, so those tags
+                    pointed at a host that does not resolve. And a chip is
+                    written once: the one address that must still work in three
+                    years is the platform's. lib/tagUrl.js has the full
+                    reasoning, including why sharing a host separates nothing
+                    (the UID is looked up inside the tapper's own company).
+                
+                    One string for every tag, because both chips mirror their
+                    own UID into the URL. That is also the safer way round: no
+                    per-tag editing means no chance of tag 14's UID ending up
+                    on tag 15. */}
                 {order.clockBaseUrl ? (
                   <div className="space-y-1.5 rounded-md border bg-neutral-50 p-2">
                     <p className="text-xs font-medium">
                       Programme this onto every tag
+                    </p>
+                    <p className="text-[11px] text-neutral-500">
+                      Our host, not the customer&apos;s — the same URL on every
+                      tag we write. A tap finds the tag inside the employee&apos;s
+                      own company.
                     </p>
 
                     {/* Three forms, because writers disagree about how you

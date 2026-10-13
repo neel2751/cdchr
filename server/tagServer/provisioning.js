@@ -3,6 +3,7 @@
 import { connect } from "@/db/db";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
+import { platformClockOrigin } from "@/lib/tagUrl";
 import {
   generateTagKey,
   openTagKey,
@@ -109,16 +110,24 @@ export async function getProvisioningQueue() {
     );
     const nameOf = new Map(companies.map((c) => [String(c._id), c.name]));
 
-    // Each customer's own origin, so the station can show the URL to programme
-    // rather than leaving the operator to work out which host this order's
-    // tags should point at. A tag written with the wrong company's host sends
-    // every tap to a workspace its employees cannot sign into.
-    const origins = new Map();
-    for (const tenantId of new Set(
-      orders.map((o) => (o.tenantId ? String(o.tenantId) : "")).filter(Boolean)
-    )) {
-      origins.set(tenantId, await resolveTenantAppUrl(tenantId));
-    }
+    // THE PLATFORM'S OWN HOST, not the customer's. One URL for every tag we
+    // ever write, and the reasoning is worth keeping:
+    //
+    //  - A chip is written once and lives on a wall for years. Whatever host
+    //    is on it is permanent, so it must be the one address we are certain
+    //    will still be ours — not a customer's subdomain, which a customer
+    //    can replace with their own domain the week after the stickers arrive.
+    //
+    //  - `<slug>.<root>` needs a wildcard DNS record AND a certificate for a
+    //    wildcard two labels deep, which the usual free universal certificates
+    //    do not issue. Tags written against a host that does not resolve are a
+    //    drawer of dead stickers.
+    //
+    // Nothing is lost by sharing the host: the tag's UID is looked up inside
+    // the signed-in employee's own company (ClockTag is tenant-scoped), so a
+    // tap only ever finds a tag their company owns. See the note in
+    // lib/tagUrl.js and the /clock branch in proxy.js.
+    const clockBaseUrl = platformClockOrigin();
 
     // Which chip each order is for, so the station can show the right URL
     // template. Stated here rather than inferred on the screen: the obvious
@@ -143,7 +152,7 @@ export async function getProvisioningQueue() {
       data: JSON.stringify(
         orders.map((o) => ({
           ...o,
-          clockBaseUrl: origins.get(String(o.tenantId)) || "",
+          clockBaseUrl,
           chipType: chipOf.get(o.items?.[0]?.productSku) || "ntag213",
           shipments: (o.shipments || []).map((sh) => ({
             ...sh,
