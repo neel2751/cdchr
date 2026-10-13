@@ -77,17 +77,39 @@ export async function inspectTag({ uid, picc, cmac } = {}) {
       };
     }
 
-    // A tag nobody has registered is not an error — it is how a new tag gets
-    // enrolled. Only a super admin's tap creates the row, or an employee
-    // tapping a stray tag would fill the list with other people's hardware.
-    if (resolved.status === "unknown" && user.role === "superAdmin") {
-      const created = await recordUnknownTag(uid, { byName: user.name });
+    // A tag with nowhere to be is a super admin's job, and the tap is where
+    // they are standing — in front of the door it is stuck to.
+    //
+    // TWO STATES REACH THE SAME PICKER, which they did not before. "unknown"
+    // is a stray tag being adopted. "unassigned" is the normal end of
+    // provisioning: a tag we wrote, keyed and verified arrives at the customer
+    // bound to no location, and the only screen that could bind it was a
+    // settings page three menus deep. Tapping it — the obvious thing to do,
+    // while holding the phone against it — gave a dead "this tag cannot be
+    // used", which is a strange thing to tell the one person who can fix it.
+    const needsLocation =
+      resolved.status === "unknown" || resolved.status === "unassigned";
+    if (needsLocation && user.role === "superAdmin") {
+      // Only the unknown case creates anything. An unassigned tag already
+      // exists, and recording it again would overwrite the keyRef that
+      // provisioning attached — the one thing that makes its taps verifiable.
+      const tagUid =
+        resolved.status === "unknown"
+          ? (await recordUnknownTag(uid, { byName: user.name }))?.uid ||
+            normaliseUid(uid)
+          : resolved.tag.uid;
+
       return {
         success: true,
         data: JSON.stringify({
           state: "enrol",
-          uid: created?.uid || normaliseUid(uid),
-          message: "New tag. Choose where it is mounted.",
+          uid: tagUid,
+          existing: resolved.status === "unassigned",
+          label: resolved.tag?.label || "",
+          message:
+            resolved.status === "unassigned"
+              ? "This tag is ready but not placed yet. Choose where it is mounted."
+              : "New tag. Choose where it is mounted.",
         }),
       };
     }
@@ -290,7 +312,14 @@ export const assignClockTag = withAudit(
       }
 
       const before = tag.toObject();
-      const moving = String(tag.locationId || "") !== String(location._id);
+      // Moving means it was somewhere BEFORE. Comparing "" against the new id
+      // made every first assignment a move, so a tag fresh out of its packet
+      // was reported as "Moved to London Office. Attendance already recorded
+      // stays where it was." — about a tag that has never recorded anything,
+      // and the one sentence that would matter if it had.
+      const moving =
+        Boolean(before.locationId) &&
+        String(before.locationId) !== String(location._id);
 
       tag.locationId = location._id;
       tag.status = "active";

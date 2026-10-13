@@ -200,11 +200,18 @@ export default function TapToClock({ uid, picc, cmac }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>New tag</CardTitle>
+          {/* A tag we provisioned is not "new" to the person placing it — they
+              ordered it, and it arrived keyed and verified. Calling it new
+              reads like something went wrong. */}
+          <CardTitle>
+            {state.existing ? "Where is this tag?" : "New tag"}
+          </CardTitle>
           <CardDescription>
-            Tag <code className="text-xs">{state.uid}</code> has not been used
-            before. Choose where it is mounted — the code was read from the chip
-            itself, so there is nothing to type.
+            {state.existing
+              ? "This tag is ready to use — it just needs to know where it is mounted."
+              : "This tag has not been used before."}{" "}
+            Tag <code className="text-xs">{state.uid}</code>. The code was read
+            from the chip itself, so there is nothing to type.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
