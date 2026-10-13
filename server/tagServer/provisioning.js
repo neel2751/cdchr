@@ -301,6 +301,99 @@ async function emailCustomerAboutCancellation(order, reason) {
 }
 
 /**
+ * Adopt a key that is already on a chip.
+ *
+ * Normally we generate the key and the chip is written to match. Some writers
+ * work the other way round — NFC Developer takes a master key and derives the
+ * tag's from it, so the chip ends up holding a key this server never chose —
+ * and once a chip has been programmed, the key on it is the only one that can
+ * authenticate to it. Without a way to record it, a tag written by such a tool
+ * can never be verified, and a tag whose key was reissued on our side (press
+ * Failed and a fresh key is sealed) becomes unwritable AND unverifiable: the
+ * chip wants the old key, we hold the new one.
+ *
+ * So this takes the key as typed and seals it as that unit's. It is an
+ * adoption, not a generation.
+ *
+ * IT UPDATES THE CUSTOMER'S TAG TOO. recordUnitWritten copies keyRef onto the
+ * ClockTag when it creates it, so a unit whose chip has already been recorded
+ * has a second copy of the old reference sitting in the customer's registry —
+ * and that is the one clockTagStore verifies taps against. Fixing only the
+ * unit would leave every tap failing with the server holding the right key in
+ * the wrong place.
+ *
+ * THE KEY IS NEVER LOGGED. Not in the audit row, not in a console line. The
+ * audit records that a key was adopted and by whom, which is the part that is
+ * useful later; the value is the one thing that must not be anywhere it can be
+ * read twice.
+ */
+export async function adoptUnitKey({ orderNumber, index, keyHex } = {}) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (!auth.ok) return { success: false, message: auth.message };
+    if (!tagKeysConfigured()) {
+      return {
+        success: false,
+        message: "TAG_KEY_MASTER is not set on this server — nothing can be sealed.",
+      };
+    }
+
+    const clean = String(keyHex || "").replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+    if (clean.length !== 32) {
+      return {
+        success: false,
+        message: `An AES-128 key is 32 hex characters; that is ${clean.length}.`,
+      };
+    }
+
+    await connect();
+    const order = await loadOrder(orderNumber);
+    if (!order) return { success: false, message: "Order not found" };
+    const unit = order.units?.find((u) => u.index === Number(index));
+    if (!unit) return { success: false, message: "No such unit on that order" };
+
+    const keyRef = sealTagKey(Buffer.from(clean, "hex"));
+
+    await escapeTenant("tag provisioning: adopt a key", () =>
+      TagOrderModel.updateOne(
+        { _id: order._id, "units.index": unit.index },
+        { $set: { "units.$.keyRef": keyRef } }
+      )
+    );
+
+    // And the copy the scan path actually reads.
+    let tagUpdated = false;
+    if (unit.uid) {
+      const res = await runWithTenant(String(order.tenantId), () =>
+        ClockTagModel.updateOne({ uid: unit.uid }, { $set: { keyRef } })
+      );
+      tagUpdated = Boolean(res?.matchedCount);
+    }
+
+    await logAuditDirect({
+      action: "TagOrder.adoptKey",
+      module: "TagOrder",
+      entityId: String(order._id),
+      tenantId: order.tenantId,
+      description: `Adopted the existing key for unit #${unit.index} of ${orderNumber}`,
+      actor: auth.user,
+      // Deliberately no key, and no UID either — the pair is what matters.
+      metadata: { unitIndex: unit.index, clockTagUpdated: tagUpdated },
+    }).catch(() => {});
+
+    return {
+      success: true,
+      message: unit.uid
+        ? `Key adopted for unit #${unit.index}${tagUpdated ? " and its tag" : " (no tag record found for that UID)"}`
+        : `Key adopted for unit #${unit.index} — record the UID next`,
+    };
+  } catch (error) {
+    console.log("Error adopting a unit key:", error?.message);
+    return { success: false, message: "Could not adopt that key" };
+  }
+}
+
+/**
  * The operator cancels somebody's order.
  *
  * The customer can already cancel their own (cancelTagOrder in

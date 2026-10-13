@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { useFetchSelectQuery } from "@/hooks/use-query";
 import {
   acceptTagOrder,
+  adoptUnitKey,
   platformCancelTagOrder,
   fetchUnitKey,
   getProvisioningQueue,
@@ -144,6 +145,7 @@ export default function ProvisioningStation() {
     mutationFn: ({ kind, ...args }) => {
       if (kind === "accept") return run(acceptTagOrder(args));
       if (kind === "cancel") return run(platformCancelTagOrder(args));
+      if (kind === "adoptKey") return run(adoptUnitKey(args));
       if (kind === "written")
         return run(recordUnitWritten(args), () => {
           setLiveKey(null);
@@ -569,6 +571,32 @@ export default function ProvisioningStation() {
                             Copy test URL
                           </Button>
                         ) : null}
+                        {/* For a chip programmed by a writer that chose its
+                            own key — ours is then the wrong one, and the chip
+                            is the only thing that knows. See adoptUnitKey. */}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-1.5 text-[11px]"
+                          disabled={isPending}
+                          onClick={() => {
+                            const keyHex = (
+                              window.prompt(
+                                `Paste the AES key that is already on unit #${unit.index} (32 hex characters). It replaces the key this server generated.`
+                              ) || ""
+                            ).trim();
+                            if (!keyHex) return;
+                            act({
+                              kind: "adoptKey",
+                              orderNumber: order.orderNumber,
+                              index: unit.index,
+                              keyHex,
+                            });
+                          }}
+                        >
+                          Adopt chip key
+                        </Button>
                         {unit.shipmentRef ? (
                           <span className="text-[11px] text-muted-foreground">
                             in {unit.shipmentRef}
