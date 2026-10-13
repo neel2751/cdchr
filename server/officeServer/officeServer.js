@@ -139,6 +139,42 @@ export async function canManageEmployees() {
   };
 }
 
+/**
+ * Is this email already an office employee of THIS company?
+ *
+ * Scoped by the tenant plugin, which is the right answer and already was: the
+ * same person can be on the books of two companies — a contractor, or somebody
+ * who works Saturdays somewhere else — and only signing up a whole new
+ * workspace is judged globally (see emailInUse in authServer/signupServer.js).
+ *
+ * Case-insensitive, which it was not. The check compared the typed address
+ * while the save lowercased it, so "Neel@Example.com" matched nothing and went
+ * in beside "neel@example.com" — two records, one person, in one company,
+ * which is exactly what scripts/find-duplicate-emails.mjs exists to report.
+ *
+ * `delete: { $ne: true }` rather than `delete: false`, because a record
+ * written before that field existed has no `delete` at all and `false` does
+ * not match it.
+ */
+async function emailTakenInCompany(email, exceptId) {
+  const clean = String(email || "").trim();
+  if (!clean) return false;
+  const rx = new RegExp(`^${clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+  const query = { email: rx, delete: { $ne: true } };
+  if (exceptId) query._id = { $ne: exceptId };
+  return Boolean(await OfficeEmployeeModel.exists(query));
+}
+
+/** The same question for a phone number. Kept separate so the refusal can say which. */
+async function phoneTakenInCompany(phoneNumber, exceptId) {
+  if (phoneNumber === undefined || phoneNumber === null || phoneNumber === "") {
+    return false;
+  }
+  const query = { phoneNumber, delete: { $ne: true } };
+  if (exceptId) query._id = { $ne: exceptId };
+  return Boolean(await OfficeEmployeeModel.exists(query));
+}
+
 export const handleOfficeEmployee = withAudit(
   "OfficeEmployee.upsert",
   async (data, id) => {
@@ -175,26 +211,26 @@ export const handleOfficeEmployee = withAudit(
       if (!updatedEmp) {
         return { success: false, message: "Employee Not Found" };
       }
-      // checking  for unique fields both email and phone. Each check runs only
-      // when the payload actually carries that field: Mongoose drops undefined
-      // keys from a query, so `{ email: undefined }` would match the first
-      // other employee in the company and refuse a legitimate save.
-      const hasSameEmail = payload.email
-        ? await OfficeEmployeeModel.findOne({
-            email: payload.email,
-            delete: false, // only check for active employees
-            _id: { $ne: id },
-          }).exec()
-        : null;
-      const hasSamePhone = payload.phoneNumber
-        ? await OfficeEmployeeModel.findOne({
-            phoneNumber: payload.phoneNumber,
-            delete: false, // only check for active employees
-            _id: { $ne: id },
-          }).exec()
-        : null;
-      if (hasSameEmail || hasSamePhone) {
-        throw new Error("This Email or Phone Number is Already In Use");
+      // Each check runs only when the payload actually carries that field:
+      // Mongoose drops undefined keys from a query, so `{ email: undefined }`
+      // would match the first other employee in the company and refuse a
+      // legitimate save.
+      //
+      // Reported separately, because "email or phone" leaves HR guessing which
+      // one to change — and a phone collision is usually a shared office line
+      // rather than a mistake.
+      if (payload.email && (await emailTakenInCompany(payload.email, id))) {
+        throw new Error(
+          "Another employee at this company already uses that email address"
+        );
+      }
+      if (
+        payload.phoneNumber &&
+        (await phoneTakenInCompany(payload.phoneNumber, id))
+      ) {
+        throw new Error(
+          "Another employee at this company already uses that phone number"
+        );
       }
       // if the email is changing we have to convert it to lowercase
       if (payload.email) payload.email = payload.email.toLowerCase();
@@ -231,11 +267,12 @@ export const handleOfficeEmployee = withAudit(
         return { success: false, message: "Please Provid All Required Fields" };
       const hashPass = await GenerateHashPassword("Cdc@1234");
       await connect();
-      let userExist = await OfficeEmployeeModel.findOne({
-        delete: false, // only check for active employees
-        $or: [{ email }, { phoneNumber }],
-      });
-      if (!userExist) {
+      // Asked as two questions so the refusal below can say which field, and
+      // case-insensitively so a capital letter cannot create a second record
+      // for one person.
+      const emailTaken = await emailTakenInCompany(email);
+      const phoneTaken = emailTaken ? false : await phoneTakenInCompany(phoneNumber);
+      if (!emailTaken && !phoneTaken) {
         // Seat limit. Unlimited unless the platform team has set a number, so
         // this caps nobody who has not been given one.
         const { props: sessionProps } = await getServerSideProps();
@@ -319,7 +356,9 @@ export const handleOfficeEmployee = withAudit(
       } else {
         return {
           success: false,
-          message: "Email or Phone number is already taken",
+          message: emailTaken
+            ? "Another employee at this company already uses that email address"
+            : "Another employee at this company already uses that phone number",
         };
       }
     }
