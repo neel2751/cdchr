@@ -261,6 +261,23 @@ export default function TapToClock({ uid, picc, cmac }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* WHAT THE TAP ACTUALLY SENT. The screen knew this all along and
+              did not show it, which turned "this tag has not been set up yet"
+              into a dead end: the id is either absent (the chip is not
+              mirroring), mangled (a writer that shifted or watermarked the
+              URL), or simply not the one registered — three different fixes,
+              and the id tells you which in one glance. Shown to everybody
+              because the person holding the phone is the one who can read it
+              out, and it is printed on the tag's own packaging anyway. */}
+          {uid ? (
+            <p className="rounded border bg-neutral-50 px-2 py-1.5 font-mono text-[11px] break-all text-neutral-600">
+              this tap sent: {uid}
+            </p>
+          ) : (
+            <p className="rounded border bg-neutral-50 px-2 py-1.5 text-[11px] text-neutral-600">
+              this tap sent no tag id at all
+            </p>
+          )}
           {/* What to do next depends on who can actually fix it. "Your manager
               can set this up" is right for a tag nobody has registered and
               wrong for a tag that was programmed badly — no manager can fix
