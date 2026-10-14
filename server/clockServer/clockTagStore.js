@@ -254,6 +254,50 @@ export async function recordSighting(
 }
 
 /**
+ * Note that a tap was turned away, and why.
+ *
+ * Best-effort and never allowed to change the answer: the refusal has already
+ * been decided by the time this runs, and a diagnostic that could fail a tap
+ * would be worse than no diagnostic.
+ *
+ * Only called where a tag is known. An unreadable or unregistered UID has no
+ * row to attach to — that case goes to the log, with the raw value, because
+ * the raw value is the whole evidence.
+ */
+export async function recordRefusedTap(
+  tagId,
+  { reason, rawTag, hadSignature, byName } = {},
+) {
+  try {
+    if (!tagId) return;
+    await connect();
+    await ClockTagModel.updateOne(
+      { _id: tagId },
+      {
+        $push: {
+          refusedTaps: {
+            $each: [
+              {
+                at: new Date(),
+                reason,
+                rawTag: String(rawTag ?? "").slice(0, 200),
+                hadSignature: Boolean(hadSignature),
+                byName,
+              },
+            ],
+            // Keep the newest five. $slice with a negative count keeps the
+            // tail, which is where $push has just added.
+            $slice: -5,
+          },
+        },
+      },
+    );
+  } catch (error) {
+    console.log("Could not record a refused tap:", error?.message);
+  }
+}
+
+/**
  * Remember that an unrecognised tag was tapped, so it can be enrolled.
  *
  * A brand-new tag has to tap *somewhere* before anyone can bind it, and the

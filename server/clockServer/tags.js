@@ -13,6 +13,7 @@ import { getServerSideProps } from "../session/session";
 import { performClockAction } from "./clockActions";
 import {
   normaliseUid,
+  recordRefusedTap,
   recordSighting,
   recordUnknownTag,
   resolveTag,
@@ -115,6 +116,26 @@ export async function inspectTag({ uid, picc, cmac } = {}) {
     }
 
     if (!resolved.ok) {
+      // Kept, so "the tag does not work" is answerable. A tap that never
+      // arrived and a tap that arrived and was turned away have the same
+      // symptom and completely different fixes; without this, telling them
+      // apart means guessing. Where there is no tag row to attach it to, the
+      // raw value goes to the log instead — it is the whole evidence.
+      if (resolved.tag?._id) {
+        await recordRefusedTap(resolved.tag._id, {
+          reason: resolved.status,
+          rawTag: uid,
+          hadSignature: Boolean(picc && cmac),
+          byName: user.name,
+        });
+      } else {
+        console.log(
+          `[tag] refused tap: status=${resolved.status} tag=${JSON.stringify(
+            String(uid ?? "").slice(0, 120)
+          )} signed=${Boolean(picc && cmac)}`
+        );
+      }
+
       return {
         success: true,
         data: JSON.stringify({
@@ -174,7 +195,19 @@ export async function storeClockTimeByTag(
       picc: signature?.picc,
       cmac: signature?.cmac,
     });
-    if (!resolved.ok) return { success: false, message: resolved.message };
+    if (!resolved.ok) {
+      // Same reasoning as inspectTag: a refused tap that leaves no trace is
+      // why "it does not work" took days to answer.
+      if (resolved.tag?._id) {
+        await recordRefusedTap(resolved.tag._id, {
+          reason: resolved.status,
+          rawTag: uid,
+          hadSignature: Boolean(signature?.picc && signature?.cmac),
+          byName: props?.session?.user?.name,
+        });
+      }
+      return { success: false, message: resolved.message };
+    }
 
     const tag = resolved.tag;
     const location = await ClockLocationModel.findById(tag.locationId).lean();

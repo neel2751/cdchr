@@ -145,6 +145,20 @@ export default function ClockTagsSettings() {
                               downgrade nobody can see is worse than one
                               somebody chose: this is the tag whose geofence
                               wants setting to enforce. */}
+                          {/* The last refusal, which is the answer to "it
+                              does not work". A tap that never arrived leaves
+                              nothing here — and that absence is itself the
+                              answer: the problem is the URL on the chip, not
+                              anything this screen can change. */}
+                          {tag.refusedTaps?.length ? (
+                            <span className="mt-1 w-fit rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-700">
+                              last tap refused:{" "}
+                              {tag.refusedTaps[tag.refusedTaps.length - 1].reason}
+                              {tag.refusedTaps[tag.refusedTaps.length - 1].rawTag
+                                ? ` (sent "${tag.refusedTaps[tag.refusedTaps.length - 1].rawTag}")`
+                                : ""}
+                            </span>
+                          ) : null}
                           {tag.signature === "none" ? (
                             <span className="mt-1 w-fit rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
                               no replay protection — set this location&apos;s

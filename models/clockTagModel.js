@@ -97,6 +97,37 @@ const clockTagSchema = new mongoose.Schema(
     },
     lastSeenBy: mongoose.Schema.Types.ObjectId,
 
+    /**
+     * The last few taps that were REFUSED, and why.
+     *
+     * A successful tap moves lastSeenAt; a refused one used to leave nothing at
+     * all. So "this tag does not work" was unanswerable: nobody could tell a
+     * tap that never arrived (wrong URL on the chip, dead host, a writer that
+     * mangled the link) from one that arrived and was turned away (no
+     * signature, replayed counter, tag not placed). Those have completely
+     * different fixes and the same symptom, and working out which cost days.
+     *
+     * Bounded to the last five, because this is a diagnostic and not a log: the
+     * question it answers is always "what happened the last time somebody
+     * tried", and an unbounded array on a hot path is how a document grows
+     * until it cannot be written.
+     *
+     * The raw `tag` value is kept exactly as it arrived, because the whole
+     * point is to see what the chip actually sent — a placeholder written
+     * verbatim, a shifted UID, a watermark injected by a trial-version writer.
+     * Normalising it first would discard the evidence.
+     */
+    refusedTaps: [
+      {
+        at: { type: Date, default: Date.now },
+        reason: String, // the `status` from resolveTag
+        rawTag: String, // the tag parameter as sent
+        hadSignature: Boolean,
+        byName: String,
+        _id: false,
+      },
+    ],
+
     assignedBy: mongoose.Schema.Types.ObjectId,
     assignedByName: String,
     assignedAt: Date,
