@@ -45,6 +45,71 @@ function refusalMessage(failed) {
 }
 
 /**
+ * Which record does a clock action at this location belong to today?
+ *
+ * Extracted so the screen that decides WHAT A TAP MEANS and the write that
+ * carries it out read the same record. They have to: if the tap screen looks
+ * only at this location and the write follows a shift that started somewhere
+ * else, the screen offers Clock In for a shift that is already open, and the
+ * write refuses it. The disagreement is invisible and lands on whoever is
+ * standing at the door.
+ *
+ * Returns `{ record, shiftMovedFrom, recordFilter }`. `shiftMovedFrom` is the
+ * location the open shift actually began at, when that is not this one.
+ */
+export async function findActionRecord({ employeeId, date, locationId }) {
+  await connect();
+
+  // Keyed on the location, matching the unique index — `siteId: null` used to
+  // mean "the office", which made two offices one place.
+  //
+  // isDeleted matters too: a soft-deleted record used to still match, so once
+  // one had been deleted the employee could never clock in again that day.
+  const recordFilter = {
+    employeeId: createObjectId(employeeId),
+    date,
+    locationId,
+    isDeleted: false,
+  };
+
+  let record = await ClockRecordModel.findOne(recordFilter);
+  if (record) return { record, shiftMovedFrom: null, recordFilter };
+
+  // ─────────────────────────────────────────────────────────────────────
+  // A SHIFT THAT MOVED.
+  //
+  // Somebody clocks in on the office QR code, drives to a site, finishes
+  // there and taps the site's NFC tag on the way home. The record they need
+  // is at the OFFICE, and a lookup keyed on this location finds nothing — so
+  // the tap was refused with "You must clock in first", leaving them with an
+  // open shift they cannot close and no way to fix it from where they stood.
+  //
+  // A person is on one shift at a time, wherever they started it. So if there
+  // is no record here and one is open elsewhere today, that open one IS the
+  // shift and this action belongs to it.
+  //
+  // This also answers the other half correctly without a special case: a tap
+  // meaning "clock in" at the site finds the open office record, and
+  // checkClockAction says "You are already clocked in" — which is true, and
+  // is what somebody mid-shift should be told.
+  //
+  // A finished shift is deliberately NOT picked up, so an employee who
+  // clocked out at the office can still start a genuine second shift at a
+  // site later the same day.
+  const openElsewhere = await ClockRecordModel.findOne({
+    employeeId: createObjectId(employeeId),
+    date,
+    isDeleted: false,
+    clockIn: { $type: "string", $ne: "" },
+    $or: [{ clockOut: null }, { clockOut: { $exists: false } }],
+  });
+
+  return openElsewhere
+    ? { record: openElsewhere, shiftMovedFrom: openElsewhere.locationId, recordFilter }
+    : { record: null, shiftMovedFrom: null, recordFilter };
+}
+
+/**
  * Perform one clock action at one location.
  *
  * @param employeeId    the session's employee
@@ -73,58 +138,11 @@ export async function performClockAction({
   evidence: partialEvidence = {},
   onBeforeWrite,
 }) {
-  await connect();
-
-  // The one record this acts on. Keyed on the location, matching the unique
-  // index — `siteId: null` used to mean "the office", which made two offices
-  // one place.
-  //
-  // isDeleted matters too: a soft-deleted record used to still match, so once
-  // one had been deleted the employee could never clock in again that day.
-  const recordFilter = {
-    employeeId: createObjectId(employeeId),
-    date,
-    locationId: location._id,
-    isDeleted: false,
-  };
-
-  let existingRecord = await ClockRecordModel.findOne(recordFilter);
-
-  // ─────────────────────────────────────────────────────────────────────
-  // A SHIFT THAT MOVED.
-  //
-  // Somebody clocks in on the office QR code, drives to a site, finishes
-  // there and taps the site's NFC tag on the way home. The record they need
-  // is at the OFFICE, and a lookup keyed on this location finds nothing — so
-  // the tap was refused with "You must clock in first", leaving them with an
-  // open shift they cannot close and no way to fix it from where they stood.
-  //
-  // A person is on one shift at a time, wherever they started it. So if there
-  // is no record here and one is open elsewhere today, that open one IS the
-  // shift and this action belongs to it.
-  //
-  // This also answers the other half correctly without a special case: a tap
-  // meaning "clock in" at the site finds the open office record, and
-  // checkClockAction says "You are already clocked in" — which is true, and
-  // is what somebody mid-shift should be told.
-  //
-  // A finished shift is deliberately NOT picked up, so an employee who
-  // clocked out at the office can still start a genuine second shift at a
-  // site later the same day.
-  let shiftMovedFrom = null;
-  if (!existingRecord) {
-    const openElsewhere = await ClockRecordModel.findOne({
-      employeeId: createObjectId(employeeId),
-      date,
-      isDeleted: false,
-      clockIn: { $type: "string", $ne: "" },
-      $or: [{ clockOut: null }, { clockOut: { $exists: false } }],
-    });
-    if (openElsewhere) {
-      existingRecord = openElsewhere;
-      shiftMovedFrom = openElsewhere.locationId;
-    }
-  }
+  const {
+    record: existingRecord,
+    shiftMovedFrom,
+    recordFilter,
+  } = await findActionRecord({ employeeId, date, locationId: location._id });
 
   const rules = await getClockRules();
 

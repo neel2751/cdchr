@@ -28,6 +28,7 @@ import {
   describeMinutes,
   resolveClockRules,
   resolveCutover,
+  tapStage,
   validateShift,
 } from "@/lib/clockRules";
 
@@ -482,6 +483,173 @@ check("policy rules measure correctly across midnight", () => {
   const night = { clockIn: "23:00", breaks: [] };
   assert.equal(checkClockAction(night, "clockOut", "23:30", strict).ok, false);
   assert.equal(checkClockAction(night, "clockOut", "01:00", strict).ok, true);
+});
+
+/* ------------------------------------------------------------- tapStage */
+/*
+ * A chip carries no intent, so the tap has to decide what it meant. These walk
+ * a whole day the way somebody actually taps one, because the value is in the
+ * SEQUENCE: each action has to move the stage to the next thing a tap could
+ * mean, or the screen either asks a pointless question or repeats itself.
+ */
+
+check("the first tap of the day clocks in, with nothing to choose", () => {
+  const s = tapStage(null, "09:00");
+  assert.equal(s.stage, "beforeShift");
+  assert.equal(s.auto, "clockIn");
+  assert.deepEqual(
+    s.actions.map((a) => a.action),
+    ["clockIn"],
+  );
+});
+
+check("once clocked in, a tap asks break or clock out", () => {
+  const s = tapStage(open(), "11:00");
+  assert.equal(s.stage, "working");
+  // The one state with a real question, so nothing happens on its own.
+  assert.equal(s.auto, null);
+  assert.deepEqual(
+    s.actions.map((a) => a.action),
+    ["breakIn", "clockOut"],
+  );
+  // Breaks first: a mis-tap on it costs a tap, a mis-tap on clock out closes
+  // the shift.
+  assert.equal(s.actions[0].action, "breakIn");
+  assert.ok(s.actions.every((a) => a.allowed));
+});
+
+check("on a break, a tap ends it — no question asked", () => {
+  const s = tapStage(open({ breaks: [{ breakIn: "12:00" }] }), "12:30");
+  assert.equal(s.stage, "onBreak");
+  assert.equal(s.auto, "breakOut");
+  assert.equal(s.openBreakSince, "12:00");
+});
+
+check("after a break it asks again, so several breaks a day work", () => {
+  const s = tapStage(
+    open({ breaks: [{ breakIn: "12:00", breakOut: "12:30" }] }),
+    "13:00",
+  );
+  assert.equal(s.stage, "working");
+  assert.equal(s.auto, null);
+  assert.deepEqual(
+    s.actions.map((a) => a.action),
+    ["breakIn", "clockOut"],
+  );
+  assert.equal(s.breaksTaken, 1);
+});
+
+check("a second break behaves exactly like the first", () => {
+  const s = tapStage(
+    open({
+      breaks: [
+        { breakIn: "12:00", breakOut: "12:30" },
+        { breakIn: "15:00" },
+      ],
+    }),
+    "15:10",
+  );
+  assert.equal(s.stage, "onBreak");
+  assert.equal(s.auto, "breakOut");
+  // One closed, one open — the open one is not counted as taken.
+  assert.equal(s.breaksTaken, 1);
+  assert.equal(s.openBreakSince, "15:00");
+});
+
+check("once clocked out there is nothing left to tap for", () => {
+  const s = tapStage(open({ clockOut: "17:00" }), "17:05");
+  assert.equal(s.stage, "finished");
+  assert.equal(s.auto, null);
+  assert.deepEqual(s.actions, []);
+  assert.equal(s.clockOut, "17:00");
+});
+
+check("a whole day of taps never repeats an action", () => {
+  // The property the automatic tap depends on: carrying out the single action
+  // always moves the stage out of the one that implied it, so a re-render, a
+  // refetch or a reloaded page cannot fire it twice.
+  let record = null;
+  const taps = [];
+  const apply = (action, at) => {
+    if (action === "clockIn") record = { clockIn: at, breaks: [] };
+    else if (action === "breakIn") record.breaks.push({ breakIn: at });
+    else if (action === "breakOut") {
+      record.breaks.find((b) => !b.breakOut).breakOut = at;
+    } else if (action === "clockOut") record.clockOut = at;
+  };
+
+  // in, break, back, break, back, out — chosen where the tap asks.
+  const script = [
+    ["09:00", null],
+    ["12:00", "breakIn"],
+    ["12:30", null],
+    ["15:00", "breakIn"],
+    ["15:15", null],
+    ["17:00", "clockOut"],
+  ];
+
+  for (const [at, chosen] of script) {
+    const s = tapStage(record, at);
+    const action = s.auto || chosen;
+    assert.ok(action, `nothing to do at ${at} (stage ${s.stage})`);
+    if (!s.auto) {
+      // Where it asks, what was chosen must be one of the two offered.
+      assert.ok(
+        s.actions.some((a) => a.action === action && a.allowed),
+        `${action} was not offered at ${at}`,
+      );
+    }
+    taps.push(action);
+    apply(action, at);
+    // The stage must have moved on: tapping again never means the same thing.
+    assert.notEqual(
+      tapStage(record, at).auto,
+      s.auto === null ? "never" : s.auto,
+      `${action} at ${at} left the tap meaning the same thing`,
+    );
+  }
+
+  assert.deepEqual(taps, [
+    "clockIn",
+    "breakIn",
+    "breakOut",
+    "breakIn",
+    "breakOut",
+    "clockOut",
+  ]);
+  assert.equal(tapStage(record, "17:30").stage, "finished");
+  assert.equal(record.breaks.length, 2);
+  assert.ok(record.breaks.every((b) => b.breakIn && b.breakOut));
+});
+
+check("a policy rule disables the button instead of hiding it", () => {
+  // Offered, refused, and the reason travels with it — so the screen can say
+  // why next to the button rather than after the press.
+  const s = tapStage(open(), "09:30", strict);
+  assert.equal(s.stage, "working");
+  const breakIn = s.actions.find((a) => a.action === "breakIn");
+  assert.equal(breakIn.allowed, false);
+  assert.match(breakIn.reason, /break/i);
+  const clockOut = s.actions.find((a) => a.action === "clockOut");
+  assert.equal(clockOut.allowed, false);
+  assert.ok(clockOut.reason);
+});
+
+check("an action blocked by a rule is never fired automatically", () => {
+  // A break shorter than the minimum: the stage still has one meaning, but it
+  // is not legal yet, so the tap shows the reason and waits.
+  const s = tapStage(open({ breaks: [{ breakIn: "12:00" }] }), "12:05", strict);
+  assert.equal(s.stage, "onBreak");
+  assert.equal(s.auto, null);
+  assert.equal(s.actions[0].allowed, false);
+  assert.match(s.actions[0].reason, /at least/i);
+});
+
+check("a record with no clock-in is still 'before the shift'", () => {
+  // An admin-created row with no clock-in must not read as mid-shift, or the
+  // tap would offer to end a break on a shift that never started.
+  const s = tapStage({ breaks: [] }, "09:00");
+  assert.equal(s.stage, "beforeShift");
 });
 
 /* ---------------------------------------------------------------- report */

@@ -4,13 +4,15 @@ import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { getClockTime, getWorkingDate } from "@/lib/clockTime";
+import { tapStage } from "@/lib/clockRules";
 import ClockLocationModel from "@/models/clockLocationModel";
 import ClockTagModel from "@/models/clockTagModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import { getClockRules } from "../settingsServer/workSettings";
 import { getServerSideProps } from "../session/session";
-import { performClockAction } from "./clockActions";
+import { findActionRecord, performClockAction } from "./clockActions";
 import {
   normaliseUid,
   recordRefusedTap,
@@ -150,6 +152,30 @@ export async function inspectTag({ uid, picc, cmac } = {}) {
       .select("name kind projectSiteId")
       .lean();
 
+    // WHAT THIS TAP MEANS, decided here rather than on the screen.
+    //
+    // A chip carries no intent — it is the same URL every time — so the tap has
+    // to work out for itself whether it is the start of a shift, the end of a
+    // break or the end of the day. That answer depends on the record, which
+    // lives here; the screen used to render all four actions and let the write
+    // refuse three of them, which is how somebody who had not clocked in was
+    // offered End Break. See lib/clockRules.js tapStage.
+    //
+    // Best-effort: a stage that cannot be worked out leaves `tap` null and the
+    // screen falls back to offering the actions, because a tap that shows
+    // nothing is worse than a tap that asks.
+    let tap = null;
+    try {
+      const { record } = await findActionRecord({
+        employeeId: user._id,
+        date: getWorkingDate(),
+        locationId: location?._id || resolved.tag.locationId,
+      });
+      tap = tapStage(record, getClockTime(), await getClockRules());
+    } catch (error) {
+      console.log("Could not work out what this tap means:", error?.message);
+    }
+
     return {
       success: true,
       data: JSON.stringify({
@@ -159,6 +185,7 @@ export async function inspectTag({ uid, picc, cmac } = {}) {
         location: location
           ? { _id: String(location._id), name: location.name, kind: location.kind }
           : null,
+        tap,
       }),
     };
   } catch (error) {
