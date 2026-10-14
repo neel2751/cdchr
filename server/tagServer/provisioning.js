@@ -702,7 +702,13 @@ function parseTapUrl(tapUrl, uid) {
  * the fault is the chip, the key, the URL or the phone. Catching it here costs
  * seconds.
  */
-export async function verifyUnit({ orderNumber, index, uid, tapUrl } = {}) {
+export async function verifyUnit({
+  orderNumber,
+  index,
+  uid,
+  tapUrl,
+  acceptUnsigned = false,
+} = {}) {
   try {
     const auth = await requirePlatformAdmin();
     if (!auth.ok) return { success: false, message: auth.message };
@@ -774,11 +780,82 @@ export async function verifyUnit({ orderNumber, index, uid, tapUrl } = {}) {
     // chip works, the URL is right, and nothing it signs will ever verify.
     if (unit.keyRef) {
       if (!tap.picc || !tap.cmac) {
+        // A 424 that cannot be told to mirror. Not hypothetical: the writing
+        // tool in use refuses a URL carrying the picc and cmac placeholders, so
+        // the chip gets `?tag=<uid>` and has nothing to sign with. Refusing
+        // outright leaves the tag permanently unusable — and deleting its key
+        // to "fix" it would throw away the ability to switch signing on later
+        // and hide the downgrade from the people relying on the tag.
+        //
+        // So it can be accepted, but only on purpose. `acceptUnsigned` is the
+        // operator saying they know what the tag will and will not prove; the
+        // tag is marked `signature: "none"` and that mark is what the scan path
+        // reads, so nothing has to infer it.
+        if (!acceptUnsigned) {
+          return {
+            success: false,
+            needsUnsignedChoice: true,
+            message:
+              "That tap carries no signature, so this chip cannot prove it was " +
+              "the one tapped — a UID can be read off any tag. If the writer " +
+              "will not accept the picc and cmac placeholders, verify it as an " +
+              "unsigned tag and set the location's geofence to enforce.",
+          };
+        }
+
+        await runWithTenant(String(order.tenantId), () =>
+          ClockTagModel.updateOne(
+            { uid: tap.uid },
+            {
+              $set: { signature: "none" },
+              $push: {
+                history: {
+                  toStatus: "unassigned",
+                  at: new Date(),
+                  byName: auth.user.name,
+                  reason:
+                    "Verified without a signature — the chip could not be " +
+                    "programmed to mirror picc/cmac, so taps prove the UID only",
+                },
+              },
+            }
+          )
+        );
+
+        await logAuditDirect({
+          action: "TagOrder.verifyUnsigned",
+          module: "TagOrder",
+          entityId: String(order._id),
+          tenantId: order.tenantId,
+          description:
+            `Unit #${unit.index} of ${orderNumber} verified as UNSIGNED — ` +
+            "its taps prove the UID only",
+          actor: auth.user,
+          metadata: { unitIndex: unit.index },
+        }).catch(() => {});
+
+        await escapeTenant("tag provisioning: mark verified unsigned", () =>
+          TagOrderModel.updateOne(
+            { _id: order._id, "units.index": unit.index },
+            {
+              $set: {
+                "units.$.status": "verified",
+                "units.$.verifiedAt": new Date(),
+                "units.$.verifiedChecks": {
+                  host: Boolean(tap.origin),
+                  uid: true,
+                  signature: false,
+                },
+              },
+            }
+          )
+        );
+
         return {
-          success: false,
+          success: true,
           message:
-            "That tap carries no signature. A 424 should append picc and cmac " +
-            "— check that SDM mirroring is enabled, then write it again.",
+            `Unit ${unit.index} verified as an unsigned tag — right host, ` +
+            "right chip, no replay protection",
         };
       }
       let signed;

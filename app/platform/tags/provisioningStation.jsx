@@ -102,6 +102,10 @@ export default function ProvisioningStation() {
   const [openOrder, setOpenOrder] = React.useState("");
   // The live key, for one unit, until its chip is written. Never stored.
   const [liveKey, setLiveKey] = React.useState(null);
+
+  // Set when a bench tap carried no signature, so the choice can be put to
+  // the operator instead of the verify silently doing one thing or the other.
+  const [unsignedPrompt, setUnsignedPrompt] = React.useState(null);
   const [uid, setUid] = React.useState("");
   // Per-order dispatch form. Keyed by order number so switching orders does
   // not carry one order's tracking reference onto another's parcel.
@@ -142,7 +146,7 @@ export default function ProvisioningStation() {
     });
 
   const { mutate: act, isPending } = useMutation({
-    mutationFn: ({ kind, ...args }) => {
+    mutationFn: async ({ kind, ...args }) => {
       if (kind === "accept") return run(acceptTagOrder(args));
       if (kind === "cancel") return run(platformCancelTagOrder(args));
       if (kind === "adoptKey") return run(adoptUnitKey(args));
@@ -151,7 +155,17 @@ export default function ProvisioningStation() {
           setLiveKey(null);
           setUid("");
         });
-      if (kind === "verify") return run(verifyUnit(args), () => setUid(""));
+      if (kind === "verify") {
+        // A chip that cannot be told to mirror comes back asking whether to
+        // accept it unsigned. Asked rather than assumed: what the tag will
+        // prove afterwards is different, and that is the operator's call.
+        const res = await verifyUnit(args);
+        if (res?.needsUnsignedChoice) {
+          setUnsignedPrompt({ args, message: res.message });
+          return;
+        }
+        return run(Promise.resolve(res), () => setUid(""));
+      }
       if (kind === "failed") return run(markUnitFailed(args), () => setLiveKey(null));
       if (kind === "dispatch")
         return run(dispatchShipment(args), () =>
@@ -323,6 +337,44 @@ export default function ProvisioningStation() {
                     </Button>
                   ) : null}
                 </div>
+
+                {/* The chip tapped, but carried no signature. Put to the
+                    operator rather than decided for them: accepting it makes a
+                    tag that proves its UID was known and nothing more, and that
+                    is a different product from the one on the order. */}
+                {unsignedPrompt ? (
+                  <div className="space-y-2 rounded-md border-2 border-rose-300 bg-rose-50 p-3">
+                    <p className="flex items-center gap-1.5 text-sm font-medium text-rose-900">
+                      <AlertTriangle className="size-4" />
+                      This chip is not signing its taps
+                    </p>
+                    <p className="text-xs text-rose-800">
+                      {unsignedPrompt.message}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isPending}
+                        onClick={() => setUnsignedPrompt(null)}
+                      >
+                        Write it again
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={isPending}
+                        onClick={() => {
+                          const { args } = unsignedPrompt;
+                          setUnsignedPrompt(null);
+                          act({ ...args, kind: "verify", acceptUnsigned: true });
+                        }}
+                      >
+                        Verify as an unsigned tag
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 {liveKey ? (
                   <div className="space-y-2 rounded-md border-2 border-amber-300 bg-amber-50 p-3">

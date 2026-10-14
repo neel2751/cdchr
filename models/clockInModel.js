@@ -82,6 +82,13 @@ const clockInSchema = new Schema(
       deviceId: String,
       tagId: String,
       tagCounter: Number,
+      // Did the chip sign this tap? A 424 whose SDM mirroring could not be
+      // programmed holds a key it cannot use and proves only that its UID was
+      // known — which any phone can read off the tag. Kept per record rather
+      // than read off the tag later: a tag can be switched between signing and
+      // not, so what it is set to today says nothing about what a tap last
+      // March proved, and that is the question a disputed timesheet asks.
+      tagSigned: Boolean,
       tokenJti: String,
       checks: [
         {

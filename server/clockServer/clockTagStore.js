@@ -134,7 +134,18 @@ export async function resolveTag(rawUid, { picc, cmac } = {}) {
   // string — which is what this did before — meant "replay protection" came
   // down to asking the attacker not to increment a number. Now a replayed URL
   // carries a spent counter, and a URL with a bumped counter fails its CMAC.
-  if (tag.keyRef) {
+  // `tag.signature`, not `tag.keyRef`. A chip can hold a key it is unable to
+  // use: the writing tool refuses a URL carrying the picc and cmac
+  // placeholders, so the chip gets `?tag=<uid>` and has no way to sign
+  // anything. Keyed-therefore-must-sign made such a tag permanently
+  // unusable — refused on every tap as unverifiable, with the key sitting
+  // right there and no way to say "this chip cannot do that".
+  //
+  // An unsigned tag is accepted the way a 213 is, and the tap carries that
+  // fact onward (`signed`) so what was proven is never guessed at later.
+  const mustSign = tag.keyRef && tag.signature !== "none";
+
+  if (mustSign) {
     if (!picc || !cmac) {
       return {
         ok: false,
@@ -191,13 +202,14 @@ export async function resolveTag(rawUid, { picc, cmac } = {}) {
       };
     }
 
-    return { ok: true, status: "active", tag, counter: verified.counter };
+    return { ok: true, status: "active", tag, counter: verified.counter, signed: true };
   }
 
-  // A plain NTAG213 sends nothing to verify, which is exactly why a 213 needs
-  // a geofence beside it — the tag proves you have been near it once, and no
-  // more than that.
-  return { ok: true, status: "active", tag, counter: null };
+  // Nothing to verify: a plain NTAG213, or a 424 that could not be told to
+  // mirror. Which is exactly why an unsigned tag needs a geofence beside it —
+  // it proves the UID was known, and a UID can be read off the tag by any
+  // phone. `signed: false` travels with the tap so the record says so.
+  return { ok: true, status: "active", tag, counter: null, signed: false };
 }
 
 /**

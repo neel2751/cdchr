@@ -52,6 +52,38 @@ const clockTagSchema = new mongoose.Schema(
     // 424 variant.
     lastCounter: { type: Number, default: 0 },
 
+    /**
+     * Does this chip actually sign its taps?
+     *
+     * "required" is a 424 doing what a 424 is for: every tap arrives with the
+     * encrypted counter and a CMAC over it, and one that does not is refused.
+     *
+     * "none" is a 424 whose SDM mirroring could not be programmed, which is a
+     * real situation and not a hypothetical: the writing tool in use will not
+     * accept a URL carrying the picc and cmac placeholders, so the chip can
+     * only be written with `?tag=<uid>` and has nothing to sign with. Holding a
+     * key it cannot use, it behaves exactly like an NTAG213.
+     *
+     * IT IS A SEPARATE FIELD FROM keyRef ON PURPOSE. Inferring "must sign" from
+     * "has a key" is what left a tag unusable: the key was sealed during
+     * provisioning, the chip could not be told to mirror, and every tap was
+     * refused as unverifiable with no way to say "this chip cannot do that".
+     * Deleting the key to make it work would have been the worst answer — it
+     * throws away the ability to turn signing on later, and it hides the
+     * downgrade from the people relying on the tag.
+     *
+     * WHAT "none" COSTS, stated so nobody has to work it out: a UID can be read
+     * off a tag by any phone, so an unsigned tap proves the UID was known, not
+     * that anybody was there. That is the same ground a QR code or a 213 stands
+     * on, and it is why a location that matters should have its geofence or
+     * network check set to enforce rather than shadow (lib/locationPolicy.js).
+     */
+    signature: {
+      type: String,
+      enum: ["required", "none"],
+      default: "required",
+    },
+
     // --- what we have seen -------------------------------------------------
     lastSeenAt: Date,
     // Where the tap actually came from, per the geofence — not where the tag

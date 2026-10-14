@@ -230,6 +230,12 @@ export async function storeClockTimeByTag(
         deviceId: clientEvidence?.deviceId || undefined,
         tagId: String(tag._id),
         tagCounter: resolved.counter ?? undefined,
+        // Whether the chip proved itself, kept with the record rather than
+        // inferred later from the tag. A tag can be switched between signing
+        // and not signing, so the tag's setting today says nothing about what
+        // a tap last March proved — and "was this record backed by a signature"
+        // is exactly the question a disputed timesheet asks.
+        tagSigned: resolved.signed === true,
       },
     });
 
@@ -261,6 +267,10 @@ export async function getClockTags() {
 
     await connect();
     const rows = await ClockTagModel.find({ status: { $ne: "retired" } })
+      // Never the key reference, for the same reason the provisioning queue
+      // excludes it: it is sealed, not plaintext, but a settings screen has no
+      // use for it and a sealed blob plus a leaked master key is a working tag.
+      .select("-keyRef")
       .sort({ status: 1, label: 1 })
       .populate({ path: "locationId", select: "name kind" })
       .populate({ path: "lastSeenLocationId", select: "name" })

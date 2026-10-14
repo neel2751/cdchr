@@ -139,6 +139,18 @@ export default function ClockTagsSettings() {
                           <span className="text-[11px] text-neutral-400">
                             {tag.uid} · {tag.chipType}
                           </span>
+                          {/* A 424 that holds a key it cannot use proves only
+                              that its UID was known, and a UID can be read off
+                              the tag by any phone. Said on the row because a
+                              downgrade nobody can see is worse than one
+                              somebody chose: this is the tag whose geofence
+                              wants setting to enforce. */}
+                          {tag.signature === "none" ? (
+                            <span className="mt-1 w-fit rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                              no replay protection — set this location&apos;s
+                              geofence to enforce
+                            </span>
+                          ) : null}
                           <span
                             className={`mt-1 w-fit rounded px-1.5 py-0.5 text-[10px] ${
                               STATUS_STYLE[tag.status] || "bg-neutral-100"

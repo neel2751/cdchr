@@ -180,6 +180,9 @@ async function replayOne({ entry, employeeId, employeeType, officeEmployee, sync
       deviceId: evidence?.deviceId || undefined,
       tagId: String(resolved.tag._id),
       tagCounter: resolved.counter ?? undefined,
+      // Same reasoning as the live path in tags.js: what the chip proved
+      // belongs on the record, not inferred from the tag's setting later.
+      tagSigned: resolved.signed === true,
     },
   });
 
