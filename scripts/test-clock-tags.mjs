@@ -59,8 +59,14 @@ async function main() {
   const { runWithTenant } = await import("@/lib/tenantContext");
   const { buildSunMessageForTest } = await import("@/lib/sun");
   const { generateTagKey, sealTagKey } = await import("@/lib/tagKeys");
-  const { normaliseUid, recordSighting, recordUnknownTag, resolveTag } =
-    await import("@/server/clockServer/clockTagStore");
+  const {
+    normaliseUid,
+    parseTapCounter,
+    recordSighting,
+    recordUnknownTag,
+    resolveTag,
+    tapNonce,
+  } = await import("@/server/clockServer/clockTagStore");
   const { assignClockTag, setClockTagStatus, storeClockTimeByTag } =
     await import("@/server/clockServer/tags");
 
@@ -176,6 +182,162 @@ async function main() {
     const r = await resolveTag("04A2B3C4D5E680");
     assert.equal(r.ok, false);
     assert.equal(r.status, "unassigned");
+  });
+
+  /* --------------------------------------------- one tap, one use */
+  /*
+   * THE HOLE THESE CLOSE. Without a counter the URL a chip sends is a fixed
+   * string, so a tap and a page reload are the same request: one touch of the
+   * tag bought a page that could clock in, break and clock out by pressing
+   * refresh, and the tag proved somebody had been there once, ever.
+   */
+
+  check("the read counter is read as hex, not decimal", () => {
+    // The trap: decimal still goes up, so it would look like it worked and
+    // then refuse a real tap the first time a digit rolled past 9.
+    assert.equal(parseTapCounter("00001A"), 26);
+    assert.equal(parseTapCounter("0A"), 10);
+    assert.equal(parseTapCounter("000000"), 0);
+    // Nothing usable is null, NOT zero: zero is a real counter on a chip that
+    // has never been read, and a crafted empty value must not pass as the
+    // lowest possible one.
+    for (const bad of [null, undefined, "", "zz", "{COUNTER}", "12 34"]) {
+      assert.equal(parseTapCounter(bad), null, `accepted ${JSON.stringify(bad)}`);
+    }
+  });
+
+  check("a tap nonce is stable for one tap and different for the next", () => {
+    const a = tapNonce({ picc: "AA".repeat(16), cmac: "BB".repeat(8) });
+    const b = tapNonce({ picc: "AA".repeat(16), cmac: "BB".repeat(8) });
+    const c = tapNonce({ picc: "AC".repeat(16), cmac: "BB".repeat(8) });
+    assert.equal(a, b, "the same tap must hash the same");
+    assert.notEqual(a, c, "a different tap must hash differently");
+    assert.equal(tapNonce({}), null);
+    assert.equal(tapNonce(), null);
+  });
+
+  await check("a counted tap is refused the second time it is used", async () => {
+    const uid = "04CCDDEE11223344";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Counted",
+        status: "active",
+        locationId: elm._id,
+      });
+    });
+
+    const first = await resolveTag(uid, { counter: "000005" });
+    assert.equal(first.ok, true, first.message);
+    assert.equal(first.counted, true);
+    assert.equal(first.counter, 5);
+
+    // Spending it is what the action does.
+    await recordSighting(first.tag._id, { counter: first.counter });
+
+    // The same URL again — a reload, a bookmark, the back button.
+    const again = await resolveTag(uid, { counter: "000005" });
+    assert.equal(again.ok, false, "a reused tap was accepted");
+    assert.equal(again.status, "replay");
+
+    // An older one too, in case anybody kept a screenshot.
+    assert.equal((await resolveTag(uid, { counter: "000001" })).status, "replay");
+
+    // And the next real tap works.
+    const next = await resolveTag(uid, { counter: "000006" });
+    assert.equal(next.ok, true, next.message);
+    assert.equal(next.counter, 6);
+  });
+
+  await check("an unverifiable 424 is still single-use, via its blob", async () => {
+    // The real tag in production: a 424 whose key we do not hold, so picc and
+    // cmac cannot be checked — but they change on every tap, and that is
+    // enough to tell a tap from a refresh.
+    const uid = "04AABBCCDDEE0099";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Unverifiable 424",
+        status: "active",
+        signature: "none",
+        locationId: elm._id,
+      });
+    });
+
+    const tap1 = { picc: "11".repeat(16), cmac: "22".repeat(8) };
+    const first = await resolveTag(uid, tap1);
+    assert.equal(first.ok, true, first.message);
+    assert.equal(first.signed, false, "nothing was verified and must not claim to be");
+    assert.equal(first.counted, true, "but it IS single-use");
+    assert.ok(first.nonce);
+
+    await recordSighting(first.tag._id, { nonce: first.nonce });
+
+    const reload = await resolveTag(uid, tap1);
+    assert.equal(reload.ok, false, "a refresh was accepted as a new tap");
+    assert.equal(reload.status, "replay");
+
+    // A genuine second tap carries a different blob.
+    const second = await resolveTag(uid, {
+      picc: "33".repeat(16),
+      cmac: "44".repeat(8),
+    });
+    assert.equal(second.ok, true, second.message);
+  });
+
+  await check("spending the same nonce twice stores it once", async () => {
+    const uid = "04AABBCCDDEE0099";
+    const tag = await ClockTag.findOne({ uid }).lean();
+    const used = (tag.usedTapIds || []).length;
+    await recordSighting(tag._id, { nonce: (tag.usedTapIds || [])[0] });
+    const after = await ClockTag.findOne({ uid }).lean();
+    assert.equal((after.usedTapIds || []).length, used, "a race double-pushed");
+  });
+
+  await check("the spent-tap list stays bounded", async () => {
+    const uid = "04AABBCCDDEE0099";
+    const tag = await ClockTag.findOne({ uid }).lean();
+    for (let i = 0; i < 60; i++) {
+      await recordSighting(tag._id, { nonce: `nonce${i}` });
+    }
+    const after = await ClockTag.findOne({ uid }).lean();
+    assert.ok(
+      after.usedTapIds.length <= 50,
+      `grew to ${after.usedTapIds.length} — an unbounded array on a hot path`,
+    );
+    // The newest are what got kept; the question is "has THIS tap been used".
+    assert.ok(after.usedTapIds.includes("nonce59"));
+  });
+
+  await check("the tag records whether its last tap was single-use", async () => {
+    // What the admin screen's warning hangs on. Inferring it from lastCounter
+    // would call a blob-spent tag unprotected, because that path never moves
+    // the counter.
+    const counted = await ClockTag.findOne({ uid: "04CCDDEE11223344" }).lean();
+    assert.equal(counted.lastTapCounted, true, "a counter tap read as unprotected");
+    const blobbed = await ClockTag.findOne({ uid: "04AABBCCDDEE0099" }).lean();
+    assert.equal(blobbed.lastTapCounted, true, "a spent blob read as unprotected");
+    assert.equal(blobbed.lastCounter, 0, "and it did NOT move the counter");
+  });
+
+  await check("a chip with no mirror at all still works, and says so", async () => {
+    // Refusing it would strand a working tag. But `counted: false` has to
+    // travel with the tap, because this is the one case where a reload really
+    // is indistinguishable from a tap.
+    const uid = "04777788889999AA";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Plain 213",
+        status: "active",
+        locationId: elm._id,
+      });
+    });
+    const r = await resolveTag(uid);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.counted, false);
+    assert.equal(r.signed, false);
+    assert.equal(r.nonce, undefined);
   });
 
   /* -------------------------------------------------------------- assigning */

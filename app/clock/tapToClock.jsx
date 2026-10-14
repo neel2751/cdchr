@@ -110,18 +110,24 @@ function ShiftSoFar({ tap }) {
   );
 }
 
-/** What a further tap would do from here — the instruction after an action. */
-function nextTapHint(stage) {
-  if (stage === "beforeShift") return "Tap the tag again to start your shift.";
-  if (stage === "onBreak") return "Tap the tag again when your break ends.";
-  if (stage === "working") {
+/**
+ * What a further tap would do, given what was just recorded.
+ *
+ * Keyed on the ACTION rather than on a re-read of the tag, because by this
+ * point the tap has been spent and re-reading it would correctly come back
+ * "already used" — see the note on `done` in act(). The action tells us the
+ * stage anyway: ending a break and clocking in both land on the same question.
+ */
+function nextTapHintAfter(action) {
+  if (action === "clockIn" || action === "breakOut") {
     return "Tap the tag again to start a break, or to clock out.";
   }
-  if (stage === "finished") return "That is you finished for today.";
+  if (action === "breakIn") return "Tap the tag again when your break ends.";
+  if (action === "clockOut") return "That is you finished for today.";
   return "Tap the tag again for your next action.";
 }
 
-export default function TapToClock({ uid, picc, cmac }) {
+export default function TapToClock({ uid, ctr, picc, cmac }) {
   const { data: session } = useSession();
   const [busy, setBusy] = React.useState(false);
   const [waiting, setWaiting] = React.useState(0);
@@ -140,8 +146,10 @@ export default function TapToClock({ uid, picc, cmac }) {
     refetch,
   } = useFetchQuery({
     fetchFn: inspectTag,
-    params: { uid, picc, cmac },
-    queryKey: ["clockTag", uid, picc, cmac],
+    params: { uid, ctr, picc, cmac },
+    // The counter is part of the key: a new tap is a different tap, and must
+    // not be answered from the cached result of the previous one.
+    queryKey: ["clockTag", uid, ctr, picc, cmac],
     enabled: Boolean(uid),
   });
 
@@ -187,9 +195,20 @@ export default function TapToClock({ uid, picc, cmac }) {
     };
   }, [drain]);
 
-  // What this tap meant and what came of it. Set by `act`, and the reason the
-  // next action is not offered in the same view: one tap, one action.
+  // What this tap meant and what came of it.
+  //
+  // Set by `act`, and once set it is the whole of what this view shows. Not
+  // politeness — the tap has been SPENT by the action, so asking the server
+  // about it again would correctly come back "this tap has already been used"
+  // (server/clockServer/clockTagStore.js). This view is therefore finished the
+  // moment an action lands, and the next action needs a new tap, which is the
+  // point.
   const [done, setDone] = React.useState(null);
+
+  // Which action is in flight, so the spinner can name it. `busy` alone cannot:
+  // it is also true while a tag is being enrolled, and a button press carries
+  // no `auto` to read the verb from.
+  const [pending, setPending] = React.useState(null);
 
   // Guards the automatic action against running twice. Keyed on the tag and
   // the stage, so a re-render or a refetch cannot repeat it, while a genuinely
@@ -198,6 +217,7 @@ export default function TapToClock({ uid, picc, cmac }) {
 
   const act = React.useCallback(async (action) => {
     setBusy(true);
+    setPending(action);
     setDone(null);
     try {
       // Never blocks: a declined permission or a cold GPS chip resolves to
@@ -206,7 +226,7 @@ export default function TapToClock({ uid, picc, cmac }) {
 
       let res;
       try {
-        res = await storeClockTimeByTag(uid, action, evidence, { picc, cmac });
+        res = await storeClockTimeByTag(uid, action, evidence, { ctr, picc, cmac });
       } catch {
         // The request never left the phone. On a site with no signal that is
         // the normal case, not an error — keep the tap and send it later.
@@ -222,7 +242,7 @@ export default function TapToClock({ uid, picc, cmac }) {
           uid,
           action,
           evidence,
-          signature: { picc, cmac },
+          signature: { ctr, picc, cmac },
         });
         setWaiting(await queuedCount());
         setDone({
@@ -236,16 +256,18 @@ export default function TapToClock({ uid, picc, cmac }) {
         return;
       }
 
+      // Deliberately no refetch. The tap is spent; re-reading it would report a
+      // replay, which is true and useless to show somebody who has just been
+      // clocked in.
       setDone({
         action,
         ok: res.success === true,
         message: res.message || (res.success ? "Recorded" : "That did not work"),
       });
-      await refetch();
     } finally {
       setBusy(false);
     }
-  }, [uid, picc, cmac, refetch]);
+  }, [uid, ctr, picc, cmac]);
 
   const tap = state?.state === "ready" ? state.tap || null : null;
 
@@ -292,6 +314,48 @@ export default function TapToClock({ uid, picc, cmac }) {
       <div className="flex h-40 items-center justify-center">
         <Loader2 className="size-6 animate-spin text-neutral-400" />
       </div>
+    );
+  }
+
+  // WHAT JUST HAPPENED — and nothing else, whatever the tag now says about
+  // itself. Placed ahead of every other branch because the action has spent the
+  // tap: a background refetch (the offline queue drains on reconnect and
+  // refreshes this query) would legitimately come back "already used", and
+  // showing somebody "this tag cannot be used" one second after clocking them
+  // in would be the most alarming possible way to report a success.
+  if (done) {
+    const { Icon } = ACTION_LABELS[done.action] || {};
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            {Icon ? <Icon className="size-4" /> : null}
+            {done.ok ? done.message : "Not recorded"}
+          </CardTitle>
+          {done.ok ? null : (
+            <CardDescription>{done.message}</CardDescription>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {done.queued ? (
+            <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+              Saved on this phone. Your manager will confirm the time.
+            </p>
+          ) : null}
+          <p className="text-center text-sm text-neutral-600">
+            {done.ok || done.queued
+              ? nextTapHintAfter(done.action)
+              : "Nothing was recorded. Tap the tag again to try."}
+          </p>
+          {/* No button back to the actions. The next one costs a tap, which is
+              the only thing the tag actually proves. */}
+          <Button asChild variant="outline" size="sm" className="w-full">
+            <Link href={homePathForRole(session?.user?.role)}>
+              See my attendance
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -438,29 +502,8 @@ export default function TapToClock({ uid, picc, cmac }) {
         {busy ? (
           <p className="flex items-center justify-center gap-2 rounded-md border bg-neutral-50 py-3 text-sm text-neutral-600">
             <Loader2 className="size-4 animate-spin" />
-            {ACTION_LABELS[done?.action || tap?.auto]?.verb || "Recording that"}…
+            {ACTION_LABELS[pending]?.verb || "Recording that"}…
           </p>
-        ) : done ? (
-          /* WHAT JUST HAPPENED, AND NOTHING ELSE OFFERED. The next action
-             deliberately needs another tap: the tap is the evidence of being
-             at the tag, so collecting several actions from one of them would
-             throw away the only thing the hardware proves. */
-          <div className="space-y-2">
-            <p
-              className={
-                done.ok
-                  ? "rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900"
-                  : "rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
-              }
-            >
-              {done.message}
-            </p>
-            <p className="text-center text-xs text-neutral-500">
-              {done.ok || done.queued
-                ? nextTapHint(tap?.stage)
-                : "Nothing was recorded. Tap the tag again to try."}
-            </p>
-          </div>
         ) : tap?.stage === "finished" ? (
           <div className="space-y-2">
             <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-700">

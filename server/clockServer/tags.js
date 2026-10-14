@@ -46,13 +46,13 @@ async function requireSuperAdmin() {
  * /clock page can show the right thing — clock actions, an enrolment prompt
  * for a super admin, or a plain explanation.
  */
-export async function inspectTag({ uid, picc, cmac } = {}) {
+export async function inspectTag({ uid, ctr, picc, cmac } = {}) {
   try {
     const { props } = await getServerSideProps();
     const user = props?.session?.user;
     if (!user?._id) return { success: false, message: "Not signed in" };
 
-    const resolved = await resolveTag(uid, { picc, cmac });
+    const resolved = await resolveTag(uid, { picc, cmac, counter: ctr });
 
     // A CHIP THAT SIGNS ITSELF IS NOT ENROLLED BY TAPPING IT.
     //
@@ -221,6 +221,7 @@ export async function storeClockTimeByTag(
     const resolved = await resolveTag(uid, {
       picc: signature?.picc,
       cmac: signature?.cmac,
+      counter: signature?.ctr,
     });
     if (!resolved.ok) {
       // Same reasoning as inspectTag: a refused tap that leaves no trace is
@@ -296,6 +297,12 @@ export async function storeClockTimeByTag(
         // a tap last March proved — and "was this record backed by a signature"
         // is exactly the question a disputed timesheet asks.
         tagSigned: resolved.signed === true,
+        // And whether this tap was single-use. Without a counter the chip
+        // sends the same URL every time, so the record cannot claim to be one
+        // physical tap — it could be a reload of an earlier one. Stored beside
+        // tagSigned for the same reason: the tag's setting today says nothing
+        // about what a tap last March could prove.
+        tagCounted: resolved.counted === true,
       },
     });
 
@@ -303,6 +310,10 @@ export async function storeClockTimeByTag(
     // twenty miles away" is worth knowing whether or not the clock-in landed.
     await recordSighting(tag._id, {
       counter: resolved.counter,
+      // Spent whether or not the action landed. A tap is one use of the tag,
+      // and letting a refused attempt hand the URL back would mean a refusal
+      // could be retried from the browser instead of from the wall.
+      nonce: resolved.nonce,
       employeeId,
       seenAtLocationId: location._id,
     });
@@ -330,7 +341,7 @@ export async function getClockTags() {
       // Never the key reference, for the same reason the provisioning queue
       // excludes it: it is sealed, not plaintext, but a settings screen has no
       // use for it and a sealed blob plus a leaked master key is a working tag.
-      .select("-keyRef")
+      .select("-keyRef -usedTapIds")
       .sort({ status: 1, label: 1 })
       .populate({ path: "locationId", select: "name kind" })
       .populate({ path: "lastSeenLocationId", select: "name" })

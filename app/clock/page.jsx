@@ -45,6 +45,9 @@ export default async function ClockPage({ searchParams }) {
   // encrypted file data, which we do not mirror anything into and so ignore.
   const picc = firstString(params?.picc, params?.picc_data);
   const cmac = firstString(params?.cmac);
+  // The chip's read counter in the clear — what makes one tap usable once.
+  // Aliases because writers disagree on the name; see lib/tagUrl.js.
+  const ctr = firstString(params?.ctr, params?.cnt, params?.counter);
 
   const sessionData = await getServerSideProps();
   if (sessionData?.redirect?.destination) {
@@ -52,6 +55,7 @@ export default async function ClockPage({ searchParams }) {
     // one extra step rather than a dead end.
     const back = encodeURIComponent(
       `/clock?tag=${encodeURIComponent(uid)}` +
+        (ctr ? `&ctr=${encodeURIComponent(ctr)}` : "") +
         (picc ? `&picc=${encodeURIComponent(picc)}` : "") +
         (cmac ? `&cmac=${encodeURIComponent(cmac)}` : ""),
     );
@@ -60,7 +64,7 @@ export default async function ClockPage({ searchParams }) {
 
   return (
     <main className="mx-auto w-full max-w-sm px-3 py-6">
-      <TapToClock uid={uid} picc={picc} cmac={cmac} />
+      <TapToClock uid={uid} ctr={ctr} picc={picc} cmac={cmac} />
     </main>
   );
 }

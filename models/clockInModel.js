@@ -89,6 +89,21 @@ const clockInSchema = new Schema(
       // not, so what it is set to today says nothing about what a tap last
       // March proved, and that is the question a disputed timesheet asks.
       tagSigned: Boolean,
+      /**
+       * Was this tap usable only once?
+       *
+       * True when the chip mirrored its read counter, which it increments on
+       * every read and cannot wind back, so the server could refuse anything at
+       * or below the highest it had seen. False means the chip sent the same
+       * fixed URL it always sends — and then a reload, a bookmark or a back
+       * button is the same request as a tap, so this record cannot claim to be
+       * one physical touch of the tag.
+       *
+       * Separate from tagSigned because they fail separately: a cleartext
+       * counter stops ordinary reuse without proving anything cryptographically,
+       * and a signature proves the chip was there. See lib/tagUrl.js.
+       */
+      tagCounted: Boolean,
       tokenJti: String,
       checks: [
         {

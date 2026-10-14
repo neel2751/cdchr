@@ -4,6 +4,8 @@
  * NOT a "use server" module — `recordSighting` writes, and none of this should
  * be callable from a browser by name.
  */
+import { createHash } from "crypto";
+
 import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import ClockTagModel from "@/models/clockTagModel";
@@ -68,6 +70,63 @@ export function normaliseUid(raw) {
 }
 
 /**
+ * The chip's read counter, as it arrives mirrored in the URL.
+ *
+ * Hex, because that is what both chips mirror — NXP's ASCII mirror writes the
+ * counter as hex digits, so "00001A" is 26 and not one thousand and a bit.
+ * Reading it as decimal would still go up, which is the trap: it would appear
+ * to work and then refuse a real tap every time a digit rolled past 9.
+ *
+ * Returns null for anything unusable, which the caller must treat as "this tap
+ * carried no counter" rather than as zero — zero is a legitimate counter value
+ * on a chip that has never been read, and conflating them would let a crafted
+ * `ctr=000000` pass as the lowest possible rather than as nothing at all.
+ */
+export function parseTapCounter(raw) {
+  if (raw === 0) return 0;
+  if (!raw) return null;
+  const cleaned = String(raw).trim();
+  // Only a plain hex run. A counter arriving with anything else in it is a
+  // mangled URL, and guessing at it would be inventing evidence.
+  if (!/^[0-9a-fA-F]{1,8}$/.test(cleaned)) return null;
+  const value = parseInt(cleaned, 16);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * A short, stable id for one physical tap — used to spend it.
+ *
+ * THE CASE THIS EXISTS FOR, because it is not hypothetical. A 424 whose key we
+ * do not hold still mirrors `picc` and `cmac`, and those change on every single
+ * tap: the encrypted blob covers the chip's read counter, so each read produces
+ * a different ciphertext. We cannot decrypt it and therefore cannot prove the
+ * chip produced it — but we do not need to decrypt it to notice that THIS EXACT
+ * BLOB has been used before.
+ *
+ * That is the difference between a tap and a refresh. A reload re-sends the
+ * same URL byte for byte, so the same nonce; a real tap sends a new one. So
+ * even a tag we cannot verify can be made single-use, which is what makes "one
+ * tap, one action" true rather than merely displayed.
+ *
+ * WHAT IT DOES NOT DO: it is not a signature and not ordered. Somebody who
+ * captured a URL from a tap that was never used could still spend it later,
+ * because without the key there is nothing to compare it against — only a
+ * signed counter gives ordering. It closes reload, history, bookmarks and a
+ * forwarded link, which is every way a tap gets reused by accident.
+ *
+ * Hashed rather than stored raw, and truncated, because this is an equality
+ * check against a bounded list — the ciphertext itself is not wanted on disk
+ * and 64 bits of it is already far past collision for a list of fifty.
+ */
+export function tapNonce({ picc, cmac, counter } = {}) {
+  const parts = [picc, cmac, counter]
+    .map((v) => String(v ?? "").trim().toUpperCase())
+    .filter(Boolean);
+  if (!parts.length) return null;
+  return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+}
+
+/**
  * Why a link arrived with no readable tag id.
  *
  * Every one of these is a chip that was written wrong, not an employee who did
@@ -124,9 +183,10 @@ function unreadableUidMessage(raw) {
  *                  taps like this, and that is how it gets enrolled (§5.2).
  *   "unassigned" — registered, not yet bound to a location.
  *   "suspended" / "retired" — deliberately switched off.
- *   "replay"     — the counter did not advance. A cloned chip.
+ *   "replay"     — the counter did not advance. A reused tap: a reload, a
+ *                  bookmark, a back button, or a cloned chip.
  */
-export async function resolveTag(rawUid, { picc, cmac } = {}) {
+export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
   await connect();
 
   const uid = normaliseUid(rawUid);
@@ -248,14 +308,89 @@ export async function resolveTag(rawUid, { picc, cmac } = {}) {
       };
     }
 
-    return { ok: true, status: "active", tag, counter: verified.counter, signed: true };
+    return {
+      ok: true,
+      status: "active",
+      tag,
+      counter: verified.counter,
+      signed: true,
+      counted: true,
+    };
   }
 
-  // Nothing to verify: a plain NTAG213, or a 424 that could not be told to
-  // mirror. Which is exactly why an unsigned tag needs a geofence beside it —
-  // it proves the UID was known, and a UID can be read off the tag by any
-  // phone. `signed: false` travels with the tap so the record says so.
-  return { ok: true, status: "active", tag, counter: null, signed: false };
+  // ───────────────────────────────── AN UNSIGNED TAP, WITH A COUNTER ───────
+  //
+  // THIS IS WHAT MAKES ONE TAP ONE ACTION.
+  //
+  // Without a counter the URL a chip sends is a fixed string, so a tap, a page
+  // reload, a bookmark and a back button are the same request and nothing here
+  // can tell them apart. One tap then bought an open page that could clock in,
+  // break and clock out by pressing refresh — the tag proved somebody had been
+  // at it ONCE, ever, and every action after that rode on it. No server logic
+  // fixes that, because there is nothing in the request to distinguish.
+  //
+  // A mirrored read counter does fix it, and needs no key: the chip increments
+  // it on every read and has no command to wind it back, so the highest value
+  // seen is a watermark. At or below it, the tap has already been used.
+  //
+  // Not signed, so it is a floor and not a ceiling: somebody who reads the URL
+  // once can type a higher number. It defeats every ordinary reuse — reload,
+  // history, a shared link — and a determined forger still needs the signature
+  // path above. Both are better than a static string, which stops nothing.
+  const sentCounter = parseTapCounter(counter);
+  if (sentCounter !== null) {
+    if (sentCounter <= (tag.lastCounter || 0)) {
+      return {
+        ok: false,
+        status: "replay",
+        tag,
+        message: "This tap has already been used. Hold the phone to the tag again.",
+      };
+    }
+    return {
+      ok: true,
+      status: "active",
+      tag,
+      counter: sentCounter,
+      signed: false,
+      counted: true,
+    };
+  }
+
+  // ──────────────── AN UNSIGNED TAP WHOSE BLOB IS STILL UNIQUE PER TAP ─────
+  //
+  // A 424 whose key we do not hold. It mirrors picc and cmac and they change on
+  // every tap, so we cannot verify them but we CAN spend them: this exact blob
+  // either has been used before or has not. That alone separates a tap from a
+  // refresh, which is the whole of what was broken — see tapNonce above.
+  const nonce = tapNonce({ picc, cmac });
+  if (nonce) {
+    if ((tag.usedTapIds || []).includes(nonce)) {
+      return {
+        ok: false,
+        status: "replay",
+        tag,
+        message: "This tap has already been used. Hold the phone to the tag again.",
+      };
+    }
+    return {
+      ok: true,
+      status: "active",
+      tag,
+      counter: null,
+      nonce,
+      signed: false,
+      counted: true,
+    };
+  }
+
+  // Nothing to verify, nothing to count, nothing to spend: a chip written with
+  // no mirror of any kind. Accepted, because refusing it would strand a working
+  // tag — but `counted: false` travels with the tap so nothing downstream has
+  // to guess. This is the one case where a tap and a page reload really are the
+  // same request, and it is why such a tag needs its geofence enforced: it
+  // proves a UID was known, which any phone can read off the tag.
+  return { ok: true, status: "active", tag, counter: null, signed: false, counted: false };
 }
 
 /**
@@ -270,14 +405,35 @@ export async function resolveTag(rawUid, { picc, cmac } = {}) {
  */
 export async function recordSighting(
   tagId,
-  { counter, employeeId, seenAtLocationId } = {},
+  { counter, nonce, employeeId, seenAtLocationId } = {},
 ) {
   try {
     if (!tagId) return;
     await connect();
 
+    // SPENDING THE TAP. Written first and on its own, because it is the thing
+    // that must happen even if everything below fails — an unspent tap is a
+    // URL that still works, which is the hole this closes.
+    //
+    // `$ne` in the filter rather than $addToSet: two taps racing with the same
+    // nonce must not both land, and $addToSet would silently accept the second
+    // as a no-op success. Bounded to the last fifty, which is weeks of taps for
+    // one tag and cannot grow a document without limit.
+    if (nonce) {
+      await ClockTagModel.updateOne(
+        { _id: tagId, usedTapIds: { $ne: nonce } },
+        { $push: { usedTapIds: { $each: [nonce], $slice: -50 } } },
+      );
+    }
+
     const changes = {
       lastSeenAt: new Date(),
+      // Was the last tap usable only once? Stored rather than inferred: a
+      // counter in `lastCounter` is only one of the two ways to get there, and
+      // the other (spending the chip's per-tap blob, above) leaves lastCounter
+      // at zero. Without this the admin screen would warn that a tag cannot
+      // tell a tap from a refresh when it demonstrably can.
+      lastTapCounted: Boolean(nonce) || Number.isFinite(counter),
       ...(employeeId && isValidObjectId(employeeId)
         ? { lastSeenBy: createObjectId(employeeId) }
         : {}),

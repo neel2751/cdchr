@@ -98,6 +98,21 @@ const clockTagSchema = new mongoose.Schema(
     lastSeenBy: mongoose.Schema.Types.ObjectId,
 
     /**
+     * Could the last tap be used only once?
+     *
+     * True when the chip mirrored something that changes per tap — a read
+     * counter, or (on a 424 whose key we do not hold) the encrypted blob we
+     * spend without being able to verify. False means the chip sends one fixed
+     * URL, so a reload, a bookmark or a forwarded link is indistinguishable
+     * from somebody standing at the tag.
+     *
+     * Stored rather than worked out from `lastCounter`, because spending a blob
+     * leaves lastCounter at zero — and a screen that inferred it would warn
+     * that a tag cannot tell a tap from a refresh when it demonstrably can.
+     */
+    lastTapCounted: Boolean,
+
+    /**
      * The last few taps that were REFUSED, and why.
      *
      * A successful tap moves lastSeenAt; a refused one used to leave nothing at
@@ -127,6 +142,29 @@ const clockTagSchema = new mongoose.Schema(
         _id: false,
       },
     ],
+
+    /**
+     * Taps already spent, as short hashes. The last fifty.
+     *
+     * WHY A TAP HAS TO BE SPENT AT ALL. Without it the URL a chip sends is a
+     * fixed string, so a tap and a page reload are the same request: one touch
+     * of the tag bought an open page that could clock in, take a break and
+     * clock out by pressing refresh. The tag then proved somebody had been at
+     * it once, ever, and every action afterwards rode on that — which is not
+     * what anyone is buying a tag for.
+     *
+     * `lastCounter` handles it where a counter arrives, by refusing anything at
+     * or below the highest seen. This list handles the case that has no usable
+     * counter but still changes per tap: a 424 whose key we do not hold mirrors
+     * picc and cmac, and those cover the chip's read counter, so each tap
+     * produces a different blob. We cannot decrypt it to prove the chip made
+     * it — but we do not have to, to see that this exact blob was used already.
+     *
+     * Bounded on purpose. It answers "has this tap been used", not "every tap
+     * ever", and fifty is weeks of taps on one tag while keeping the document a
+     * fixed size on a hot write path.
+     */
+    usedTapIds: { type: [String], default: undefined },
 
     assignedBy: mongoose.Schema.Types.ObjectId,
     assignedByName: String,

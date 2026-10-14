@@ -159,10 +159,30 @@ export default function ClockTagsSettings() {
                                 : ""}
                             </span>
                           ) : null}
+                          {/* TWO DIFFERENT WEAKNESSES, said separately because
+                              they need different things done about them.
+
+                              A chip that cannot sign still proves nothing about
+                              WHO tapped it — a UID is readable by any phone —
+                              so the answer is an enforced geofence beside it.
+
+                              A chip that mirrors nothing per tap is worse and
+                              less obvious: it sends the same URL every time, so
+                              a reload, a bookmark or a forwarded link is the
+                              same request as a tap. One touch then covers a
+                              whole day of actions, which is the one thing a tag
+                              is bought to prevent. The fix is a rewrite with a
+                              counter mirror, not a setting. */}
                           {tag.signature === "none" ? (
                             <span className="mt-1 w-fit rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
-                              no replay protection — set this location&apos;s
+                              taps are not signed — set this location&apos;s
                               geofence to enforce
+                            </span>
+                          ) : null}
+                          {tag.lastSeenAt && tag.lastTapCounted === false ? (
+                            <span className="mt-1 w-fit rounded bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-800">
+                              cannot tell a tap from a page refresh — this chip
+                              mirrors no counter, so one tap covers every action
                             </span>
                           ) : null}
                           <span

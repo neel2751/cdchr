@@ -139,6 +139,7 @@ async function replayOne({ entry, employeeId, employeeType, officeEmployee, sync
   const resolved = await resolveTag(uid, {
     picc: signature?.picc,
     cmac: signature?.cmac,
+    counter: signature?.ctr,
   });
   if (!resolved.ok) return refuse(resolved.message);
 
@@ -183,11 +184,13 @@ async function replayOne({ entry, employeeId, employeeType, officeEmployee, sync
       // Same reasoning as the live path in tags.js: what the chip proved
       // belongs on the record, not inferred from the tag's setting later.
       tagSigned: resolved.signed === true,
+      tagCounted: resolved.counted === true,
     },
   });
 
   await recordSighting(resolved.tag._id, {
     counter: resolved.counter,
+    nonce: resolved.nonce,
     employeeId,
     seenAtLocationId: location._id,
   });
