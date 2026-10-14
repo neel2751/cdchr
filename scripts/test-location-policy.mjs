@@ -349,6 +349,95 @@ check("ENFORCE: a location still only measuring refuses nobody", () => {
   assert.equal(r.wouldAllow, false, "but it should still record the verdict");
 });
 
+/* ------------------------------------------- a forwarded tap link */
+/*
+ * THE THREAT. A tap URL is bearer evidence: whoever holds it can spend it.
+ * Single-use stops it being replayed and does nothing to stop it being
+ * forwarded — tap at the office, send the link to someone at home, and they
+ * clock themselves in. No property of the chip fixes that; a signature proves
+ * the chip made the URL, never who holds the phone.
+ *
+ * The recipient's move is to DECLINE the location prompt, because a missing
+ * position is "unknown", and unknown allows.
+ */
+
+const strictSite = (over = {}) =>
+  site({
+    methods: [{ type: "geofence", mode: "enforce" }],
+    requirePositionForTaps: true,
+    ...over,
+  });
+
+check("the forwarded-link bypass, with the setting off", () => {
+  // What production did before this existed, kept as a test so the hole cannot
+  // quietly reopen: no position, enforced geofence, allowed.
+  const location = site({ methods: [{ type: "geofence", mode: "enforce" }] });
+  const r = evaluateLocation(location, { method: "nfc" });
+  assert.equal(r.checks[0].verdict, CHECK.UNKNOWN);
+  assert.equal(r.wouldAllow, true, "the fail-open is deliberate when off");
+});
+
+check("a tap that will not say where it is is refused", () => {
+  const r = evaluateLocation(strictSite(), { method: "nfc" });
+  assert.equal(r.checks[0].verdict, CHECK.FAIL);
+  assert.equal(r.wouldAllow, false, "a forwarded tap link still got through");
+  assert.match(r.checks[0].detail, /has to say where it is/);
+});
+
+check("a tap at the gate is unaffected by it", () => {
+  const r = evaluateLocation(strictSite(), {
+    method: "nfc",
+    coords: { lat: 51.5, lng: -0.1, accuracyMetres: 10 },
+  });
+  assert.equal(r.wouldAllow, true, "somebody actually present was refused");
+});
+
+check("a tap far away is refused for being far away, not for silence", () => {
+  const r = evaluateLocation(strictSite(), {
+    method: "nfc",
+    coords: { lat: 52.5, lng: -1.9, accuracyMetres: 10 },
+  });
+  assert.equal(r.wouldAllow, false);
+  // The two refusals need different sentences, so they must stay
+  // distinguishable: this one has a distance, the other says why it has none.
+  assert.doesNotMatch(r.checks[0].detail, /has to say where it is/);
+  assert.match(r.checks[0].detail, /away/);
+});
+
+check("it applies to TAPS ONLY", () => {
+  // A QR scan already carries a thirty-second single-use code from a screen at
+  // the location, and a manager recording attendance claims to be nowhere. If
+  // this ever bled into those, declining a location prompt would stop people
+  // clocking in by every route at once.
+  for (const method of ["deviceQr", "rollCall", undefined]) {
+    const r = evaluateLocation(strictSite(), { method });
+    assert.equal(
+      r.wouldAllow,
+      true,
+      `a ${method || "method-less"} entry was caught by the tap rule`,
+    );
+  }
+});
+
+check("a poor fix is still not a missing one", () => {
+  // The rule is about silence, not accuracy. A 300m fix at the gate is the
+  // normal case in a steel-framed building and must still admit somebody.
+  const r = evaluateLocation(strictSite(), {
+    method: "nfc",
+    coords: { lat: 51.5008, lng: -0.1, accuracyMetres: 300 },
+  });
+  assert.equal(r.wouldAllow, true);
+});
+
+check("it does nothing while the geofence is only measuring", () => {
+  // Enforced is what makes a verdict a decision. Turning a missing position
+  // into a FAIL on a shadow geofence must not start refusing anybody.
+  const location = strictSite({ methods: [{ type: "geofence", mode: "shadow" }] });
+  const r = evaluateLocation(location, { method: "nfc" });
+  assert.equal(r.enforcing, false);
+  assert.equal(r.checks[0].verdict, CHECK.FAIL, "still measured");
+});
+
 /* ---------------------------------------------------------------- report */
 
 const failed = results.filter(([s]) => s !== "pass");

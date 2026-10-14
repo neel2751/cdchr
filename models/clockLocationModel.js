@@ -75,6 +75,35 @@ const clockLocationSchema = new mongoose.Schema(
     // false = any satisfied method admits them.
     requireAll: { type: Boolean, default: false },
 
+    /**
+     * Must an NFC tap say where it is?
+     *
+     * A tap URL is bearer evidence: whoever holds it can spend it. Making it
+     * single-use stops it being replayed and does nothing to stop it being
+     * FORWARDED — tap the tag at the office, send the link to someone at home,
+     * and they clock themselves in. No property of the chip fixes that, a full
+     * signature included: a signature proves the chip made the URL, never who
+     * is holding the phone.
+     *
+     * Position is the only evidence attached to the person instead of the link,
+     * and the usual fail-open is what a forwarded link exploits — decline the
+     * browser's location prompt and an enforced geofence returns "unknown",
+     * which allows. With this on, a tap that cannot say where it is counts as a
+     * failure rather than as silence.
+     *
+     * Taps only, deliberately. A tap asserts "I am standing at this tag", so a
+     * tap with no position has made a claim it cannot support. Nothing else
+     * claims that: a QR scan already carries a thirty-second single-use code
+     * from a screen at the location, and a manager recording attendance by hand
+     * is not claiming to be anywhere.
+     *
+     * Default false, because it has a real cost — an employee who has denied
+     * location access, or whose phone gets no fix indoors, can no longer use
+     * the tag. The QR code and a manager's override still work, but somebody
+     * has to have told them that first. See lib/locationPolicy.js.
+     */
+    requirePositionForTaps: { type: Boolean, default: false },
+
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true },

@@ -29,6 +29,18 @@ import { getClockRules } from "@/server/settingsServer/workSettings";
  */
 function refusalMessage(failed) {
   if (failed?.method === "geofence") {
+    // Two quite different refusals wear the same verdict, and sending the
+    // wrong sentence wastes somebody's morning. "You seem to be elsewhere" to
+    // a person standing at the door with location switched off tells them to
+    // move, which cannot help; "turn location on" to a person genuinely twenty
+    // miles away tells them to fiddle with settings that will not admit them.
+    if (/has to say where it is/.test(failed?.detail || "")) {
+      return (
+        "This tag needs to know where you are. Allow location access for " +
+        "this site and tap the tag again — or scan the code at reception, or " +
+        "ask your manager to record it."
+      );
+    }
     return (
       "You do not appear to be at this location. If you are, check that " +
       "location access is on for this site, then try again — or ask your " +

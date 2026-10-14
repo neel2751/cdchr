@@ -42,6 +42,7 @@ const APPLY = argv.includes("--apply");
 const LOCATION_ID = flag("location");
 const METHOD = flag("method");
 const MODE = flag("mode");
+const STRICT_TAPS = flag("strict-taps");
 const DB_NAME = flag("db", "test");
 
 const VALID_MODES = ["off", "shadow", "enforce"];
@@ -54,8 +55,12 @@ function die(message) {
 if (!LOCATION_ID || !mongoose.Types.ObjectId.isValid(LOCATION_ID)) {
   die("Pass --location <objectid>");
 }
-if (!METHOD) die("Pass --method <geofence|network|deviceQr|nfc|rollCall>");
-if (!VALID_MODES.includes(MODE)) die(`Pass --mode <${VALID_MODES.join("|")}>`);
+if (STRICT_TAPS !== null) {
+  if (!["on", "off"].includes(STRICT_TAPS)) die("Pass --strict-taps <on|off>");
+} else {
+  if (!METHOD) die("Pass --method <geofence|network|deviceQr|nfc|rollCall>");
+  if (!VALID_MODES.includes(MODE)) die(`Pass --mode <${VALID_MODES.join("|")}>`);
+}
 
 async function main() {
   await mongoose.connect(process.env.MONGO_DB_URL, {
@@ -79,6 +84,69 @@ async function main() {
   console.log(`  location  ${location._id}`);
   console.log(`  requireAll ${location.requireAll === true}`);
   console.log();
+
+  // --- must a tap say where it is? ----------------------------------------
+  //
+  // Its own mode, because it is not a method — it changes how one verdict is
+  // read, and the thing it defends against is a FORWARDED link rather than a
+  // replayed one. See models/clockLocationModel.js.
+  if (STRICT_TAPS !== null) {
+    const want = STRICT_TAPS === "on";
+    const geofence = methods.find((m) => m?.type === "geofence");
+
+    console.log(`  position required for taps: ${location.requirePositionForTaps === true} -> ${want}`);
+    if (want && geofence?.mode !== "enforce") {
+      die(
+        `\n  This does nothing unless the geofence is enforced — it turns a\n` +
+          `  MISSING position into a refusal, and a geofence on ${geofence?.mode || "no mode"}\n` +
+          `  refuses nothing either way. Enforce the geofence first.`,
+      );
+    }
+    if (want) {
+      console.log();
+      console.log(
+        `  WHAT THIS WILL REFUSE: a tap from a phone that shares no position.\n` +
+          `  That is the forwarded-link case — someone taps here, sends the link\n` +
+          `  on, and the recipient declines the location prompt. It is ALSO an\n` +
+          `  employee standing at the door who has denied location access to the\n` +
+          `  site, or whose phone gets no fix indoors. They are not stranded (the\n` +
+          `  QR code at reception and a manager's override both still work) but\n` +
+          `  they will not know that unless somebody tells them.`,
+      );
+    }
+    console.log();
+
+    if (!APPLY) {
+      console.log("Dry run. Nothing was changed. Re-run with --apply.");
+      await mongoose.disconnect();
+      return;
+    }
+
+    await db.collection("clocklocations").updateOne(
+      { _id },
+      { $set: { requirePositionForTaps: want, updatedAt: new Date() } },
+    );
+    await db.collection("auditlogs").insertOne({
+      actorType: "System",
+      actorName: "System",
+      actorRole: "system",
+      action: "ClockLocation.setStrictTaps",
+      module: "Clock",
+      entityId: _id,
+      tenantId: location.tenantId ?? undefined,
+      description:
+        `A tag tap at ${location.name} ${want ? "now requires" : "no longer requires"} ` +
+        `a position. ${want ? "A forwarded tap link can no longer be used by declining the location prompt." : "A tap with no position is allowed again."}`,
+      before: { requirePositionForTaps: location.requirePositionForTaps === true },
+      after: { requirePositionForTaps: want },
+      status: "success",
+      createdAt: new Date(),
+    });
+
+    console.log(`Applied. Taps at ${location.name} ${want ? "must" : "need not"} report a position.`);
+    await mongoose.disconnect();
+    return;
+  }
 
   // --- what is actually configured ----------------------------------------
   if (METHOD === "geofence") {
