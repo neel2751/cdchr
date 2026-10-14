@@ -29,6 +29,10 @@ dotenv.config();
 // Self-provisioning: the suite is about key handling, so it brings its own.
 process.env.TAG_KEY_MASTER =
   process.env.TAG_KEY_MASTER || crypto.randomBytes(32).toString("hex");
+// Verifying a unit checks where a tap LANDS, so the suite needs to know what
+// the right host is. Set before any import that reads it.
+process.env.PLATFORM_APEX_HOST =
+  process.env.PLATFORM_APEX_HOST || "tags.example.com";
 
 const results = [];
 function check(name, fn) {
@@ -72,6 +76,23 @@ async function main() {
     replaceUnit,
     verifyUnit,
   } = await import("@/server/tagServer/provisioning");
+  const { buildSunMessageForTest } = await import("@/lib/sun");
+  const { platformOrigin } = await import("@/lib/tenantHost");
+
+  /**
+   * The URL a chip would actually open, signed with the key it was given.
+   *
+   * Verifying takes the tapped URL rather than a typed UID, because a typed
+   * UID only ever proved that the operator could read their own handwriting.
+   */
+  const tapUrl = (uid, keyHex, counter = 1) => {
+    const { picc, cmac } = buildSunMessageForTest({
+      key: Buffer.from(keyHex, "hex"),
+      uid,
+      counter,
+    });
+    return `${platformOrigin()}/clock?tag=${uid}&picc=${picc}&cmac=${cmac}`;
+  };
 
   const db = mongoose.connection.db;
   for (const c of ["tagproducts", "tagorders", "clocktags", "companies"]) {
@@ -366,17 +387,63 @@ async function main() {
     const res = await verifyUnit({
       orderNumber,
       index: 0,
-      uid: "04FFFFFFFFFF99",
+      tapUrl: tapUrl("04FFFFFFFFFF99", issuedKey),
     });
     assert.equal(res.success, false);
     assert.match(res.message, /but this unit was written as/i);
   });
 
-  await check("verifying with the right UID passes", async () => {
+  await check("a typed UID is no longer accepted as proof", async () => {
+    const res = await verifyUnit({ orderNumber, index: 0, uid: "04AABBCCDDEE01" });
+    assert.equal(res.success, false);
+    assert.match(res.message, /paste the whole URL/i);
+  });
+
+  await check("a tap that landed on the wrong host is refused", async () => {
+    const { picc, cmac } = buildSunMessageForTest({
+      key: Buffer.from(issuedKey, "hex"),
+      uid: "04AABBCCDDEE01",
+      counter: 1,
+    });
     const res = await verifyUnit({
       orderNumber,
       index: 0,
+      tapUrl: `https://acme.staffmain.example.com/clock?tag=04AABBCCDDEE01&picc=${picc}&cmac=${cmac}`,
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /wrong URL on it/i);
+  });
+
+  await check("a tap with the UID mirror switched off is refused", async () => {
+    const res = await verifyUnit({
+      orderNumber,
+      index: 0,
+      tapUrl: `${platformOrigin()}/clock?tag=00000000000000&picc=${"A".repeat(32)}&cmac=${"B".repeat(16)}`,
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /mirror is not switched on/i);
+  });
+
+  await check("a tap signed with somebody else's key is refused", async () => {
+    const { picc, cmac } = buildSunMessageForTest({
+      key: crypto.randomBytes(16),
       uid: "04AABBCCDDEE01",
+      counter: 1,
+    });
+    const res = await verifyUnit({
+      orderNumber,
+      index: 0,
+      tapUrl: `${platformOrigin()}/clock?tag=04AABBCCDDEE01&picc=${picc}&cmac=${cmac}`,
+    });
+    assert.equal(res.success, false);
+    assert.match(res.message, /holding a different one/i);
+  });
+
+  await check("a genuine tap passes", async () => {
+    const res = await verifyUnit({
+      orderNumber,
+      index: 0,
+      tapUrl: tapUrl("04AABBCCDDEE01", issuedKey),
     });
     assert.equal(res.success, true, res.message);
   });
@@ -443,17 +510,16 @@ async function main() {
 
   await check("the rest follow in a second shipment", async () => {
     for (const index of [1, 2]) {
-      await fetchUnitKey({ orderNumber, index });
-      await recordUnitWritten({
+      const keyRes = await fetchUnitKey({ orderNumber, index });
+      const unitKey = JSON.parse(keyRes.data).key;
+      const uid = `04AABBCCDDEE0${index + 1}`;
+      await recordUnitWritten({ orderNumber, index, uid });
+      const verified = await verifyUnit({
         orderNumber,
         index,
-        uid: `04AABBCCDDEE0${index + 1}`,
+        tapUrl: tapUrl(uid, unitKey),
       });
-      await verifyUnit({
-        orderNumber,
-        index,
-        uid: `04AABBCCDDEE0${index + 1}`,
-      });
+      assert.equal(verified.success, true, verified.message);
     }
 
     const res = await dispatchShipment({

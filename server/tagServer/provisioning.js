@@ -4,6 +4,7 @@ import { connect } from "@/db/db";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { platformOrigin } from "@/lib/tenantHost";
+import { verifySunMessage } from "@/lib/sun";
 import {
   generateTagKey,
   openTagKey,
@@ -650,6 +651,50 @@ export async function recordUnitWritten({ orderNumber, index, uid } = {}) {
 }
 
 /**
+ * Pull a bench tap apart: where it landed, which chip, and its signature.
+ *
+ * Takes the URL the chip opened. Accepts a bare UID too, because that is what
+ * the field used to hold and a half-typed entry should fail with a sentence
+ * rather than a stack trace — but a bare UID can only answer one of the three
+ * questions, and verifyUnit says so.
+ *
+ * Deliberately tolerant about the shape: an operator pastes from a phone's
+ * address bar, which may arrive without a scheme, or with the tracking
+ * rubbish a share sheet adds.
+ */
+function parseTapUrl(tapUrl, uid) {
+  const raw = String(tapUrl || "").trim();
+
+  if (!raw) {
+    return { fromUrl: false, uid: normaliseUid(uid), origin: "", picc: "", cmac: "" };
+  }
+
+  // No scheme means it came from an address bar that hides it.
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    // Not a URL at all — treat the whole thing as a UID attempt.
+    return { fromUrl: false, uid: normaliseUid(raw), origin: "", picc: "", cmac: "" };
+  }
+
+  const tagParam = url.searchParams.get("tag") || "";
+  return {
+    fromUrl: true,
+    // Zeros are kept rather than normalised away: "the mirror is off" is a
+    // different sentence from "that is not a tag id", and normaliseUid
+    // deliberately rejects both to null.
+    uid: /^0+$/.test(tagParam.replace(/[^0-9a-fA-F]/g, ""))
+      ? tagParam.replace(/[^0-9a-fA-F]/g, "")
+      : normaliseUid(tagParam) || normaliseUid(uid),
+    origin: url.origin,
+    picc: url.searchParams.get("picc") || "",
+    cmac: url.searchParams.get("cmac") || "",
+  };
+}
+
+/**
  * Tap the written chip on the bench and confirm the server can read it.
  *
  * **A tag that has not verified does not ship.** Without this a customer finds
@@ -657,7 +702,7 @@ export async function recordUnitWritten({ orderNumber, index, uid } = {}) {
  * the fault is the chip, the key, the URL or the phone. Catching it here costs
  * seconds.
  */
-export async function verifyUnit({ orderNumber, index, uid } = {}) {
+export async function verifyUnit({ orderNumber, index, uid, tapUrl } = {}) {
   try {
     const auth = await requirePlatformAdmin();
     if (!auth.ok) return { success: false, message: auth.message };
@@ -672,18 +717,93 @@ export async function verifyUnit({ orderNumber, index, uid } = {}) {
       return { success: false, message: "Write the chip before verifying it" };
     }
 
-    // What the bench tap has to agree with: the UID we recorded, and a tag row
-    // that actually exists in the customer's registry.
-    const cleanUid = normaliseUid(uid);
-    if (!cleanUid || cleanUid !== unit.uid) {
+    // WHAT THIS USED TO PROVE: that the operator typed the same UID twice.
+    //
+    // It took a bare UID and compared it with the one recorded a minute
+    // earlier by the same person at the same bench. It never looked at the URL
+    // on the chip and never checked a signature, so a chip carrying a dead
+    // host, or holding a key we do not have, passed — and "a tag that has not
+    // verified does not ship" was enforcing nothing. One shipped tag that
+    // pointed at a host which does not resolve is what exposed this.
+    //
+    // So it now wants the URL THE CHIP ITSELF OPENED. That single string is
+    // the only thing that can answer all three questions at once: where the
+    // tap lands, which chip it came from, and whether the chip can sign.
+    const tap = parseTapUrl(tapUrl, uid);
+
+    // The URL is the evidence, so its absence is the first thing refused —
+    // ahead of every check below, which would otherwise report a missing
+    // signature when what is actually missing is the paste.
+    if (!tap.fromUrl || !tap.uid) {
       return {
         success: false,
-        message: `That tap reads ${cleanUid || "nothing"}, but this unit was written as ${unit.uid}.`,
+        message:
+          "Tap the chip and paste the whole URL it opened — that is what " +
+          "proves the write, not a UID typed by hand.",
       };
     }
 
+    // 1. WHERE WILL A REAL TAP LAND? The one failure a bench check must catch,
+    // because it is invisible until a customer sticks the tag on a door.
+    if (tap.origin) {
+      const expected = platformOrigin();
+      if (expected && tap.origin !== expected) {
+        return {
+          success: false,
+          message:
+            `That tap opened ${tap.origin}, which is not ${expected}. ` +
+            "The chip has the wrong URL on it and needs writing again.",
+        };
+      }
+    }
+
+    // 2. IS IT THIS CHIP? The UID is mirrored by the chip, so a mismatch means
+    // a different tag was tapped — or the mirror is off and the placeholder
+    // came back verbatim.
+    if (tap.uid !== unit.uid) {
+      return {
+        success: false,
+        message: /^0+$/.test(tap.uid)
+          ? "That tap carries no id — the chip's UID mirror is not switched on. It needs writing again."
+          : `That tap reads ${tap.uid}, but this unit was written as ${unit.uid}.`,
+      };
+    }
+
+    // 3. CAN IT SIGN? Only a 424 can, and only with the key we hold for it.
+    // This is the check that catches a writer which derived its own key: the
+    // chip works, the URL is right, and nothing it signs will ever verify.
+    if (unit.keyRef) {
+      if (!tap.picc || !tap.cmac) {
+        return {
+          success: false,
+          message:
+            "That tap carries no signature. A 424 should append picc and cmac " +
+            "— check that SDM mirroring is enabled, then write it again.",
+        };
+      }
+      let signed;
+      try {
+        signed = verifySunMessage({
+          piccHex: tap.picc,
+          cmacHex: tap.cmac,
+          key: openTagKey(unit.keyRef),
+        });
+      } catch {
+        signed = { ok: false };
+      }
+      if (!signed.ok) {
+        return {
+          success: false,
+          message:
+            "That tap will not verify against this unit's key — the chip is " +
+            "holding a different one. Read the key off the chip and adopt it, " +
+            "or write the chip again with this unit's key.",
+        };
+      }
+    }
+
     const tag = await runWithTenant(String(order.tenantId), () =>
-      ClockTagModel.findOne({ uid: cleanUid }).lean(),
+      ClockTagModel.findOne({ uid: tap.uid }).lean(),
     );
     if (!tag) {
       return { success: false, message: "That tag is not in the customer's registry" };
@@ -692,11 +812,30 @@ export async function verifyUnit({ orderNumber, index, uid } = {}) {
     await escapeTenant("tag provisioning: mark verified", () =>
       TagOrderModel.updateOne(
         { _id: order._id, "units.index": unit.index },
-        { $set: { "units.$.status": "verified", "units.$.verifiedAt": new Date() } },
+        {
+          $set: {
+            "units.$.status": "verified",
+            "units.$.verifiedAt": new Date(),
+            // What was actually proven, so a later question about a tag in the
+            // field has an answer: "verified" alone turned out to mean very
+            // little, and a record of which checks ran is how that is never
+            // ambiguous again.
+            "units.$.verifiedChecks": {
+              host: Boolean(tap.origin),
+              uid: true,
+              signature: Boolean(unit.keyRef),
+            },
+          },
+        },
       ),
     );
 
-    return { success: true, message: `Unit ${unit.index} verified` };
+    return {
+      success: true,
+      message: unit.keyRef
+        ? `Unit ${unit.index} verified — right host, right chip, signature checks out`
+        : `Unit ${unit.index} verified — right host, right chip`,
+    };
   } catch (error) {
     console.log("Error verifying a unit:", error?.message);
     return { success: false, message: "Could not verify that chip" };

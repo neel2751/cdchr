@@ -55,6 +55,16 @@ const unitSchema = new mongoose.Schema(
     keyIssuedAt: Date,
     writtenAt: Date,
     verifiedAt: Date,
+    // WHICH checks the bench tap actually passed. "verified" on its own meant
+    // only that an operator typed the same UID twice, and a tag shipped with a
+    // URL pointing at a host that does not resolve — so what was proven is
+    // recorded alongside the fact of it. A unit verified before this existed
+    // has no record here, which is itself the honest answer.
+    verifiedChecks: {
+      host: Boolean, // the tap landed on our clock host
+      uid: Boolean, // the chip mirrored the UID we recorded
+      signature: Boolean, // the CMAC verified against this unit's key
+    },
     failureReason: String,
 
     // Which shipment carried it. A unit belongs to at most one: an order can

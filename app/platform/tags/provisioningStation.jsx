@@ -704,11 +704,17 @@ export default function ProvisioningStation() {
                             Get key
                           </Button>
                         ) : null}
+                        {/* THE WHOLE URL THE CHIP OPENED, not a UID typed by
+                            hand. A typed UID only proved the operator could
+                            read their own handwriting: it said nothing about
+                            the URL on the chip or whether the chip can sign,
+                            so a tag with a dead host passed and shipped. One
+                            pasted string answers all three. */}
                         {unit.status === "written" ? (
-                          <span className="flex gap-1">
+                          <span className="flex flex-1 gap-1">
                             <Input
-                              className="h-8 w-44"
-                              placeholder="Tap to verify — UID"
+                              className="h-8 min-w-0 flex-1"
+                              placeholder="Tap the chip, paste the URL it opened"
                               value={uid}
                               onChange={(e) => setUid(e.target.value)}
                             />
@@ -720,7 +726,7 @@ export default function ProvisioningStation() {
                                   kind: "verify",
                                   orderNumber: order.orderNumber,
                                   index: unit.index,
-                                  uid,
+                                  tapUrl: uid,
                                 })
                               }
                             >
