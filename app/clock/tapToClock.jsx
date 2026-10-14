@@ -9,6 +9,7 @@ import {
   Loader2,
   LogOut,
   MapPin,
+  Nfc,
   TimerOff,
   TriangleAlert,
 } from "lucide-react";
@@ -182,6 +183,38 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
     setWaiting(await queuedCount());
   }, [refetch]);
 
+  // THE URL IS EVIDENCE, SO IT DOES NOT SIT IN THE ADDRESS BAR.
+  //
+  // A tap arrives as a URL carrying the chip's per-tap values, and until it is
+  // spent that URL is worth something to whoever holds the phone. Leaving it on
+  // display invites exactly what you would expect: copy it, send it to someone
+  // at home, keep it for tomorrow.
+  //
+  // So it is replaced with a bare /clock as the page mounts — NOT after the
+  // action, which would be far too late. The window for copying it opens the
+  // moment the phone shows the banner, before anybody has pressed anything.
+  //
+  // Be clear about what this is worth: it is hygiene, not the defence. What
+  // actually stops a copied URL is that the tap is spent server-side
+  // (server/clockServer/clockTagStore.js) and that the location can demand a
+  // position. Clearing the bar only removes the temptation, and keeps the link
+  // out of browser history, the share sheet and the recent-tabs list. Anything
+  // worth stealing has to be useless once used; hiding it is never enough.
+  //
+  // replaceState, not router.replace: the native call leaves the route alone,
+  // so the confirmation card below survives it. A router navigation would
+  // re-run this page with no searchParams and take the confirmation with it.
+  React.useEffect(() => {
+    if (!window.location.search) return;
+    try {
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {
+      // Some in-app browsers refuse it. Nothing is lost — the tap is still
+      // single-use — so this must never break a screen somebody is standing at
+      // a cabin door trying to use.
+    }
+  }, []);
+
   React.useEffect(() => {
     // Deferred rather than called straight from the effect body: draining
     // eventually sets state, and nothing here needs to happen before the
@@ -349,6 +382,37 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
           </p>
           {/* No button back to the actions. The next one costs a tap, which is
               the only thing the tag actually proves. */}
+          <Button asChild variant="outline" size="sm" className="w-full">
+            <Link href={homePathForRole(session?.user?.role)}>
+              See my attendance
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // A RELOAD, WHICH IS NOW THE ORDINARY WAY TO GET HERE WITH NO TAP.
+  //
+  // The address bar was cleared on arrival, so refreshing lands on a bare
+  // /clock. That is the design working, not a fault, and it must not be dressed
+  // as one: "this tag cannot be used" would send somebody to their manager over
+  // a page they pulled down to refresh. Say what to do instead, and say why,
+  // because "it disappeared" is otherwise a support call.
+  if (!uid) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Nfc className="size-4 text-teal-600" />
+            Hold your phone to the tag
+          </CardTitle>
+          <CardDescription>
+            Each tap works once, so this page empties itself afterwards. Tap the
+            tag again for your next action.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <Button asChild variant="outline" size="sm" className="w-full">
             <Link href={homePathForRole(session?.user?.role)}>
               See my attendance
