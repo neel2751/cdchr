@@ -45,6 +45,27 @@ import { assignClockTag, getClockTags, setClockTagStatus } from "@/server/clockS
  * location it was recorded at. Rewriting it would re-attribute hours, and
  * therefore pay, to a site the work never happened on.
  */
+/**
+ * What is actually protecting this tag's location?
+ *
+ * The advice on a row has to follow the setting, not restate it for ever.
+ * "Set this location's geofence to enforce" is the right thing to tell somebody
+ * who has not done it, and a waste of their afternoon once they have — they go
+ * hunting for a setting that is already set and conclude the warning must mean
+ * something else. The location's policy is populated alongside the tag for
+ * exactly this (server/clockServer/tags.js getClockTags).
+ */
+function geofenceEnforced(tag) {
+  return (tag?.locationId?.methods || []).some(
+    (m) => m?.type === "geofence" && m?.mode === "enforce",
+  );
+}
+
+/** Does a tap here have to report a position, or may it stay silent? */
+function strictTaps(tag) {
+  return tag?.locationId?.requirePositionForTaps === true;
+}
+
 const STATUS_STYLE = {
   active: "bg-green-100 text-green-800",
   unassigned: "bg-amber-100 text-amber-800",
@@ -174,9 +195,18 @@ export default function ClockTagsSettings() {
                               is bought to prevent. The fix is a rewrite with a
                               counter mirror, not a setting. */}
                           {tag.signature === "none" ? (
-                            <span className="mt-1 w-fit rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
-                              taps are not signed — set this location&apos;s
-                              geofence to enforce
+                            <span
+                              className={`mt-1 w-fit rounded px-1.5 py-0.5 text-[10px] ${
+                                geofenceEnforced(tag)
+                                  ? "bg-neutral-100 text-neutral-600"
+                                  : "bg-amber-100 text-amber-800"
+                              }`}
+                            >
+                              {geofenceEnforced(tag)
+                                ? strictTaps(tag)
+                                  ? "taps are not signed — covered by an enforced geofence"
+                                  : "taps are not signed — geofence enforced, but a tap with no position is still allowed"
+                                : "taps are not signed — set this location’s geofence to enforce"}
                             </span>
                           ) : null}
                           {tag.lastSeenAt && tag.lastTapCounted === false ? (

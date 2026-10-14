@@ -2,6 +2,7 @@
 
 import { connect } from "@/db/db";
 import { createObjectId } from "@/lib/mongodb";
+import { toWorkingDate } from "@/lib/clockTime";
 import ClockRecordModel from "@/models/clockInModel";
 import { permissionRefusal } from "@/lib/actionAccess";
 
@@ -21,27 +22,50 @@ export async function getAttendanceReportData(params) {
   if (params) {
     const { startDate, endDate, employeeId, leaveYear } = params;
 
-    if (startDate && endDate) {
-      query.attendanceDates = {
-        $elemMatch: {
-          $gte: new Date(startDate),
-          $lte: new Date(endDate),
-        },
-      };
-    }
+    // THE DATE FILTER MATCHED NOTHING, EVER.
+    //
+    // It read `attendanceDates`, as an array, with $elemMatch. No clock record
+    // has ever had such a field — it is written nowhere in this codebase, and
+    // zero of the rows in production carry it. The shape belongs to the site
+    // attendance collection, which really does hold an array of dated entries
+    // (server/attendanceServer/attendanceServer.js); on a clock record the
+    // working day is a single `date` at UTC midnight.
+    //
+    // So the report came back empty the moment anybody picked a date range,
+    // which is the normal way to use it — and it looked like the clock-ins had
+    // never been written rather than like the filter was wrong.
+    //
+    // Normalised through toWorkingDate because `date` is stored at UTC
+    // midnight: a plain `new Date(endDate)` carrying a time of day excludes the
+    // end day itself for some timezones and includes it for others, which is
+    // the sort of bug that only shows up as "yesterday is missing".
+    const dateRanges = [];
+
+    const from = toWorkingDate(startDate);
+    const to = toWorkingDate(endDate);
+    if (from && to) dateRanges.push({ $gte: from, $lte: to });
+
     if (employeeId && employeeId !== "all") {
       query.employeeId = createObjectId(employeeId);
     }
 
     if (leaveYear && leaveYear !== "all") {
       const year = parseInt(leaveYear, 10);
-      const startOfYear = new Date(year, 0, 1);
-      const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
+      if (Number.isFinite(year)) {
+        dateRanges.push({
+          $gte: new Date(Date.UTC(year, 0, 1)),
+          $lte: new Date(Date.UTC(year, 11, 31)),
+        });
+      }
+    }
 
-      query.date = {
-        $gte: startOfYear,
-        $lte: endOfYear,
-      };
+    // Both narrow the same field, so they are ANDed rather than assigned —
+    // whichever was written second used to silently replace the first, so
+    // picking a range AND a year gave the year alone.
+    if (dateRanges.length === 1) {
+      query.date = dateRanges[0];
+    } else if (dateRanges.length > 1) {
+      query.$and = dateRanges.map((range) => ({ date: range }));
     }
   }
 

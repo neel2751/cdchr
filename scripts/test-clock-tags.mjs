@@ -320,6 +320,28 @@ async function main() {
     assert.equal(blobbed.lastCounter, 0, "and it did NOT move the counter");
   });
 
+  await check("stripping the signature out of the URL is refused", async () => {
+    // The escape hatch in what the fix above protects: everything is decided by
+    // what the URL CONTAINS, so deleting the picc and cmac parameters left
+    // nothing to spend and the bare ?tag=… was accepted, reusable for ever.
+    // Single-use protection that comes off by editing the address bar is not
+    // protection.
+    const uid = "04AABBCCDDEE0099"; // has spent taps, so it mirrors
+    const tag = await ClockTag.findOne({ uid }).lean();
+    assert.equal(tag.lastTapCounted, true, "fixture precondition");
+
+    const stripped = await resolveTag(uid);
+    assert.equal(stripped.ok, false, "a stripped URL was accepted");
+    assert.equal(stripped.status, "downgraded");
+
+    // And a complete tap from the same tag still works.
+    const whole = await resolveTag(uid, {
+      picc: "55".repeat(16),
+      cmac: "66".repeat(8),
+    });
+    assert.equal(whole.ok, true, whole.message);
+  });
+
   await check("a chip with no mirror at all still works, and says so", async () => {
     // Refusing it would strand a working tag. But `counted: false` has to
     // travel with the tap, because this is the one case where a reload really

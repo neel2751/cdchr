@@ -384,12 +384,43 @@ export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
     };
   }
 
-  // Nothing to verify, nothing to count, nothing to spend: a chip written with
-  // no mirror of any kind. Accepted, because refusing it would strand a working
-  // tag — but `counted: false` travels with the tap so nothing downstream has
-  // to guess. This is the one case where a tap and a page reload really are the
-  // same request, and it is why such a tag needs its geofence enforced: it
-  // proves a UID was known, which any phone can read off the tag.
+  // ─────────────────────────── NO STRIPPING YOUR WAY OUT OF IT ─────────────
+  //
+  // Everything above is reached by what the URL CONTAINS, which means it can be
+  // escaped by what the URL leaves out. Delete `&picc_data=…&cmac=…` from a
+  // tapped link and there is no blob to spend; delete `&ctr=…` and there is no
+  // counter to compare. What is left — `?tag=048A35BA1E1E90` — used to land
+  // here and be accepted, reusable for ever. Single-use protection that can be
+  // removed by editing the address bar is not protection.
+  //
+  // So a tag that has ever proved it mirrors something refuses a tap that
+  // mirrors nothing. `lastTapCounted` is the record of that, set the first time
+  // a counter or a blob was spent.
+  //
+  // It is a one-way door on purpose: the only innocent way to reach it is to
+  // rewrite a chip that used to mirror with one that does not, which is a
+  // downgrade somebody should have to do deliberately. If that is genuinely
+  // wanted, clear lastTapCounted on the tag — and the refusal lands in
+  // refusedTaps with reason "downgraded", so it is visible rather than a tag
+  // that mysteriously stopped working.
+  if (tag.lastTapCounted === true) {
+    return {
+      ok: false,
+      status: "downgraded",
+      tag,
+      message:
+        "Part of this tap is missing. Hold the phone to the tag again — and " +
+        "if it keeps happening, tell your manager.",
+    };
+  }
+
+  // Nothing to verify, nothing to count, nothing to spend, and nothing better
+  // ever seen from this tag: a chip written with no mirror of any kind.
+  // Accepted, because refusing it would strand a working tag — but
+  // `counted: false` travels with the tap so nothing downstream has to guess.
+  // This is the one case where a tap and a page reload really are the same
+  // request, and it is why such a tag needs its geofence enforced: it proves a
+  // UID was known, which any phone can read off the tag.
   return { ok: true, status: "active", tag, counter: null, signed: false, counted: false };
 }
 

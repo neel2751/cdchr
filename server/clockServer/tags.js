@@ -343,7 +343,15 @@ export async function getClockTags() {
       // use for it and a sealed blob plus a leaked master key is a working tag.
       .select("-keyRef -usedTapIds")
       .sort({ status: 1, label: 1 })
-      .populate({ path: "locationId", select: "name kind" })
+      // The location's own presence policy comes along, because the advice this
+      // screen gives depends on it. "Set this location's geofence to enforce"
+      // is the right thing to tell somebody who has not, and a waste of their
+      // afternoon once they have — they go looking for a setting that is
+      // already set, and conclude the warning means something else.
+      .populate({
+        path: "locationId",
+        select: "name kind methods requirePositionForTaps",
+      })
       .populate({ path: "lastSeenLocationId", select: "name" })
       .lean();
 
