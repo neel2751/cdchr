@@ -458,6 +458,22 @@ export default function ProvisioningStation() {
                       tag we write. A tap finds the tag inside the employee&apos;s
                       own company.
                     </p>
+                    {/* EVERY FORM BELOW ASSUMES THE WRITER CAN MIRROR, and
+                        plenty cannot. A tool that neither mirrors nor
+                        substitutes placeholders writes `{UID}` or a run of
+                        zeroes to the chip verbatim, and every tap sends that
+                        instead of a tag id — which reads downstream as "that
+                        tag could not be read" and sends people hunting through
+                        keys and hosts. Said here because this panel is where
+                        the operator decides, and the alternative is per-chip
+                        and three lines further down. */}
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                      Only if your writer can mirror the UID. If it cannot —
+                      no SDM or placeholder support — read each chip&apos;s UID
+                      with an NFC reader first, record it below, then use{" "}
+                      <strong>Copy this chip&apos;s URL</strong> and write that
+                      one chip with its own UID in the URL.
+                    </p>
 
                     {/* Three forms, because writers disagree about how you
                         tell them where the mirrored fields go, and picking
@@ -624,27 +640,40 @@ export default function ProvisioningStation() {
                             key issued — UID not recorded, so no tag exists yet
                           </span>
                         ) : null}
-                        {/* The concrete URL for this chip, for checking it by
-                            hand: paste it in a browser and the scan should
-                            behave as a tap would, minus the signature. Not
-                            what gets written — see the template above. */}
+                        {/* THIS CHIP'S OWN URL, with its UID written in.
+                            Two uses, and the second is why it is no longer
+                            buried under the word "test":
+
+                            A WRITER THAT CANNOT MIRROR needs this. Mirroring
+                            is what lets one template serve every tag — the
+                            chip substitutes its own UID at tap time. A tool
+                            that cannot be told to mirror, and does not
+                            substitute placeholders either, writes `{UID}` to
+                            the chip as eleven literal characters, and every
+                            tap sends them. The fix is to write the UID in
+                            yourself, per chip, which is this string.
+
+                            It is also the by-hand check: paste it into a
+                            browser and the scan behaves as a tap would, minus
+                            the signature. */}
                         {unit.uid && order.clockBaseUrl ? (
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
                             className="h-6 px-1.5 text-[11px]"
+                            title="The URL for this one chip, with its UID written in. Use it when the writer cannot mirror the UID."
                             onClick={() =>
                               copy(
                                 clockUrlFor({
                                   baseUrl: order.clockBaseUrl,
                                   uid: unit.uid,
                                 }),
-                                "Test URL"
+                                "This chip's URL"
                               )
                             }
                           >
-                            Copy test URL
+                            Copy this chip&apos;s URL
                           </Button>
                         ) : null}
                         {/* For a chip programmed by a writer that chose its
