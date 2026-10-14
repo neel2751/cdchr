@@ -23,13 +23,28 @@ export const metadata = { title: "Clock in" };
  * counter in the query string is a number anybody can edit. A plain NTAG213
  * sends neither, which is why a 213 wants a geofence beside it.
  */
+/** The first of these that actually arrived as a string. */
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value) return value;
+  }
+  return "";
+}
+
 export default async function ClockPage({ searchParams }) {
   const params = await searchParams;
   const uid = typeof params?.tag === "string" ? params.tag : "";
   // What an NTAG 424 DNA chip appends on every tap: its encrypted UID and
   // counter, and a CMAC over them. A plain NTAG213 sends neither.
-  const picc = typeof params?.picc === "string" ? params.picc : "";
-  const cmac = typeof params?.cmac === "string" ? params.cmac : "";
+  //
+  // `picc_data` is the same field under the name NXP's own tooling writes. The
+  // SDM templates in NFC Developer emit `picc_data=…&enc=…&cmac=…`, so reading
+  // only `picc` meant a chip programmed with the vendor's own template arrived
+  // looking unsigned and was refused as unverifiable — with the signature
+  // sitting right there in the URL under a different key. `enc` is the
+  // encrypted file data, which we do not mirror anything into and so ignore.
+  const picc = firstString(params?.picc, params?.picc_data);
+  const cmac = firstString(params?.cmac);
 
   const sessionData = await getServerSideProps();
   if (sessionData?.redirect?.destination) {

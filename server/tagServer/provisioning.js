@@ -689,7 +689,10 @@ function parseTapUrl(tapUrl, uid) {
       ? tagParam.replace(/[^0-9a-fA-F]/g, "")
       : normaliseUid(tagParam) || normaliseUid(uid),
     origin: url.origin,
-    picc: url.searchParams.get("picc") || "",
+    // `picc_data` is what NXP's own SDM templates name this field; see the note
+    // in app/clock/page.jsx. The bench has to read a tap exactly the way the
+    // clock route does, or a unit verifies here and fails in the field.
+    picc: url.searchParams.get("picc") || url.searchParams.get("picc_data") || "",
     cmac: url.searchParams.get("cmac") || "",
   };
 }

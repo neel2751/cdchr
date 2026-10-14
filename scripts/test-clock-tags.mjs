@@ -107,6 +107,26 @@ async function main() {
     }
   });
 
+  check("a trial writer's watermark does not become part of the UID", () => {
+    // The real refusal this came from. An unlicensed writer stamps its notice
+    // straight after the value, and only the first "?" in a URL delimits the
+    // query, so the whole thing arrives as the `tag` parameter.
+    const sent =
+      "048A35BA1E1E90?_____TRIAL_VERSION______NOT_FOR_PRODUCTION_____";
+    assert.equal(normaliseUid(sent), "048A35BA1E1E90");
+    // What it used to do: salvage hex letters out of the English and weld them
+    // on, producing a well-formed id that matched no tag.
+    assert.notEqual(normaliseUid(sent), "048A35BA1E1E90AEFDC");
+  });
+
+  check("the UID ends where the hex ends", () => {
+    assert.equal(normaliseUid("04A2B3C4D5E680&picc=00"), "04A2B3C4D5E680");
+    assert.equal(normaliseUid("04A2B3C4D5E680 (Elm Street)"), "04A2B3C4D5E680");
+    // Nothing in front of the junk is nothing to recover — not a silent pass.
+    assert.equal(normaliseUid("_____TRIAL_VERSION_____04A2B3C4D5E680"), null);
+    assert.equal(normaliseUid("{UID}"), null);
+  });
+
   /* ------------------------------------------------------------- enrolment */
 
   await check("an unknown tag is 'unknown', not an error", async () => {
@@ -128,6 +148,28 @@ async function main() {
   await check("tapping it again does not create a second row", async () => {
     await recordUnknownTag("04:A2:B3:C4:D5:E6:80");
     assert.equal(await ClockTag.countDocuments({}), 1);
+  });
+
+  await check("a watermarked tap reaches the tag it was written for", async () => {
+    // End to end through the real query parsing, because the bug lived in the
+    // gap between what a tapped URL carries and what we went looking for.
+    const url = new URL(
+      "https://staffmain.example/clock?tag=04A2B3C4D5E680?_____TRIAL_VERSION______NOT_FOR_PRODUCTION_____" +
+        "&picc_data=757B56AA1F161BC811FCD4772D10EE92&cmac=7119A4C4D11BA9A5",
+    );
+    const r = await resolveTag(url.searchParams.get("tag"));
+    // "unassigned" — the tag enrolled just above. The answer that matters is
+    // that it is NOT "unknown": the tap found its own tag despite the
+    // watermark, so the message names the real problem (nobody has placed it)
+    // instead of blaming the registry.
+    assert.equal(r.status, "unassigned");
+    assert.equal(r.uid, "04A2B3C4D5E680");
+    assert.equal(await ClockTag.countDocuments({}), 1, "no stray row was enrolled");
+    // And the signature survives under the name NXP's tooling gives it.
+    assert.equal(
+      url.searchParams.get("picc_data"),
+      "757B56AA1F161BC811FCD4772D10EE92",
+    );
   });
 
   await check("an unassigned tag cannot be used to clock in", async () => {

@@ -10,10 +10,45 @@ import ClockTagModel from "@/models/clockTagModel";
 import { openTagKey } from "@/lib/tagKeys";
 import { verifySunMessage } from "@/lib/sun";
 
-/** A chip UID as we store it: hex, uppercase, no separators. */
+/**
+ * A chip UID as we store it: hex, uppercase, no separators.
+ *
+ * READS THE LEADING RUN, rather than stripping every non-hex character out of
+ * the whole string. The difference is not cosmetic, and it is the reason a
+ * correctly written tag was refused for days.
+ *
+ * Trial-version tag writers append a watermark to the URL they write, and they
+ * append it immediately after the value:
+ *
+ *   /clock?tag=048A35BA1E1E90?_____TRIAL_VERSION______NOT_FOR_PRODUCTION_____&picc_data=…
+ *
+ * Only the FIRST "?" in a URL delimits the query, so that whole watermark is
+ * part of the `tag` value. Stripping non-hex globally then salvaged a letter
+ * here and there out of the English — A from "tri[A]l", E from "v[E]rsion", F
+ * from "[F]or", D and C from "pro[D]u[C]tion" — and welded them onto the end of
+ * a perfectly good UID:
+ *
+ *   048A35BA1E1E90  ->  048A35BA1E1E90AEFDC
+ *
+ * Nineteen characters, well-formed hex, the right sort of length: it sailed
+ * through every check here and matched no tag, so the tap came back "this tag
+ * has not been set up yet" — which points at the registry, the one thing that
+ * was correct. The UID was intact the whole time, with five letters of a legal
+ * notice stuck to it.
+ *
+ * So: separators are tolerated (04:A3:5B:… is the same chip, and readers do
+ * format it that way), and the UID ends at the first character that is neither
+ * hex nor a separator. Truncating is also the safer failure: a mangled value
+ * can now only ever resolve to a shorter string, where gluing fragments
+ * together could invent one that collides with a real chip.
+ */
+const UID_SEPARATORS = /[\s:\-.]/g;
+
 export function normaliseUid(raw) {
   if (!raw || typeof raw !== "string") return null;
-  const cleaned = raw.replace(/[^0-9a-fA-F]/g, "").toUpperCase();
+  const leading = raw.trim().match(/^[0-9a-fA-F\s:\-.]+/);
+  if (!leading) return null;
+  const cleaned = leading[0].replace(UID_SEPARATORS, "").toUpperCase();
   // 4-byte and 7-byte UIDs are the common ones; allow a little either side
   // rather than rejecting a chip nobody anticipated.
   if (cleaned.length < 8 || cleaned.length > 32) return null;
@@ -63,6 +98,17 @@ function unreadableUidMessage(raw) {
     return (
       "This tag is not filling in its own id — it was written without the " +
       "UID mirror switched on. It needs writing again."
+    );
+  }
+  // An unlicensed writer stamps its nag into the URL it writes. Where the UID
+  // survives in front of it the tap now works (see normaliseUid), so reaching
+  // here means the watermark landed on top of the id itself and there is
+  // nothing to recover. Worth naming: the fix is a different writing tool, and
+  // nobody would guess that from "could not be read".
+  if (/TRIAL|NOT.?FOR.?PRODUCTION|DEMO.?VERSION/i.test(value)) {
+    return (
+      "This tag was written by an unlicensed app, which has stamped its own " +
+      "notice over the tag id. It needs writing again with a different tool."
     );
   }
   return "That tag id could not be read. Tap the tag again, or tell your manager.";
