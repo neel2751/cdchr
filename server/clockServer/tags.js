@@ -16,6 +16,7 @@ import { findActionRecord, performClockAction } from "./clockActions";
 import {
   normaliseUid,
   recordRefusedTap,
+  noteTapSeen,
   recordSighting,
   recordUnknownTag,
   resolveTag,
@@ -175,6 +176,21 @@ export async function inspectTag({ uid, ctr, picc, cmac } = {}) {
     } catch (error) {
       console.log("Could not work out what this tap means:", error?.message);
     }
+
+    // THE TAP'S CLOCK STARTS HERE, not when somebody presses a button.
+    //
+    // This is a read that writes, deliberately. A tap that reaches an action is
+    // spent and already safe; the dangerous one is the tap that is opened and
+    // abandoned — above all the second tap of a shift, where the screen has to
+    // ask "break or clock out?" and a tap left on that question used to be
+    // valid for ever. Timing it from first sight is the only way to kill it,
+    // because the chip's own counter is sealed inside a blob we have no key
+    // for. See clockTagStore.js TAP_TTL_MS and noteTapSeen.
+    //
+    // After the stage, so a slow lookup cannot shorten the window somebody
+    // actually gets, and awaited rather than fired and forgotten so the clock
+    // is recorded before the screen can act on this tap.
+    await noteTapSeen(resolved.tag._id, resolved.nonce);
 
     return {
       success: true,

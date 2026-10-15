@@ -166,6 +166,33 @@ const clockTagSchema = new mongoose.Schema(
      */
     usedTapIds: { type: [String], default: undefined },
 
+    /**
+     * When each tap was FIRST SEEN — which is what gives a tap an expiry.
+     *
+     * `usedTapIds` only records a tap that was spent on an action, and that
+     * left a hole wide enough to drive through: open a tap link, press
+     * nothing, and the tap is never recorded, so the URL stays valid for ever.
+     * Observed in the wild on 2026-10-15 — a link saved the previous day, with
+     * no action taken, still clocked somebody in.
+     *
+     * The second tap of a shift is where it bites. Before a shift there is one
+     * possible action and the screen fires it immediately, which spends the
+     * tap; once clocked in the screen has to ASK whether this is a break or a
+     * clock-out, and a tap sitting on that question is unspent and immortal.
+     *
+     * So first sight starts a clock, and the tap dies when it runs out. `at` is
+     * never updated for a nonce already here: refreshing the page must not be
+     * able to wind the expiry back, or the hole simply reopens for anybody who
+     * keeps the tab alive.
+     *
+     * Per nonce rather than per tag, so a queue of people at a door at 7am is
+     * untouched — every tap is its own blob and carries its own clock.
+     */
+    seenTaps: {
+      type: [{ nonce: String, at: Date }],
+      default: undefined,
+    },
+
     assignedBy: mongoose.Schema.Types.ObjectId,
     assignedByName: String,
     assignedAt: Date,

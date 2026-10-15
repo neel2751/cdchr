@@ -423,6 +423,39 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
     );
   }
 
+  // A TAP THAT WAS FINE AND IS NO LONGER — stale, or already spent.
+  //
+  // Both are the system working, and neither is anything wrong with the tag,
+  // so neither belongs under "this tag cannot be used": that sentence sends
+  // somebody to their manager, who has nothing to fix, when the answer is to
+  // hold the phone to the tag once more. Expected often enough to deserve its
+  // own calm card — a second action always needs a second tap, and a tap left
+  // sitting for five minutes is meant to die.
+  if (state?.state === "expired" || state?.state === "replay") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Nfc className="size-4 text-teal-600" />
+            Tap the tag again
+          </CardTitle>
+          <CardDescription>{state.message}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-neutral-500">
+            Every action needs its own tap, and a tap only lasts a few minutes.
+            Nothing is wrong with the tag or with your account.
+          </p>
+          <Button asChild variant="outline" size="sm" className="w-full">
+            <Link href={homePathForRole(session?.user?.role)}>
+              See my attendance
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (state?.state === "enrol") {
     return (
       <Card>

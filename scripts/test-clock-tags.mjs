@@ -61,11 +61,13 @@ async function main() {
   const { generateTagKey, sealTagKey } = await import("@/lib/tagKeys");
   const {
     normaliseUid,
+    noteTapSeen,
     parseTapCounter,
     recordSighting,
     recordUnknownTag,
     resolveTag,
     tapNonce,
+    TAP_TTL_MS,
   } = await import("@/server/clockServer/clockTagStore");
   const { assignClockTag, setClockTagStatus, storeClockTimeByTag } =
     await import("@/server/clockServer/tags");
@@ -283,6 +285,135 @@ async function main() {
       cmac: "44".repeat(8),
     });
     assert.equal(second.ok, true, second.message);
+  });
+
+  // ─── A TAP NOBODY ACTED ON STILL HAS TO DIE ───────────────────────────────
+  //
+  // The hole these close, found in production on 2026-10-15: a tap link saved
+  // on the 14th, with no action taken, clocked somebody in the next day.
+  // Spending only ever recorded taps that reached an action, so a tap left
+  // sitting on the "break or clock out?" question was never recorded and never
+  // stopped working.
+  await check("a tap that was seen and left alone expires", async () => {
+    const uid = "04EE11FF22330044";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Abandoned tap",
+        status: "active",
+        signature: "none",
+        locationId: elm._id,
+      });
+    });
+
+    const tap = { picc: "5A".repeat(16), cmac: "6B".repeat(8) };
+
+    // The screen loads and nobody presses anything.
+    const seen = await resolveTag(uid, tap);
+    assert.equal(seen.ok, true, seen.message);
+    await noteTapSeen(seen.tag._id, seen.nonce);
+
+    // Straight away it is still good — the honest flow is seconds long.
+    assert.equal((await resolveTag(uid, tap)).ok, true, "a fresh tap was refused");
+
+    // Wind its first sighting back past the window.
+    await ClockTag.updateOne(
+      { _id: seen.tag._id, "seenTaps.nonce": seen.nonce },
+      { $set: { "seenTaps.$.at": new Date(Date.now() - TAP_TTL_MS - 1000) } },
+    );
+
+    const stale = await resolveTag(uid, tap);
+    assert.equal(stale.ok, false, "a tap saved and used later was accepted");
+    assert.equal(stale.status, "expired");
+    // Not "replay": it was never used, and telling somebody they already
+    // clocked in when they did not is how a system stops being believed.
+    assert.match(stale.message, /too old/i);
+  });
+
+  await check("a page reload cannot wind the expiry back", async () => {
+    const uid = "04EE11FF22330045";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Refresher",
+        status: "active",
+        signature: "none",
+        locationId: elm._id,
+      });
+    });
+    const tap = { picc: "7C".repeat(16), cmac: "8D".repeat(8) };
+    const first = await resolveTag(uid, tap);
+    await noteTapSeen(first.tag._id, first.nonce);
+
+    const planted = new Date(Date.now() - TAP_TTL_MS + 2000);
+    await ClockTag.updateOne(
+      { _id: first.tag._id, "seenTaps.nonce": first.nonce },
+      { $set: { "seenTaps.$.at": planted } },
+    );
+
+    // Leaving the tab open and refreshing must not buy another five minutes,
+    // or the hole reopens for anybody patient enough to press reload.
+    await noteTapSeen(first.tag._id, first.nonce);
+    const after = await ClockTag.findOne({ uid }).lean();
+    const entry = (after.seenTaps || []).find((s) => s.nonce === first.nonce);
+    assert.equal(
+      new Date(entry.at).getTime(),
+      planted.getTime(),
+      "a reload reset the tap's clock",
+    );
+    assert.equal((after.seenTaps || []).length, 1, "a reload stored a second sighting");
+  });
+
+  await check("a queued offline tap is exempt from the expiry", async () => {
+    const uid = "04EE11FF22330046";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Dead zone",
+        status: "active",
+        signature: "none",
+        locationId: elm._id,
+      });
+    });
+    const tap = { picc: "9E".repeat(16), cmac: "AF".repeat(8) };
+    const first = await resolveTag(uid, tap);
+    await noteTapSeen(first.tag._id, first.nonce);
+    await ClockTag.updateOne(
+      { _id: first.tag._id, "seenTaps.nonce": first.nonce },
+      { $set: { "seenTaps.$.at": new Date(Date.now() - 6 * 60 * 60 * 1000) } },
+    );
+
+    // A tap taken in a cutting with no signal arrives hours later. Refusing it
+    // would make the offline queue a machine for discarding work.
+    assert.equal((await resolveTag(uid, tap)).status, "expired");
+    const queued = await resolveTag(uid, { ...tap, ignoreExpiry: true });
+    assert.equal(queued.ok, true, "a queued tap was refused for being old");
+
+    // But it is still single-use: late is not the same as replayable.
+    await recordSighting(first.tag._id, { nonce: queued.nonce });
+    const twice = await resolveTag(uid, { ...tap, ignoreExpiry: true });
+    assert.equal(twice.status, "replay", "the queue could replay a spent tap");
+  });
+
+  await check("a tap never seen by us has no clock to run out", async () => {
+    // Read off the chip with an NFC app and hoarded without ever opening the
+    // page. Nothing started its clock, so it is accepted — the honest limit of
+    // this defence, and the reason the geofence carries the rest.
+    const uid = "04EE11FF22330047";
+    await withTenant(async () => {
+      await ClockTag.create({
+        uid,
+        label: "Hoarded",
+        status: "active",
+        signature: "none",
+        locationId: elm._id,
+      });
+    });
+    const unseen = await resolveTag(uid, {
+      picc: "C1".repeat(16),
+      cmac: "D2".repeat(8),
+    });
+    assert.equal(unseen.ok, true, unseen.message);
   });
 
   await check("spending the same nonce twice stores it once", async () => {

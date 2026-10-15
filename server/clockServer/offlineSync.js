@@ -136,10 +136,26 @@ async function replayOne({ entry, employeeId, employeeType, officeEmployee, sync
   }
 
   // --- the tag still has to be real ---------------------------------------
+  //
+  // EXEMPT FROM THE TAP EXPIRY, and it has to be. A tap taken in a cutting
+  // with no signal is replayed whenever the phone next finds a bar, which is
+  // routinely hours later — every one of them would fail a five-minute clock
+  // (clockTagStore.js TAP_TTL_MS) and the queue would exist only to throw
+  // work away.
+  //
+  // Queued taps are governed instead by the rules just above: not in the
+  // future, not older than MAX_OFFLINE_AGE_HOURS, drift recorded, and the
+  // record flagged for a human. That is a weaker guarantee resting on the
+  // phone's own clock, which is exactly why it is confined to this path and
+  // why every such record is reviewed.
+  //
+  // Spending still applies. A queued tap is refused if its nonce was already
+  // used, so the queue cannot be used to replay anything — only to arrive late.
   const resolved = await resolveTag(uid, {
     picc: signature?.picc,
     cmac: signature?.cmac,
     counter: signature?.ctr,
+    ignoreExpiry: true,
   });
   if (!resolved.ok) return refuse(resolved.message);
 

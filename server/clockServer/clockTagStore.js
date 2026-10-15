@@ -127,6 +127,58 @@ export function tapNonce({ picc, cmac, counter } = {}) {
 }
 
 /**
+ * How long a tap stays worth something.
+ *
+ * SPENDING A TAP WAS NOT ENOUGH, and the gap is worth spelling out because it
+ * survived three rounds of work on exactly this. `usedTapIds` records a tap
+ * that was spent on an action. A tap that was never spent was never recorded,
+ * so its URL kept working indefinitely — and that is not theoretical: a link
+ * saved on 2026-10-14 with no action taken clocked somebody in on the 15th.
+ *
+ * The second tap of a shift is where it happens. The first has one possible
+ * meaning and fires at once, which spends it. Once clocked in, the screen must
+ * ask whether this is a break or a clock-out — and a tap left sitting on that
+ * question is unspent, so under the old rules it was good for ever.
+ *
+ * Five minutes, because the honest flow is seconds: hold the phone to the tag,
+ * read the question, press the button. Five minutes covers being interrupted
+ * mid-tap and nothing else. It is deliberately not generous — the entire value
+ * of the number is how small it is.
+ *
+ * WHAT THIS DOES AND DOES NOT CLOSE. It kills a link kept in a browser, a
+ * bookmark, a screenshot, a message to a friend — everything that goes through
+ * our page, because the clock starts the moment the page loads. It does NOT
+ * stop somebody reading the chip with an NFC app and hoarding URLs they never
+ * open: those are unseen, so nothing has started their clock. Only a signed
+ * counter orders those, and that needs a key we do not have (see
+ * `verifySunMessage` and the tag:check command). Hoarded URLs still have to be
+ * spent from inside the geofence with a position, which is the backstop.
+ */
+export const TAP_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Has this tap been sitting around too long?
+ *
+ * Returns a refusal, or null to carry on. Separate from the replay check
+ * because they are different failures with different advice: a replay means
+ * "you already used this", an expiry means "this one went stale, tap again",
+ * and telling somebody they have already clocked in when they have not is the
+ * sort of message that gets a system distrusted.
+ */
+function expiredTap(tag, nonce, ignoreExpiry) {
+  if (!nonce || ignoreExpiry) return null;
+  const seen = (tag.seenTaps || []).find((s) => s?.nonce === nonce);
+  if (!seen?.at) return null;
+  if (Date.now() - new Date(seen.at).getTime() <= TAP_TTL_MS) return null;
+  return {
+    ok: false,
+    status: "expired",
+    tag,
+    message: "This tap is too old to use. Hold the phone to the tag again.",
+  };
+}
+
+/**
  * Why a link arrived with no readable tag id.
  *
  * Every one of these is a chip that was written wrong, not an employee who did
@@ -186,7 +238,10 @@ function unreadableUidMessage(raw) {
  *   "replay"     — the counter did not advance. A reused tap: a reload, a
  *                  bookmark, a back button, or a cloned chip.
  */
-export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
+export async function resolveTag(
+  rawUid,
+  { picc, cmac, counter, ignoreExpiry = false } = {},
+) {
   await connect();
 
   const uid = normaliseUid(rawUid);
@@ -308,11 +363,20 @@ export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
       };
     }
 
+    // A verified tap expires too. The counter orders taps against each other,
+    // but it only moves when one is SPENT — so a signed tap nobody acted on
+    // stays the highest the tag has seen, and stays usable, exactly like the
+    // unsigned case below. Signing does not remove the need for a clock.
+    const signedNonce = tapNonce({ picc, cmac, counter: verified.counter });
+    const signedStale = expiredTap(tag, signedNonce, ignoreExpiry);
+    if (signedStale) return signedStale;
+
     return {
       ok: true,
       status: "active",
       tag,
       counter: verified.counter,
+      nonce: signedNonce,
       signed: true,
       counted: true,
     };
@@ -373,6 +437,11 @@ export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
         message: "This tap has already been used. Hold the phone to the tag again.",
       };
     }
+    // Spent is not the only way a tap stops being worth something: see
+    // TAP_TTL_MS. This is the check that closes a link saved from the question
+    // the screen asks once somebody is already clocked in.
+    const stale = expiredTap(tag, nonce, ignoreExpiry);
+    if (stale) return stale;
     return {
       ok: true,
       status: "active",
@@ -422,6 +491,44 @@ export async function resolveTag(rawUid, { picc, cmac, counter } = {}) {
   // request, and it is why such a tag needs its geofence enforced: it proves a
   // UID was known, which any phone can read off the tag.
   return { ok: true, status: "active", tag, counter: null, signed: false, counted: false };
+}
+
+/**
+ * Start this tap's clock.
+ *
+ * Called when a tap is merely LOOKED AT — the tap screen loading, before
+ * anybody has pressed anything — which is the whole point: an expiry measured
+ * from the action would never fire, because a tap that reaches an action is
+ * spent anyway. What needs a clock is the tap that is opened and abandoned.
+ *
+ * So yes, a read path writes. That is deliberate and it is the only way to
+ * timestamp something whose own timestamp we cannot read (the chip's counter is
+ * inside a blob we have no key for). The write is one bounded array push.
+ *
+ * `$ne` in the filter is load-bearing: a nonce already here keeps its ORIGINAL
+ * time. Without that, reloading the page would reset the expiry on every load
+ * and somebody who left the tab open would have an immortal tap again — the
+ * exact hole this exists to close, reopened by a refresh.
+ *
+ * Best-effort, like every other sighting: failing to start a clock must never
+ * fail a clock-in. The cost of a miss is one tap that lives longer than it
+ * should, which is where we already were.
+ */
+export async function noteTapSeen(tagId, nonce) {
+  try {
+    if (!tagId || !nonce) return;
+    await connect();
+    await ClockTagModel.updateOne(
+      { _id: tagId, "seenTaps.nonce": { $ne: nonce } },
+      {
+        $push: {
+          seenTaps: { $each: [{ nonce, at: new Date() }], $slice: -50 },
+        },
+      },
+    );
+  } catch (error) {
+    console.log("Could not note tap sighting:", error?.message);
+  }
 }
 
 /**
