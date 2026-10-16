@@ -16,6 +16,10 @@ import { normalizeDateToUTC } from "@/lib/formatDate";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
+import {
+  duplicateAccountWarning,
+  otherAccountsForEmail,
+} from "../authServer/duplicateAccounts";
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
 import { permissionRefusal } from "@/lib/actionAccess";
 
@@ -649,6 +653,12 @@ export const resetSiteEmployeePassword = withAudit(
 
       await clearLockByEmail(employee.email);
 
+      // The same trap as the office path: one email can own a record in
+      // several companies, each with its own password, and sign-in checks one
+      // of them. See otherAccountsForEmail for why this warns rather than
+      // writing to the other record.
+      const others = await otherAccountsForEmail(employee.email, employeeId);
+
       const targetName =
         `${employee.firstName || ""} ${employee.lastName || ""}`.trim() ||
         "employee";
@@ -668,10 +678,18 @@ export const resetSiteEmployeePassword = withAudit(
           },
           reason: String(reason).trim(),
           lockCleared: true,
+          duplicateAccounts: others.map((o) => ({
+            id: o._id,
+            company: o.companyName,
+            name: o.name,
+          })),
         },
       });
 
-      return { success: true, message: "Password reset successfully" };
+      return {
+        success: true,
+        message: "Password reset successfully" + duplicateAccountWarning(others),
+      };
     } catch (error) {
       console.log("Error in resetSiteEmployeePassword:", error);
       return { success: false, message: "Error resetting password" };

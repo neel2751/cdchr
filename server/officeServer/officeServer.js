@@ -40,6 +40,10 @@ import { withAudit, recordAudit } from "@/lib/audit";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getServerSideProps } from "../session/session";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
+import {
+  duplicateAccountWarning,
+  otherAccountsForEmail,
+} from "../authServer/duplicateAccounts";
 import { permissionRefusal } from "@/lib/actionAccess";
 
 /**
@@ -764,6 +768,24 @@ export const resetOfficeEmployeePassword = withAudit(
       // Lift any failed-login lockout so the user can sign in with the new password.
       await clearLockByEmail(employee.email);
 
+      // IS THIS EVEN THE RECORD SIGN-IN WILL CHECK?
+      //
+      // One email can own a record in several companies, each with its own
+      // password field, and sign-in picks one of them. Resetting the record an
+      // admin is looking at is therefore not necessarily resetting the one that
+      // gets checked — and when it is not, the password is correct, the hash is
+      // correct, and the person is told "invalid password" with nothing
+      // anywhere to explain it. That is not hypothetical: it happened to two
+      // new employees on 2026-10-16, both of whom had a leftover test record in
+      // another company.
+      //
+      // Not fixed by writing to the other record. A super admin of one company
+      // must not be able to set a password that opens an account in another —
+      // crossing a tenant boundary to make a reset appear to work would be
+      // worse than the bug. So the admin is told, and the duplicate is a
+      // decision for whoever owns both companies.
+      const others = await otherAccountsForEmail(employee.email, employeeId);
+
       const targetName = employee.name || employee.firstName || "employee";
       // who (actor) is captured automatically by withAudit; here we record
       // for-whom (entityId + target details) and why (reason). When = createdAt.
@@ -785,6 +807,13 @@ export const resetOfficeEmployeePassword = withAudit(
           lockCleared: true,
           signedOutEverywhere: !!signOutEverywhere,
           mustChangePassword: !!requirePasswordChange,
+          // Recorded, so "we reset it and they still could not get in" is
+          // answerable from the audit trail months later.
+          duplicateAccounts: others.map((o) => ({
+            id: o._id,
+            company: o.companyName,
+            name: o.name,
+          })),
         },
       });
 
@@ -795,12 +824,11 @@ export const resetOfficeEmployeePassword = withAudit(
         requirePasswordChange && "will be asked to set their own at next login",
       ].filter(Boolean);
 
-      return {
-        success: true,
-        message: consequences.length
-          ? `Password reset. ${targetName} has been ${consequences.join(" and ")}.`
-          : "Password reset successfully",
-      };
+      const base = consequences.length
+        ? `Password reset. ${targetName} has been ${consequences.join(" and ")}.`
+        : "Password reset successfully";
+
+      return { success: true, message: base + duplicateAccountWarning(others) };
     } catch (error) {
       console.log("Error in resetOfficeEmployeePassword:", error);
       return { success: false, message: "Error resetting password" };
