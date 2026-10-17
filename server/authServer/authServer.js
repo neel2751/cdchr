@@ -11,6 +11,7 @@ import PlatformUserModel from "@/models/platformUserModel";
 import { escapeTenant } from "@/lib/tenantContext";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import CompanyModel from "@/models/companyModel";
+import { NO_MATCH_MESSAGE } from "@/lib/authErrors";
 import {
   checkLoginRateLimit,
   clearLoginAttempts,
@@ -44,6 +45,25 @@ import {
  */
 const DUPLICATE_LOGIN_POLICY =
   process.env.DUPLICATE_LOGIN_POLICY === "block" ? "block" : "warn";
+
+/**
+ * ONE SENTENCE FOR "no such email" AND "wrong password".
+ *
+ * Two different sentences let anybody discover who has an account here by
+ * typing addresses and reading the wording. Imported rather than written out,
+ * because lib/authErrors.js recognises the failure by its wording in order to
+ * pick a wire code — so a copy of this string that drifts by one word becomes
+ * SERVER_ERROR and tells the user the app is broken.
+ */
+const NO_MATCH = NO_MATCH_MESSAGE;
+
+/**
+ * A real bcrypt hash of nothing in particular, compared against when no
+ * account exists, so an unknown address costs the same time as a known one.
+ * Fixed rather than generated: generating one per request is slower than the
+ * comparison it is hiding.
+ */
+const DUMMY_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
 // Which collection wins when an email exists in more than one. Preserves the
 // original order: office, then site, then reception, then platform.
@@ -156,9 +176,13 @@ async function reportDuplicateLogin(email, matches) {
     )
     .join(", ");
 
+  // It no longer says which one signs in, because at this point nothing knows.
+  // The password decides that, and it has not been checked yet — this used to
+  // name matches[0] because matches[0] was the answer by construction. Saying
+  // it anyway would make the log contradict the login it is describing.
   console.warn(
     `[login-duplicate] "${email}" matches ${matches.length} accounts (${describe}); ` +
-      `signing in as ${matches[0].userType}:${matches[0].user._id}`
+      `whichever one the password opens will be used`
   );
 
   try {
@@ -170,14 +194,17 @@ async function reportDuplicateLogin(email, matches) {
     await logAuditDirect({
       action: "Auth.duplicateEmail",
       module: "Auth",
-      // The tenant the chosen record belongs to, so the entry is visible to the
-      // company the person actually landed in.
+      // The first record's company, chosen only so the entry is visible
+      // somewhere. It is NOT "the company they landed in" — that is decided by
+      // which record the password opens, which this code runs before. Every
+      // match is listed in the metadata below, which is the part to read.
       tenantId: matches[0].user.tenantId,
       actor: { system: true },
       status: "failure",
       description:
         `"${email}" matches ${matches.length} accounts (${describe}). ` +
-        `Signed in as the first. Each person should exist once.`,
+        `Sign-in uses whichever record the password opens. ` +
+        `Each person should exist once.`,
       metadata: {
         email,
         policy: DUPLICATE_LOGIN_POLICY,
@@ -214,9 +241,21 @@ const verifyCredentials = async (email, password, deviceId) => {
     findAccountsByEmail(email)
   );
 
-  // No user found
+  // No user found.
+  //
+  // THE SAME SENTENCE AS A WRONG PASSWORD, on purpose. This used to say "Email
+  // not found" while a bad password said "Invalid password. Try again.", so
+  // anybody could type an address and learn from the wording alone whether it
+  // had an account here. requestPasswordReset goes to real trouble over this —
+  // it always answers "If an account exists for that email, a reset link has
+  // been sent" — and login gave it away in two words.
+  //
+  // The dummy comparison is the other half. Without it an unknown address
+  // returns with no bcrypt work done at all while a real one takes ~50ms per
+  // candidate, which answers the same question in a different language.
   if (!matches.length) {
-    return { status: false, message: "Email not found" };
+    await isMatchedPassword(password, DUMMY_HASH);
+    return { status: false, message: NO_MATCH };
   }
 
   /**
@@ -246,24 +285,80 @@ const verifyCredentials = async (email, password, deviceId) => {
     }
   }
 
-  const { user, userType } = matches[0];
+  /**
+   * WHICH OF THESE RECORDS IS THIS PERSON? THE PASSWORD SAYS.
+   *
+   * This used to take `matches[0]` — the oldest record — and check that one's
+   * password. There is no user table in this app: a person IS an employee
+   * record, a record belongs to one company, and the password is a field on
+   * it. So one address can own two records with two different passwords, and
+   * picking before checking meant picking blind.
+   *
+   * It broke three ways, all seen in production on 2026-10-16:
+   *
+   *   A password set on the record that did NOT sort first was simply never
+   *   consulted. Two new employees had correct passwords, correctly hashed,
+   *   and were told "Invalid password" — with nothing anywhere to explain it,
+   *   because every part in isolation was working.
+   *
+   *   `isActive` was judged on the picked record, so a leaver marked inactive
+   *   by one company was refused entry to the company that still employs
+   *   them, and told to contact an admin who no longer employs them.
+   *
+   *   Each company's super admin can reset the password on their own record,
+   *   correctly and within their own tenant. Only the first record's password
+   *   was ever used, so one of the two admins was always silently wrong.
+   *
+   * The password is the ONE thing in the request that distinguishes these
+   * records, so it is what resolves them: compare against every candidate and
+   * let whichever matches be the answer. Several may match — the same password
+   * set in both companies — and that is not ambiguous, it is agreement.
+   *
+   * Cost: one bcrypt comparison per record instead of one. ~50ms each, paid
+   * only by people who actually have duplicates. The alternative was a login
+   * that cannot be made to work for them at all.
+   *
+   * It does NOT reduce the duplicates, and is not meant to. Two passwords that
+   * both work is better than one that silently does not; one credential per
+   * person is the real answer and a bigger change.
+   */
+  const authenticated = [];
+  for (const candidate of matches) {
+    // A record with no password cannot authenticate anybody. Guarded because
+    // bcrypt on undefined throws, and a throw here would be a 500 on the login
+    // screen for everyone sharing that address.
+    if (!candidate.user?.password) continue;
+    if (await isMatchedPassword(password, candidate.user.password)) {
+      authenticated.push(candidate);
+    }
+  }
 
-  // Check active status
-  if (!user.isActive) {
+  if (!authenticated.length) {
+    return { status: false, message: NO_MATCH };
+  }
+
+  // ACTIVE IS JUDGED AFTER THE PASSWORD, not before and not during.
+  //
+  // Only now is it safe to say "your account is inactive": the person has
+  // proved they hold the password, so the sentence tells them something they
+  // are entitled to know rather than confirming to a stranger that the
+  // address exists.
+  //
+  // And it looks at EVERY record they authenticated as, so one company
+  // deactivating them cannot shut them out of another that has not.
+  const live = authenticated.filter((m) => m.user.isActive !== false);
+  if (!live.length) {
     return {
       status: false,
       message: "Your account is inactive. Please contact admin.",
     };
   }
 
-  // Password check
-  const isMatch = await isMatchedPassword(password, user.password);
-  if (!isMatch) {
-    return {
-      status: false,
-      message: "Invalid password. Try again.",
-    };
-  }
+  // Still deterministic, and now it only chooses between records that all
+  // accepted the same password — so the choice can no longer be wrong in the
+  // way that matters. Which company they land in is then theirs to change
+  // (components/companyChoicePrompt.jsx).
+  const { user, userType } = live[0];
 
   if (userType === "reception" && user.enforceDeviceLock) {
     console.log("Checking device authorization for reception user");
@@ -433,12 +528,25 @@ export const LoginData = async (email, password, deviceId, ip = "") => {
   return result;
 };
 
+/**
+ * `compare`, not `compareSync`.
+ *
+ * bcrypt is slow on purpose, and the sync call spends that time on the single
+ * thread that serves every other request — so one sign-in froze the whole
+ * server for ~50ms. It was `await bcrypt.compareSync(...)`, which awaits a
+ * boolean and therefore looks asynchronous while being the opposite.
+ *
+ * It matters more now than it did: verifyCredentials compares against every
+ * record an address owns, so a person with two companies cost two blocking
+ * comparisons back to back. The async form hands the work to libuv's thread
+ * pool and the event loop keeps serving.
+ */
 export const isMatchedPassword = async (password, hashword) => {
   try {
-    // console.log(password, hashword);
-    return await bcrypt.compareSync(password, hashword);
+    return await bcrypt.compare(password, hashword);
   } catch (error) {
     console.log(`Error in Matching Password ${error}`);
+    return false;
   }
 };
 
