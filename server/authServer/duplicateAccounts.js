@@ -133,6 +133,18 @@ export async function otherAccountsForEmail(email, excludeId) {
  * branching. Deliberately blunt: the admin has just been told the password was
  * reset, and if sign-in is going to check a different record then that message
  * on its own is misleading.
+ *
+ * IT NAMES THE TOOL THAT DOES WORK, because "there is a duplicate" is a
+ * diagnosis and not a fix, and the obvious reading of it — delete the other
+ * record — is wrong whenever the person genuinely works for both companies,
+ * which is a thing that happens and is supported (linkCompaniesForEmail in
+ * authServer.js links the companies so the switcher can move between them).
+ *
+ * "Forgot password" is the answer in both cases. resetPasswordWithToken writes
+ * the new password to EVERY record the address owns, which an administrator's
+ * reset deliberately cannot do — and it is allowed to, because the person
+ * following a link sent to their own email owns all of those records, while a
+ * super admin of one company does not.
  */
 export function duplicateAccountWarning(others) {
   if (!others?.length) return "";
@@ -140,9 +152,10 @@ export function duplicateAccountWarning(others) {
     .map((o) => o.companyName || "another company")
     .filter((name, i, all) => all.indexOf(name) === i);
   return (
-    ` ⚠ This email also has an account at ${where.join(" and ")}. ` +
-    `Sign-in may check that record instead, in which case this new password ` +
-    `will not let them in until the duplicate is merged or removed ` +
-    `(npm run audit:duplicate-emails shows which record wins).`
+    ` ⚠ This email also has an account at ${where.join(" and ")}, with its own ` +
+    `password, and sign-in may check that one instead — so this reset may not ` +
+    `let them in. Ask them to use "Forgot password" on the sign-in page: that ` +
+    `sets one password across all their company records, which a reset from ` +
+    `here cannot do.`
   );
 }
