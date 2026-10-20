@@ -23,6 +23,35 @@ import { getClockEvidenceReport } from "@/server/clockServer/evidenceReport";
  * not produce a warning: it produces somebody standing outside a cabin at 7am
  * unable to start work.
  */
+/**
+ * Short names for the reasons a position never arrived.
+ *
+ * Kept here rather than imported from lib/clockEvidence.js, which words them
+ * for the employee holding the phone ("Location access was declined on this
+ * phone"). An admin reading a tally wants the shape of the problem across a
+ * whole site, and a sentence per chip would be unreadable.
+ */
+const POSITION_REASON_LABEL = {
+  deniedNoPrompt: "never asked",
+  denied: "declined",
+  timeout: "too slow",
+  unavailable: "no fix",
+  blocked: "blocked",
+  dismissed: "ignored",
+};
+
+const POSITION_REASON_HELP = {
+  deniedNoPrompt:
+    "The phone refused instantly, so nobody was shown a prompt — location is off for the browser in the phone's own settings. Three taps in Settings fixes it.",
+  denied: "Somebody was asked and chose Don't Allow.",
+  timeout:
+    "Allowed, but no fix arrived in time. Normal indoors and in steel-framed buildings.",
+  unavailable: "The phone tried and could not place itself at all.",
+  blocked:
+    "The browser would not even ask. An insecure connection, or a policy on our side — this one is ours to fix, not the employee's.",
+  dismissed: "The prompt was neither allowed nor declined.",
+};
+
 export default function ClockEvidenceReport() {
   const { data, isLoading } = useFetchSelectQuery({
     queryKey: ["clockEvidenceReport"],
@@ -137,10 +166,30 @@ export default function ClockEvidenceReport() {
                     <p className="mt-2 text-xs text-neutral-500">
                       {loc.noEvidence} clock-in
                       {loc.noEvidence === 1 ? "" : "s"} arrived with nothing to
-                      judge — usually a declined location permission. Those are
-                      never refused; they say nothing about where the person
-                      was.
+                      judge. Those are never refused on their own; they say
+                      nothing about where the person was.
                     </p>
+                  ) : null}
+
+                  {/* WHY A POSITION WAS MISSING, rather than how often.
+                      This used to read "usually a declined location
+                      permission", which was a guess, and the wrong one: the
+                      common case turned out to be phones refusing without ever
+                      showing a prompt, because location is switched off for
+                      the browser in the phone's own settings. One is a
+                      conversation, the other is three taps in Settings. */}
+                  {Object.keys(loc.positionErrors || {}).length ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {Object.entries(loc.positionErrors).map(([reason, n]) => (
+                        <span
+                          key={reason}
+                          className="rounded bg-neutral-100 px-2 py-1 text-[11px] text-neutral-600"
+                          title={POSITION_REASON_HELP[reason] || ""}
+                        >
+                          {n} × {POSITION_REASON_LABEL[reason] || reason}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
               );

@@ -305,6 +305,16 @@ export async function storeClockTimeByTag(
         method: "nfc",
         coords: clientEvidence?.coords || undefined,
         deviceId: clientEvidence?.deviceId || undefined,
+        // Why the position is missing, when it is. Kept because "no position"
+        // on its own cannot distinguish a phone with location switched off
+        // from a person who declined from a chip that could not get a fix —
+        // and under requirePositionForTaps all three now refuse the tap, so
+        // somebody has to be able to answer "why was I turned away".
+        //
+        // A claim by the browser, like coords. Recorded, never judged on.
+        positionError: clientEvidence?.positionError || undefined,
+        positionErrorAfterMs:
+          Number(clientEvidence?.positionErrorAfterMs) || undefined,
         tagId: String(tag._id),
         tagCounter: resolved.counter ?? undefined,
         // Whether the chip proved itself, kept with the record rather than

@@ -80,6 +80,22 @@ const clockInSchema = new Schema(
       },
       ip: String,
       deviceId: String,
+      // WHY THERE IS NO POSITION, when there is none.
+      //
+      // `coords` absent used to be the only thing recorded, and it meant five
+      // different things: refused, no fix, too slow, blocked by our own
+      // Permissions-Policy header, or never asked for at all. Those have five
+      // different fixes and only one of them is anything to do with the
+      // employee, so a report that cannot tell them apart sends the wrong
+      // person to sort it out. See lib/clockEvidence.js POSITION_ERROR.
+      //
+      // Reported by the browser, so it is a claim and not evidence —
+      // lib/locationPolicy.js deliberately does not read it. It is here to be
+      // read by a human asking why a tap had no position.
+      positionError: String,
+      // How long the refusal took. A denial inside a quarter of a second was
+      // the phone's settings, not a person reading a prompt.
+      positionErrorAfterMs: Number,
       tagId: String,
       tagCounter: Number,
       // Did the chip sign this tap? A 424 whose SDM mirroring could not be

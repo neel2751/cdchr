@@ -32,7 +32,12 @@ import {
 } from "@/components/ui/select";
 import { useFetchQuery } from "@/hooks/use-query";
 import { homePathForRole } from "@/lib/roleHome";
-import { collectClockEvidence } from "@/lib/clockEvidence";
+import {
+  collectClockEvidence,
+  permissionState,
+  POSITION_ERROR,
+  POSITION_ERROR_TEXT,
+} from "@/lib/clockEvidence";
 import { flushQueue, queueTap, queuedCount } from "@/lib/offlineQueue";
 import { syncOfflineTaps } from "@/server/clockServer/offlineSync";
 import { getClockLocations } from "@/server/clockServer/locations";
@@ -73,6 +78,98 @@ import {
  * and once an action has happened this view does not offer the next one. It
  * shows what was recorded and says to tap again, so every action costs a tap.
  */
+
+/**
+ * Has this browser ever actually produced a position for us?
+ *
+ * WHY THIS IS REMEMBERED HERE AND NOT ASKED FOR.
+ *
+ * The Permissions API is the right question and Safari is not a reliable
+ * answerer: versions ship that report `prompt` while the user's own Safari
+ * setting is Deny, and older ones throw on the geolocation descriptor
+ * altogether. So `unknown` is an ordinary answer, and on `unknown` the only
+ * honest fallback — ask with a button press behind it — would cost a press on
+ * EVERY tap for the whole life of the phone, which is precisely the one-tap
+ * design this screen exists to protect.
+ *
+ * A fix we have actually received is proof no API can argue with. One press
+ * the first time, automatic from then on.
+ *
+ * Browser storage, so it is per phone and per browser, which is exactly the
+ * grain of the thing being remembered. It can throw or come back empty — a
+ * private window, blocked site data — and then the answer is "not granted",
+ * which costs a press and loses nothing.
+ */
+const GRANT_KEY = "clock.locationGranted";
+
+function rememberedGrant() {
+  try {
+    return window.localStorage.getItem(GRANT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberGrant() {
+  try {
+    window.localStorage.setItem(GRANT_KEY, "1");
+  } catch {
+    // Nothing to do and nothing lost: the next tap asks for a press again.
+  }
+}
+
+/**
+ * The errors that mean the phone, or its owner, is refusing — as opposed to
+ * trying and failing. Only these are worth a line of instructions; "could not
+ * get a fix" is answered by standing outside, not by changing a setting.
+ */
+const REFUSALS = new Set([
+  POSITION_ERROR.DENIED,
+  POSITION_ERROR.DENIED_NO_PROMPT,
+  POSITION_ERROR.BLOCKED,
+]);
+
+/**
+ * What to do about a position that never arrived.
+ *
+ * Written for the person holding the phone, naming the actual screens, because
+ * "enable location services" is not an instruction anybody can follow. The
+ * no-prompt case is the one worth being explicit about: the phone answered for
+ * them, so they will swear they were never asked — and they are right.
+ */
+function PositionHelp({ error }) {
+  if (!error) return null;
+  const refusal = REFUSALS.has(error);
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left">
+      <p className="flex items-start gap-1.5 text-xs font-medium text-amber-900">
+        <MapPin className="mt-0.5 size-3.5 shrink-0" />
+        {POSITION_ERROR_TEXT[error] || "This phone did not send a location."}
+      </p>
+      {error === POSITION_ERROR.DENIED_NO_PROMPT ? (
+        <p className="text-xs text-amber-800">
+          You were not asked, because the phone had already decided. On iPhone:
+          Settings → Privacy &amp; Security → Location Services → Safari
+          Websites → <strong>While Using the App</strong>. Then tap the tag
+          again.
+        </p>
+      ) : refusal ? (
+        <p className="text-xs text-amber-800">
+          Tap the tag again and choose <strong>Allow</strong> when your phone
+          asks. If it does not ask: Settings → Apps → Safari → Location →{" "}
+          <strong>Ask</strong>.
+        </p>
+      ) : (
+        <p className="text-xs text-amber-800">
+          Step outside or near a window and tap the tag again — indoors a phone
+          can take a while to find itself.
+        </p>
+      )}
+    </div>
+  );
+}
+
 const ACTION_LABELS = {
   clockIn: { label: "Clock In", Icon: Clock4, verb: "Clocking you in" },
   breakIn: { label: "Start Break", Icon: Coffee, verb: "Starting your break" },
@@ -132,6 +229,28 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
   const { data: session } = useSession();
   const [busy, setBusy] = React.useState(false);
   const [waiting, setWaiting] = React.useState(0);
+
+  // Does this browser already allow us a position? `null` while we find out.
+  //
+  // THE BUG THIS EXISTS FOR. One phone recorded its position on every tap and
+  // another was never even asked for permission — same site, same Safari. The
+  // difference was that the first phone had granted location once already, by
+  // pressing "use my current position" on the Clock Settings screen, and a
+  // grant is remembered per site. The second phone's first ever location
+  // request on this site came from the automatic action below: a useEffect,
+  // with no finger on the screen.
+  //
+  // That is the part that matters. A permission prompt is a response to a
+  // user gesture; WebKit holds a gesture for about five seconds and has a long
+  // history of simply not prompting without one. Add a phone whose Location
+  // Services are off for Safari — which refuses instantly and silently — and
+  // you get exactly what was reported: it never asked, and nothing anywhere
+  // said so.
+  //
+  // So the first request on a phone is made from a button press, and only once.
+  // After a position has actually arrived the screen goes back to needing no
+  // button at all, which is the whole point of a tag.
+  const [locationGranted, setLocationGranted] = React.useState(null);
 
   // Enrolment
   const [chosenLocation, setChosenLocation] = React.useState("");
@@ -215,6 +334,20 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
     }
   }, []);
 
+  // Settled before the automatic action can run, so a phone that is already
+  // allowed is not made to press anything. Both sources are consulted: the
+  // browser's own answer, and a fix we have actually been given before.
+  React.useEffect(() => {
+    let alive = true;
+    permissionState().then((state) => {
+      if (!alive) return;
+      setLocationGranted(state === "granted" || rememberedGrant());
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   React.useEffect(() => {
     // Deferred rather than called straight from the effect body: draining
     // eventually sets state, and nothing here needs to happen before the
@@ -254,8 +387,23 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
     setDone(null);
     try {
       // Never blocks: a declined permission or a cold GPS chip resolves to
-      // nothing rather than holding someone up at a cabin door.
-      const evidence = await collectClockEvidence();
+      // nothing rather than holding someone up at a cabin door. It now says
+      // WHICH of those happened, which is the difference between a support
+      // call and a line of text on this screen.
+      //
+      // `firstRequest` buys the longer timeout for the call that is expected
+      // to raise a prompt. Eight seconds was being spent waiting for a human
+      // to notice a sheet, read it and press Allow, and the sheet usually won.
+      const evidence = await collectClockEvidence({
+        firstRequest: locationGranted !== true,
+      });
+
+      // A position we actually received settles the question no API answers
+      // reliably, so this screen can stop asking for a press.
+      if (evidence.coords) {
+        rememberGrant();
+        setLocationGranted(true);
+      }
 
       let res;
       try {
@@ -280,6 +428,7 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
         setWaiting(await queuedCount());
         setDone({
           action,
+          positionError: evidence.positionError,
           ok: stored,
           queued: stored,
           message: stored
@@ -294,13 +443,18 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
       // clocked in.
       setDone({
         action,
+        // Carried so the outcome card can explain itself. It matters most when
+        // the server REFUSED the tap for having no position: "a tag tap has to
+        // say where it is" is correct and tells somebody standing at a door
+        // nothing they can act on.
+        positionError: evidence.positionError,
         ok: res.success === true,
         message: res.message || (res.success ? "Recorded" : "That did not work"),
       });
     } finally {
       setBusy(false);
     }
-  }, [uid, ctr, picc, cmac]);
+  }, [uid, ctr, picc, cmac, locationGranted]);
 
   const tap = state?.state === "ready" ? state.tap || null : null;
 
@@ -315,13 +469,21 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
   // `working`, which never fires automatically — so this cannot loop or double
   // up. `done` blocks it from the moment an action has happened in this view,
   // and the ref blocks a repeat within the same stage if an action failed.
+  //
+  // AND IT WAITS FOR PERMISSION TO BE SETTLED. Firing before we know costs the
+  // position: a browser that has never granted location will not raise its
+  // prompt for an effect nobody touched, so the automatic path recorded a tap
+  // with no position and the person was never asked anything. On a phone that
+  // has already granted it, nothing below changes — `locationGranted` is true
+  // within a millisecond or two and the tap still needs no button.
   React.useEffect(() => {
     if (!tap?.auto || done || busy) return;
+    if (locationGranted !== true) return;
     const key = `${uid}:${tap.stage}:${tap.auto}`;
     if (autoFired.current === key) return;
     autoFired.current = key;
     act(tap.auto);
-  }, [tap, done, busy, uid, act]);
+  }, [tap, done, busy, uid, act, locationGranted]);
 
   const enrol = async () => {
     setBusy(true);
@@ -375,6 +537,11 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
               Saved on this phone. Your manager will confirm the time.
             </p>
           ) : null}
+          {/* Shown on a success as well as a refusal. A tap that worked but
+              carried no position is a tap that will stop working the moment a
+              location starts requiring one, and telling somebody then — at a
+              door, in the morning — is too late. */}
+          <PositionHelp error={done.positionError} />
           <p className="text-center text-sm text-neutral-600">
             {done.ok || done.queued
               ? nextTapHintAfter(done.action)
@@ -572,6 +739,11 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
     tap?.actions ||
     Object.keys(ACTION_LABELS).map((action) => ({ action, allowed: true, reason: null }));
 
+  // An automatic tap whose permission state is not known yet. Held for the
+  // instant it takes to read, rather than showing a button that is about to
+  // press itself.
+  const settling = Boolean(tap?.auto) && locationGranted === null;
+
   const queuedNotice =
     waiting > 0 ? (
       <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
@@ -601,6 +773,15 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
             <Loader2 className="size-4 animate-spin" />
             {ACTION_LABELS[pending]?.verb || "Recording that"}…
           </p>
+        ) : settling ? (
+          /* A blink, not a wait — reading the permission state takes a
+             millisecond. It exists so a tap that is about to act on its own
+             does not flash a button first and invite a press that would then
+             race the automatic one. */
+          <p className="flex items-center justify-center gap-2 rounded-md border bg-neutral-50 py-3 text-sm text-neutral-600">
+            <Loader2 className="size-4 animate-spin" />
+            One moment…
+          </p>
         ) : tap?.stage === "finished" ? (
           <div className="space-y-2">
             <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-700">
@@ -618,6 +799,19 @@ export default function TapToClock({ uid, ctr, picc, cmac }) {
             {choices.length > 1 ? (
               <p className="text-center text-xs text-neutral-500">
                 What are you doing?
+              </p>
+            ) : null}
+            {/* THE ONE PRESS, EXPLAINED. Only on a phone that has not given us
+                a position yet, and only until it does. Without a word of
+                warning the prompt arrives on top of a screen somebody thinks
+                they have finished with, and "Don't Allow" is the fastest way
+                to make it go away — which is how a phone ends up refusing
+                silently for ever. */}
+            {locationGranted === false ? (
+              <p className="rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                Your phone will ask for your location — choose{" "}
+                <strong>Allow</strong>. The tag has to confirm you are here,
+                and it only asks once on this phone.
               </p>
             ) : null}
             {choices.map(({ action, allowed, reason }) => {

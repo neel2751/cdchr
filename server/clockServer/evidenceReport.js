@@ -113,6 +113,15 @@ export async function getClockEvidenceReport() {
             },
           },
           accuracies: { $push: "$clockInEvidence.coords.accuracyMetres" },
+          // WHY the ones without a position had none.
+          //
+          // `withPosition` counts them and stops there, which makes a coverage
+          // problem look like one problem. It is usually three: phones with
+          // location switched off for the browser, people who pressed Don't
+          // Allow, and fixes that timed out indoors. Only the last is about
+          // the building, and only the first two can be fixed by talking to
+          // somebody — so the count alone cannot tell you what to do next.
+          positionErrors: { $push: "$clockInEvidence.positionError" },
         },
       },
       { $sort: { scans: -1 } },
@@ -176,6 +185,13 @@ export async function getClockEvidenceReport() {
         medianAccuracyMetres: accuracies.length
           ? accuracies[Math.floor(accuracies.length / 2)]
           : null,
+        // `{ deniedNoPrompt: 2, timeout: 1 }`, omitting the taps that worked.
+        // Empty for records written before the reason was recorded, which is
+        // honest: we genuinely do not know why those had no position.
+        positionErrors: (row.positionErrors || []).reduce((acc, reason) => {
+          if (reason) acc[reason] = (acc[reason] || 0) + 1;
+          return acc;
+        }, {}),
         radiusOptions,
       };
     });

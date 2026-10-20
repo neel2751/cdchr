@@ -40,6 +40,7 @@
     "clock:test:policy": "node --import ./scripts/lib/alias-loader.mjs scripts/test-location-policy.mjs",
     "clock:test:tags": "node --import ./scripts/lib/action-loader.mjs scripts/test-clock-tags.mjs",
     "clock:test:report": "node --import ./scripts/lib/action-loader.mjs scripts/test-clock-evidence-report.mjs",
+    "clock:test:evidence": "node --import ./scripts/lib/alias-loader.mjs scripts/test-clock-evidence.mjs",
     "clock:test:offline": "node --import ./scripts/lib/action-loader.mjs scripts/test-offline-sync.mjs",
     "tag:test:provisioning": "node --import ./scripts/lib/action-loader.mjs scripts/test-tag-provisioning.mjs",
     "tag:test:sun": "node --import ./scripts/lib/alias-loader.mjs scripts/test-sun.mjs",
