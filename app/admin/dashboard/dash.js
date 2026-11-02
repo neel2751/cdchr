@@ -46,6 +46,9 @@ const Dash = () => {
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardDataServer,
+    // Today's bar counts shifts still running up to now, so it goes stale.
+    // The same interval as AttendanceToday, so the two cards agree.
+    refetchInterval: 120_000,
   });
 
   const { has } = useTenantFeatures();

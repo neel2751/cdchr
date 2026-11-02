@@ -1,7 +1,7 @@
 "use server";
 import { connect } from "@/db/db";
 import { permissionRefusal } from "@/lib/actionAccess";
-import { getWorkingDate } from "@/lib/clockTime";
+import { getClockTime, getWorkingDate, toMinutes } from "@/lib/clockTime";
 import { workedMinutes } from "@/server/clockServer/shiftCloser";
 import ClockRecordModel from "@/models/clockInModel";
 import EmployeModel from "@/models/employeModel";
@@ -285,18 +285,24 @@ const getOfficeEmpSummaryData = async () => {
  * fortnight" however many shifts had actually been worked.
  *
  * Hours are worked minutes — the shift less its breaks — the same figure
- * overtime is judged on, so the two cannot disagree. A shift still open has no
- * length yet and is left out rather than counted as zero; it lands on the
- * chart when it is clocked out.
+ * overtime is judged on, so the two cannot disagree.
+ *
+ * Today's open shifts count up to now, so today's bar climbs through the day
+ * instead of sitting empty until people go home. An open shift from an earlier
+ * day does not: nobody clocked out of it, the nightly job has flagged it, and
+ * until a human fixes the finish time any length given to it is a guess.
  *
  * All fourteen days come back, keyed "YYYY-MM-DD" on the UK working day, so a
  * day nobody worked is a gap in the row and the browser never has to work out
- * dates in its own timezone.
+ * dates in its own timezone. Today's carries `isToday` and how many shifts in
+ * it are still running, so the chart can say the figure is not final.
  */
 async function getHoursLastFortnight() {
   try {
     await connect();
     const today = getWorkingDate();
+    const todayKey = today.toISOString().slice(0, 10);
+    const now = getClockTime();
     const start = new Date(today.getTime() - 13 * DAY_MS);
 
     const records = await ClockRecordModel.find(
@@ -305,10 +311,15 @@ async function getHoursLastFortnight() {
     ).lean();
 
     const minutesByDay = new Map();
+    let openShifts = 0;
     for (const record of records) {
-      const minutes = workedMinutes(record);
-      if (minutes === null) continue;
       const key = record.date.toISOString().slice(0, 10);
+      let minutes = workedMinutes(record);
+      if (minutes === null && key === todayKey) {
+        minutes = minutesSoFar(record, now);
+        if (minutes !== null) openShifts++;
+      }
+      if (minutes === null) continue;
       minutesByDay.set(key, (minutesByDay.get(key) || 0) + minutes);
     }
 
@@ -319,12 +330,34 @@ async function getHoursLastFortnight() {
       return {
         date: key,
         TotalHours: Math.round(((minutesByDay.get(key) || 0) / 60) * 100) / 100,
+        ...(key === todayKey && { isToday: true, openShifts }),
       };
     });
   } catch (error) {
     console.error("Error getting hours for the dashboard chart: ", error);
     return [];
   }
+}
+
+/**
+ * Minutes worked so far on a shift nobody has clocked out of yet.
+ *
+ * The shift is closed at `now` for the sum, and so is a break still running:
+ * somebody at lunch is not working, and counting their break would make the
+ * bar climb while nobody is.
+ *
+ * Null when the clock-in is later than now. That is a mis-keyed record or a
+ * wrong clock somewhere, and diffMinutes would read it as a shift crossing
+ * midnight — twenty-three hours on the chart from one typo.
+ */
+function minutesSoFar(record, now) {
+  const start = toMinutes(record?.clockIn);
+  if (start === null || start > toMinutes(now)) return null;
+
+  const breaks = (record.breaks || []).map((br) =>
+    br?.breakIn && !br?.breakOut ? { ...br, breakOut: now } : br,
+  );
+  return workedMinutes({ ...record, clockOut: now, breaks });
 }
 
 // Get Total Site Working Right count total Site, active, complete, on hold, no status
