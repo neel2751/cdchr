@@ -32,7 +32,7 @@ export default function PolicyReviewsCard() {
           {total === 1 ? "1 policy needs review" : `${total} policies need review`}
         </CardTitle>
         <Link
-          href="/admin/policies?review=due"
+          href="/admin/policies?status=review"
           className="text-xs text-neutral-500 hover:underline"
         >
           See all

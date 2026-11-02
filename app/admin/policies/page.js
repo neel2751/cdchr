@@ -1,6 +1,12 @@
+import { Suspense } from "react";
 import PolicyLibrary from "./policyLibrary";
 
-export default async function Page({ searchParams }) {
-  const param = await searchParams;
-  return <PolicyLibrary searchParams={param} />;
+// The library's filters live in the address bar (see policyLibrary.jsx), read
+// on the client — hence the boundary.
+export default function Page() {
+  return (
+    <Suspense>
+      <PolicyLibrary />
+    </Suspense>
+  );
 }

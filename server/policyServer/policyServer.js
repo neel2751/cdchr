@@ -542,10 +542,15 @@ export async function getPolicies(filterData = {}) {
 
     await connect();
 
-    const filter = { isDeleted: false };
+    // Category and search narrow everything, the status tabs' counts included;
+    // the status is what the tabs choose between.
+    const scope = { isDeleted: false };
     if (isValidObjectId(filterData?.categoryId)) {
-      filter.categoryId = createObjectId(filterData.categoryId);
+      scope.categoryId = createObjectId(filterData.categoryId);
     }
+    if (filterData?.query) scope.title = searchRegex(filterData.query);
+
+    const filter = { ...scope };
     if (["draft", "active", "archived"].includes(filterData?.status)) {
       filter.status = filterData.status;
     } else {
@@ -553,27 +558,40 @@ export async function getPolicies(filterData = {}) {
       // are one filter away.
       filter.status = { $ne: "archived" };
     }
-    if (filterData?.query) filter.title = searchRegex(filterData.query);
 
     const today = getWorkingDate();
     // "Needs review": published policies due within the warning window or
     // already overdue — the same set the reminders go out for.
-    if (filterData?.review === "due") {
-      filter.status = "active";
-      filter.nextReviewDate = {
+    const dueForReview = {
+      status: "active",
+      nextReviewDate: {
         $ne: null,
         $lte: new Date(today.getTime() + REVIEW_WARNING_DAYS * 86400000),
-      };
-    }
+      },
+    };
+    if (filterData?.review === "due") Object.assign(filter, dueForReview);
 
-    const [rows, totalCount] = await Promise.all([
+    const [rows, totalCount, byStatus, dueCount] = await Promise.all([
       PolicyModel.find(filter)
         .sort({ updatedAt: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .lean(),
       PolicyModel.countDocuments(filter),
+      PolicyModel.aggregate([
+        { $match: scope },
+        { $group: { _id: "$status", n: { $sum: 1 } } },
+      ]),
+      PolicyModel.countDocuments({ ...scope, ...dueForReview }),
     ]);
+    const statusCount = Object.fromEntries(byStatus.map((s) => [s._id, s.n]));
+    const counts = {
+      current: (statusCount.draft || 0) + (statusCount.active || 0),
+      review: dueCount,
+      draft: statusCount.draft || 0,
+      active: statusCount.active || 0,
+      archived: statusCount.archived || 0,
+    };
 
     const [categories, owners, withDraft] = await Promise.all([
       PolicyCategoryModel.find({
@@ -619,6 +637,7 @@ export async function getPolicies(filterData = {}) {
         })),
       ),
       totalCount,
+      counts,
     };
   } catch (error) {
     console.log("Error listing policies:", error);

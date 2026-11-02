@@ -761,6 +761,26 @@ async function main() {
       assert.equal(none.total, 0);
     });
 
+    await check("the status tabs are counted across statuses, within the search", async () => {
+      const all = await as(acmeAdmin, () => admin.getPolicies({}));
+      const archivedTab = await as(acmeAdmin, () => admin.getPolicies({ status: "archived" }));
+      // The tabs' numbers do not change with the tab chosen.
+      assert.deepEqual(archivedTab.counts, all.counts);
+      assert.equal(all.counts.review, 1);
+      assert.equal(all.counts.current, all.counts.draft + all.counts.active);
+
+      const fireOnly = await as(acmeAdmin, () => admin.getPolicies({ query: "Fire Evac" }));
+      assert.equal(fireOnly.counts.current, 1);
+      assert.equal(fireOnly.counts.review, 1);
+      const nothing = await as(acmeAdmin, () => admin.getPolicies({ query: "zzz no such" }));
+      assert.deepEqual(nothing.counts, { current: 0, review: 0, draft: 0, active: 0, archived: 0 });
+
+      if (ENFORCING) {
+        const other = await as(betaAdmin, () => admin.getPolicies({ query: "Fire Evac" }));
+        assert.equal(other.counts.current, 0, "another company's policies were counted");
+      }
+    });
+
     await check("30 days out, the owner is reminded once, however many runs", async () => {
       await dueIn(20);
       sent.length = 0;
