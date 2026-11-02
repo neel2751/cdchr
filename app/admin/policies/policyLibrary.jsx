@@ -48,16 +48,24 @@ import {
   setPolicyCategoryArchived,
 } from "@/server/policyServer/policyServer";
 import { getSelectRoleType } from "@/server/selectServer/selectServer";
+import { describeReviewDue, reviewUrgency } from "@/lib/policies";
 import { describeAudience } from "../announcements/constants";
 import CategoryDialog from "./categoryDialog";
 import NewPolicyDialog from "./newPolicyDialog";
 
 const STATUS_OPTIONS = [
   { label: "Current", value: "" },
+  { label: "Needs review", value: "review" },
   { label: "Not yet published", value: "draft" },
   { label: "Published", value: "active" },
   { label: "Archived", value: "archived" },
 ];
+
+const URGENCY_CLASS = {
+  overdue: "font-medium text-red-700",
+  soon: "font-medium text-amber-700",
+  ok: "",
+};
 
 const formatDate = (value) =>
   value
@@ -85,7 +93,10 @@ export default function PolicyLibrary({ searchParams }) {
   const query = searchParams?.query;
 
   const [categoryId, setCategoryId] = useState("");
-  const [status, setStatus] = useState("");
+  // The dashboard's "See all" arrives as ?review=due.
+  const [status, setStatus] = useState(
+    searchParams?.review === "due" ? "review" : "",
+  );
   const [showArchived, setShowArchived] = useState(false);
   const [categoryDialog, setCategoryDialog] = useState(null); // {category?}
   const [newOpen, setNewOpen] = useState(false);
@@ -108,7 +119,13 @@ export default function PolicyLibrary({ searchParams }) {
   );
 
   const { data, isLoading, isError } = useFetchQuery({
-    params: { query, page: currentPage, pageSize: pagePerData, categoryId, status },
+    params: {
+      query,
+      page: currentPage,
+      pageSize: pagePerData,
+      categoryId,
+      ...(status === "review" ? { review: "due" } : { status }),
+    },
     queryKey: ["policies", { query, currentPage, pagePerData, categoryId, status }],
     fetchFn: getPolicies,
   });
@@ -276,7 +293,9 @@ export default function PolicyLibrary({ searchParams }) {
               <div className="text-center text-gray-500">Something went wrong</div>
             ) : rows.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
-                {query || status
+                {status === "review" && !query
+                  ? "Nothing is due for review in the next 30 days."
+                  : query || status
                   ? "No policies match."
                   : selected
                     ? `Nothing in ${selected.name} yet.`
@@ -292,7 +311,7 @@ export default function PolicyLibrary({ searchParams }) {
                       <TableHead>Version</TableHead>
                       <TableHead>Who can see it</TableHead>
                       <TableHead>Owner</TableHead>
-                      <TableHead>Updated</TableHead>
+                      <TableHead>Next review</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -335,7 +354,22 @@ export default function PolicyLibrary({ searchParams }) {
                         </TableCell>
                         <TableCell>{row.ownerName || "—"}</TableCell>
                         <TableCell className="whitespace-nowrap">
-                          {formatDate(row.updatedAt)}
+                          {row.status === "active" && row.nextReviewDate ? (
+                            <div>
+                              <div
+                                className={URGENCY_CLASS[reviewUrgency(row.daysUntilReview)]}
+                              >
+                                {formatDate(row.nextReviewDate)}
+                              </div>
+                              {reviewUrgency(row.daysUntilReview) !== "ok" ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {describeReviewDue(row.daysUntilReview)}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

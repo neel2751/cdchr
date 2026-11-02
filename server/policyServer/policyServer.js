@@ -10,11 +10,17 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { connect } from "@/db/db";
 import { recordAudit, withAudit } from "@/lib/audit";
+import { getWorkingDate, toWorkingDate } from "@/lib/clockTime";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import {
   DEFAULT_POLICY_CATEGORIES,
+  DEFAULT_REVIEW_INTERVAL_MONTHS,
   POLICY_FILE_TYPES,
   POLICY_MAX_BYTES,
+  REVIEW_INTERVAL_OPTIONS,
+  REVIEW_WARNING_DAYS,
+  addMonthsToDay,
+  daysBetween,
   policyNameKey,
 } from "@/lib/policies";
 import { featureRefusal } from "@/lib/requireFeature";
@@ -23,6 +29,7 @@ import { isReadOnly } from "@/lib/tenantContext";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import PolicyCategoryModel from "@/models/policyCategoryModel";
 import PolicyModel from "@/models/policyModel";
+import PolicyReviewModel from "@/models/policyReviewModel";
 import PolicyVersionModel from "@/models/policyVersionModel";
 import RoleBasedModel from "@/models/rolebasedModel";
 import { countAudience, resolveAudience } from "../announcementServer/audience";
@@ -190,6 +197,87 @@ async function detailsProblem(details) {
     if (!owner) return "The owner must be a current member of office staff.";
   }
   return null;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Review dates
+ * ------------------------------------------------------------------------ */
+
+/** An interval from the form: one of the offered values, or null for none. */
+function sanitizeInterval(value) {
+  const n = Number(value);
+  return REVIEW_INTERVAL_OPTIONS.includes(n) ? n : null;
+}
+
+/**
+ * A next-review date from a form, which means one of three things:
+ *   undefined     not given — the caller works one out
+ *   "" or null    cleared on purpose — no review scheduled
+ *   "YYYY-MM-DD"  this day
+ *
+ * @returns {{given: boolean, date?: Date|null, problem?: string}}
+ */
+function readReviewDate(value, { earliest }) {
+  if (value === undefined) return { given: false };
+  if (value === "" || value === null) return { given: true, date: null };
+  const date = toWorkingDate(value);
+  if (!date) return { given: true, problem: "That review date is not a date." };
+  if (date < earliest) {
+    return { given: true, problem: "Choose a later date for the next review." };
+  }
+  return { given: true, date };
+}
+
+/** Days from today (UK) to a policy's next review, or null when it has none. */
+function daysUntilReview(policy, today = getWorkingDate()) {
+  return policy?.nextReviewDate ? daysBetween(today, policy.nextReviewDate) : null;
+}
+
+/**
+ * Record that a policy has been reviewed and set when it is next due.
+ *
+ * Shared by "mark as reviewed" and by publishing, because publishing a new
+ * version is a review: whoever did it has read the policy and decided what it
+ * should say. Either way the reminders already sent belong to the old due
+ * date and are cleared, so the new one gets its own.
+ *
+ * `nextReviewDate` undefined means "work it out": the interval from today,
+ * or — with no interval — the date already set, left alone.
+ */
+async function recordReview({ policy, user, outcome, versionNumber = null, note = "", nextReviewDate }) {
+  const today = getWorkingDate();
+  const next =
+    nextReviewDate !== undefined
+      ? nextReviewDate
+      : policy.reviewIntervalMonths
+        ? addMonthsToDay(today, policy.reviewIntervalMonths)
+        : policy.nextReviewDate || null;
+  const dateChanged = String(next || "") !== String(policy.nextReviewDate || "");
+  const reviewedByName = user.name || user.email;
+
+  await PolicyReviewModel.create({
+    policyId: policy._id,
+    outcome,
+    versionNumber,
+    note,
+    dueDate: policy.nextReviewDate || null,
+    nextReviewDate: next,
+    reviewedAt: new Date(),
+    reviewedBy: toOid(user._id),
+    reviewedByName,
+  });
+
+  await PolicyModel.updateOne(
+    { _id: policy._id },
+    {
+      nextReviewDate: next,
+      lastReviewedAt: new Date(),
+      lastReviewedByName: reviewedByName,
+      ...(dateChanged ? { reviewRemindersSent: [] } : {}),
+    },
+  );
+
+  return next;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -461,6 +549,17 @@ export async function getPolicies(filterData = {}) {
     }
     if (filterData?.query) filter.title = searchRegex(filterData.query);
 
+    const today = getWorkingDate();
+    // "Needs review": published policies due within the warning window or
+    // already overdue — the same set the reminders go out for.
+    if (filterData?.review === "due") {
+      filter.status = "active";
+      filter.nextReviewDate = {
+        $ne: null,
+        $lte: new Date(today.getTime() + REVIEW_WARNING_DAYS * 86400000),
+      };
+    }
+
     const [rows, totalCount] = await Promise.all([
       PolicyModel.find(filter)
         .sort({ updatedAt: -1 })
@@ -492,11 +591,14 @@ export async function getPolicies(filterData = {}) {
     return {
       success: true,
       data: JSON.stringify(
-        rows.map((r) => ({
+        rows.map(({ reviewRemindersSent, ...r }) => ({
           ...r,
           categoryName: categoryName[String(r.categoryId)] || "Unknown",
           ownerName: r.ownerId ? owners[String(r.ownerId)] || "Former staff" : "",
           hasDraft: drafted.has(String(r._id)),
+          // Counted here, against the UK day, so the browser's own clock and
+          // timezone cannot disagree with the reminders about what is overdue.
+          daysUntilReview: daysUntilReview(r, today),
         })),
       ),
       totalCount,
@@ -518,12 +620,16 @@ export async function getPolicyById(id) {
     const policy = await PolicyModel.findOne({ _id: id, isDeleted: false }).lean();
     if (!policy) return fail("Policy not found");
 
-    const [category, versions, owners] = await Promise.all([
+    const [category, versions, owners, reviews] = await Promise.all([
       PolicyCategoryModel.findById(policy.categoryId).select("_id name").lean(),
       PolicyVersionModel.find({ policyId: policy._id, isDeleted: false })
         .sort({ createdAt: -1 })
         .lean(),
       namesFor([policy.ownerId]),
+      PolicyReviewModel.find({ policyId: policy._id })
+        .sort({ reviewedAt: -1 })
+        .limit(50)
+        .lean(),
     ]);
 
     // Drafts first, then newest published. Sorting on createdAt alone puts a
@@ -546,6 +652,8 @@ export async function getPolicyById(id) {
         audienceCount: policy.visibleToEmployees
           ? await countAudience(policy.audience)
           : 0,
+        daysUntilReview: daysUntilReview(policy),
+        reviews,
         // The key is how the file is fetched, and the manager screens open
         // files through getPolicyVersionFileUrl by version id instead.
         versions: versions.map(({ file, ...v }) => ({
@@ -572,8 +680,14 @@ export const createPolicy = withAudit(
       const problem = await detailsProblem(details);
       if (problem) return fail(problem);
 
+      // Reviewed yearly unless the form says otherwise. No date yet: the
+      // clock starts when the first version is published.
       const policy = await PolicyModel.create({
         ...details,
+        reviewIntervalMonths:
+          data?.reviewIntervalMonths === undefined
+            ? DEFAULT_REVIEW_INTERVAL_MONTHS
+            : sanitizeInterval(data.reviewIntervalMonths),
         status: "draft",
         visibleToEmployees: false,
         createdBy: toOid(user._id),
@@ -1103,10 +1217,19 @@ export const publishPolicyVersion = withAudit(
         { new: true },
       ).lean();
 
+      // A new version is a review: it restarts the clock.
+      const nextReviewDate = await recordReview({
+        policy: after,
+        user,
+        outcome: "new-version",
+        versionNumber,
+        note: version.changeNote || "",
+      });
+
       recordAudit({
         entityId: before._id,
         before,
-        after,
+        after: { ...after, nextReviewDate },
         description: `Published version ${versionNumber} of policy "${before.title}"`,
       });
 
@@ -1183,6 +1306,196 @@ export async function getPolicyVersionFileUrl(versionId) {
   } catch (error) {
     console.log("Error opening policy file:", error);
     return fail("Could not open the file");
+  }
+}
+
+/* ------------------------------------------------------------------------ *
+ * Reviews
+ * ------------------------------------------------------------------------ */
+
+/**
+ * "I have read it and it is still right."
+ *
+ * The other way to review a policy is to publish a new version, which records
+ * a review by itself. Only a published policy can be reviewed: there is
+ * nothing in force to sign off otherwise.
+ *
+ * The next review is the date given, or the policy's interval from today.
+ * With no interval and no date, nothing further is scheduled — said so in the
+ * reply, so it is a choice rather than an accident.
+ */
+export const markPolicyReviewed = withAudit(
+  "Policy.review",
+  async (id, data = {}) => {
+    try {
+      const user = await requirePolicyManager();
+      if (!user) return fail("Not authorized");
+      if (!isValidObjectId(id)) return fail("Invalid policy");
+
+      await connect();
+      const before = await PolicyModel.findOne({ _id: id, isDeleted: false }).lean();
+      if (!before) return fail("Policy not found");
+      if (before.status !== "active") {
+        return fail("Only a published policy can be reviewed.");
+      }
+
+      // Not given: the interval from today, or nothing without one.
+      const tomorrow = new Date(getWorkingDate().getTime() + 86400000);
+      const asked = readReviewDate(data.nextReviewDate, { earliest: tomorrow });
+      if (asked.problem) return fail(asked.problem);
+      const nextReviewDate = asked.given
+        ? asked.date
+        : before.reviewIntervalMonths
+          ? undefined
+          : null;
+
+      const next = await recordReview({
+        policy: before,
+        user,
+        outcome: "no-change",
+        note: String(data.note || "").trim().slice(0, 2000),
+        nextReviewDate,
+      });
+
+      recordAudit({
+        entityId: before._id,
+        before,
+        after: { ...before, nextReviewDate: next, lastReviewedAt: new Date() },
+        description: `Reviewed policy "${before.title}" with no changes`,
+      });
+
+      return {
+        success: true,
+        message: next
+          ? `Marked as reviewed. Next review ${next.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}.`
+          : "Marked as reviewed. No further review is scheduled.",
+      };
+    } catch (error) {
+      console.log("Error reviewing policy:", error);
+      return fail("Could not record the review");
+    }
+  },
+  { module: "Policy" },
+);
+
+/**
+ * How often a policy is reviewed, and when it is next due.
+ *
+ * Without an explicit date, the next review is worked out from the interval
+ * and the last time it was reviewed — or published, for one never reviewed
+ * since. That can land in the past, which is the truth: a yearly policy last
+ * looked at two years ago is overdue, and saying otherwise would be the
+ * schedule hiding it. A policy not yet published gets no date; its clock
+ * starts when it is.
+ */
+export const updatePolicyReviewSchedule = withAudit(
+  "Policy.reviewSchedule",
+  async (id, data = {}) => {
+    try {
+      const user = await requirePolicyManager();
+      if (!user) return fail("Not authorized");
+      if (!isValidObjectId(id)) return fail("Invalid policy");
+
+      await connect();
+      const before = await PolicyModel.findOne({ _id: id, isDeleted: false }).lean();
+      if (!before) return fail("Policy not found");
+
+      const reviewIntervalMonths = sanitizeInterval(data.intervalMonths);
+
+      // Not given: worked out from the interval, or — with no interval — the
+      // date already set is kept. Switching off the regular review should not
+      // quietly cancel the one already booked.
+      const asked = readReviewDate(data.nextReviewDate, { earliest: getWorkingDate() });
+      if (asked.problem) return fail(asked.problem);
+
+      let nextReviewDate = before.nextReviewDate || null;
+      if (asked.given) {
+        nextReviewDate = asked.date;
+      } else if (reviewIntervalMonths) {
+        const since = before.lastReviewedAt || before.currentPublishedAt;
+        nextReviewDate = since
+          ? addMonthsToDay(getWorkingDate(since), reviewIntervalMonths)
+          : null;
+      }
+
+      const dateChanged =
+        String(nextReviewDate || "") !== String(before.nextReviewDate || "");
+
+      const after = await PolicyModel.findByIdAndUpdate(
+        before._id,
+        {
+          reviewIntervalMonths,
+          nextReviewDate,
+          ...(dateChanged ? { reviewRemindersSent: [] } : {}),
+          updatedBy: toOid(user._id),
+        },
+        { new: true },
+      ).lean();
+
+      recordAudit({
+        entityId: before._id,
+        before,
+        after,
+        description: `Changed the review schedule of policy "${before.title}"`,
+      });
+
+      return { success: true, message: "Review schedule saved" };
+    } catch (error) {
+      console.log("Error saving policy review schedule:", error);
+      return fail("Could not save the review schedule");
+    }
+  },
+  { module: "Policy" },
+);
+
+/**
+ * Policies due for review within the warning window, or overdue — for the
+ * dashboard. Empty for anyone who does not manage policies, so the card
+ * simply does not appear for them.
+ */
+export async function getPolicyReviewsDue() {
+  const none = { success: true, data: JSON.stringify({ total: 0, policies: [] }) };
+  try {
+    const user = await requirePolicyManager();
+    if (!user) return none;
+
+    await connect();
+    const today = getWorkingDate();
+    const filter = {
+      isDeleted: false,
+      status: "active",
+      nextReviewDate: {
+        $ne: null,
+        $lte: new Date(today.getTime() + REVIEW_WARNING_DAYS * 86400000),
+      },
+    };
+
+    const [rows, total] = await Promise.all([
+      PolicyModel.find(filter)
+        .sort({ nextReviewDate: 1 })
+        .limit(5)
+        .select("_id title nextReviewDate ownerId")
+        .lean(),
+      PolicyModel.countDocuments(filter),
+    ]);
+    const owners = await namesFor(rows.map((r) => r.ownerId));
+
+    return {
+      success: true,
+      data: JSON.stringify({
+        total,
+        policies: rows.map((r) => ({
+          _id: r._id,
+          title: r.title,
+          nextReviewDate: r.nextReviewDate,
+          daysUntilReview: daysUntilReview(r, today),
+          ownerName: r.ownerId ? owners[String(r.ownerId)] || "" : "",
+        })),
+      }),
+    };
+  } catch (error) {
+    console.log("Error listing policy reviews due:", error);
+    return none;
   }
 }
 

@@ -37,7 +37,9 @@ import {
   setPolicyArchived,
   updatePolicyDetails,
 } from "@/server/policyServer/policyServer";
+import { describeReviewDue, reviewUrgency } from "@/lib/policies";
 import PolicyDetailsForm from "../policyDetailsForm";
+import ReviewPanel from "./reviewPanel";
 import VersionsPanel from "./versionsPanel";
 import VisibilityPanel from "./visibilityPanel";
 
@@ -162,6 +164,18 @@ export default function PolicyDetail({ id }) {
               </span>
             )}
             {policy.ownerName ? <span>· Owner: {policy.ownerName}</span> : null}
+            {policy.status === "active" &&
+            reviewUrgency(policy.daysUntilReview) !== "ok" ? (
+              <Badge
+                variant={
+                  reviewUrgency(policy.daysUntilReview) === "overdue"
+                    ? "destructive"
+                    : "secondary"
+                }
+              >
+                Review: {describeReviewDue(policy.daysUntilReview).toLowerCase()}
+              </Badge>
+            ) : null}
           </div>
         </div>
 
@@ -190,6 +204,7 @@ export default function PolicyDetail({ id }) {
         <TabsList>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="visibility">Who can see it</TabsTrigger>
+          <TabsTrigger value="review">Review</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
 
@@ -201,6 +216,10 @@ export default function PolicyDetail({ id }) {
             again from what was saved rather than holding the old form. */}
         <TabsContent value="visibility">
           <VisibilityPanel key={policy.updatedAt} policy={policy} />
+        </TabsContent>
+
+        <TabsContent value="review">
+          <ReviewPanel key={policy.updatedAt} policy={policy} />
         </TabsContent>
 
         <TabsContent value="details">

@@ -78,6 +78,10 @@ async function main() {
   const PolicyCategory = (await import("@/models/policyCategoryModel")).default;
   const admin = await import("@/server/policyServer/policyServer");
   const reader = await import("@/server/policyServer/myPolicyServer");
+  const PolicyReview = (await import("@/models/policyReviewModel")).default;
+  const { runPolicyReviewJob } = await import("@/server/policyServer/policyReviewJob");
+  const { getWorkingDate } = await import("@/lib/clockTime");
+  const { addMonthsToDay, reviewMilestone } = await import("@/lib/policies");
 
   await Promise.all([
     PolicyVersion.syncIndexes(),
@@ -612,6 +616,253 @@ async function main() {
       assert.equal(policy.visibleToEmployees, false);
       assert.deepEqual(await readable(acmeUser), []);
     });
+
+    /* ------------------------------------------------------------ reviews */
+
+    const DAY = 86400000;
+    const today = getWorkingDate();
+    const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+    const loadFire = () => as(acmeAdmin, () => Policy.findById(fire).lean());
+
+    await check("months are added to the day, clamped to the end of the month", () => {
+      const day = (s) => new Date(`${s}T00:00:00Z`);
+      assert.equal(dayKey(addMonthsToDay(day("2027-01-31"), 1)), "2027-02-28");
+      assert.equal(dayKey(addMonthsToDay(day("2028-01-31"), 1)), "2028-02-29");
+      assert.equal(dayKey(addMonthsToDay(day("2026-11-02"), 12)), "2027-11-02");
+      assert.equal(dayKey(addMonthsToDay(day("2026-08-31"), 6)), "2027-02-28");
+    });
+
+    await check("reminder bands: 30 days, 7 days, the day, then weekly", () => {
+      const cases = [
+        [31, null], [30, "30_days"], [8, "30_days"], [7, "7_days"], [1, "7_days"],
+        [0, "due"], [-6, "due"], [-7, "overdue_1"], [-13, "overdue_1"], [-14, "overdue_2"],
+      ];
+      for (const [days, want] of cases) assert.equal(reviewMilestone(days), want, `${days} days`);
+    });
+
+    await check("a new policy is reviewed yearly, from when it is first published", async () => {
+      const id = parse(
+        await as(acmeAdmin, () =>
+          admin.createPolicy({ title: "Data Retention", categoryId: categoryId("Data Protection") }),
+        ),
+      )._id;
+      const before = await as(acmeAdmin, () => Policy.findById(id).lean());
+      assert.equal(before.reviewIntervalMonths, 12);
+      assert.equal(before.nextReviewDate, null);
+
+      const draft = await insertDraft(acmeAdmin, id);
+      await as(acmeAdmin, () => admin.publishPolicyVersion(String(draft._id)));
+      const after = await as(acmeAdmin, () => Policy.findById(id).lean());
+      assert.equal(dayKey(after.nextReviewDate), dayKey(addMonthsToDay(today, 12)));
+      const reviews = await as(acmeAdmin, () => PolicyReview.find({ policyId: id }).lean());
+      assert.deepEqual(reviews.map((r) => [r.outcome, r.versionNumber]), [["new-version", 1]]);
+    });
+
+    await check("only a published policy can be marked as reviewed", async () => {
+      const id = parse(
+        await as(acmeAdmin, () =>
+          admin.createPolicy({ title: "Unpublished", categoryId: categoryId("IT") }),
+        ),
+      )._id;
+      const res = await as(acmeAdmin, () => admin.markPolicyReviewed(id, {}));
+      assert.equal(res.success, false);
+      await as(acmeAdmin, () => admin.deletePolicy(id));
+    });
+
+    await check("marking reviewed restarts the clock and is kept in the history", async () => {
+      await as(acmeAdmin, () => admin.setPolicyArchived(fire, false));
+      await as(acmeAdmin, () =>
+        Policy.updateOne({ _id: fire }, { nextReviewDate: new Date(today.getTime() - 3 * DAY) }),
+      );
+      const res = await as(acmeAdmin, () =>
+        admin.markPolicyReviewed(fire, { note: "Checked against the new risk assessment." }),
+      );
+      assert.equal(res.success, true, res.message);
+      const policy = await loadFire();
+      assert.equal(dayKey(policy.nextReviewDate), dayKey(addMonthsToDay(today, 12)));
+      assert.equal(policy.lastReviewedByName, acmeAdmin.name);
+
+      const [latest] = await as(acmeAdmin, () =>
+        PolicyReview.find({ policyId: fire }).sort({ reviewedAt: -1 }).limit(1).lean(),
+      );
+      assert.equal(latest.outcome, "no-change");
+      assert.equal(latest.note, "Checked against the new risk assessment.");
+      assert.equal(dayKey(latest.dueDate), dayKey(new Date(today.getTime() - 3 * DAY)));
+    });
+
+    await check("a review date in the past is refused; an empty one schedules nothing", async () => {
+      const past = await as(acmeAdmin, () =>
+        admin.markPolicyReviewed(fire, { nextReviewDate: dayKey(today) }),
+      );
+      assert.equal(past.success, false);
+
+      const none = await as(acmeAdmin, () => admin.markPolicyReviewed(fire, { nextReviewDate: "" }));
+      assert.equal(none.success, true, none.message);
+      assert.match(none.message, /No further review/);
+      assert.equal((await loadFire()).nextReviewDate, null);
+    });
+
+    await check("changing the interval works the date out from the last review", async () => {
+      const res = await as(acmeAdmin, () =>
+        admin.updatePolicyReviewSchedule(fire, { intervalMonths: 6 }),
+      );
+      assert.equal(res.success, true, res.message);
+      const policy = await loadFire();
+      assert.equal(policy.reviewIntervalMonths, 6);
+      assert.equal(
+        dayKey(policy.nextReviewDate),
+        dayKey(addMonthsToDay(getWorkingDate(policy.lastReviewedAt), 6)),
+      );
+    });
+
+    await check("switching off regular review keeps the date already booked", async () => {
+      const booked = (await loadFire()).nextReviewDate;
+      await as(acmeAdmin, () => admin.updatePolicyReviewSchedule(fire, { intervalMonths: null }));
+      const policy = await loadFire();
+      assert.equal(policy.reviewIntervalMonths, null);
+      assert.equal(dayKey(policy.nextReviewDate), dayKey(booked));
+      await as(acmeAdmin, () => admin.updatePolicyReviewSchedule(fire, { intervalMonths: 12 }));
+    });
+
+    /* ------------------------------------------------- review reminders */
+
+    const sent = [];
+    const fakeSend = async (mail) => {
+      sent.push(mail);
+      return { success: true };
+    };
+    const dueIn = (days) =>
+      as(acmeAdmin, () =>
+        Policy.updateOne(
+          { _id: fire },
+          { nextReviewDate: new Date(today.getTime() + days * DAY), reviewRemindersSent: [] },
+        ),
+      );
+    const fireMail = () => sent.filter((m) => m.html.includes(`/admin/policies/${fire}`));
+
+    await check("the library and dashboard list what is due, with days counted on the server", async () => {
+      await dueIn(-2);
+      const rows = parse(await as(acmeAdmin, () => admin.getPolicies({ review: "due" })));
+      assert.deepEqual(rows.map((r) => r.title), ["Fire Evacuation"]);
+      assert.equal(rows[0].daysUntilReview, -2);
+      assert(!("reviewRemindersSent" in rows[0]), "reminder bookkeeping leaked to the list");
+
+      const due = parse(await as(acmeAdmin, () => admin.getPolicyReviewsDue()));
+      assert.equal(due.total, 1);
+      const none = parse(await as(acmeUser, () => admin.getPolicyReviewsDue()));
+      assert.equal(none.total, 0);
+    });
+
+    await check("30 days out, the owner is reminded once, however many runs", async () => {
+      await dueIn(20);
+      sent.length = 0;
+      const first = await runPolicyReviewJob({ send: fakeSend });
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 1, JSON.stringify(first));
+      const [mail] = fireMail();
+      assert.equal(mail.to, "admin@acme.test");
+      assert.equal(mail.tenantId, A);
+      assert.match(mail.subject, /^Policy review due .*: Fire Evacuation$/);
+      assert.match(mail.html, /in 20 days/);
+    });
+
+    await check("two runs at the same moment still send it once", async () => {
+      await dueIn(5);
+      sent.length = 0;
+      await Promise.all([
+        runPolicyReviewJob({ send: fakeSend }),
+        runPolicyReviewJob({ send: fakeSend }),
+      ]);
+      assert.equal(fireMail().length, 1);
+    });
+
+    await check("a failed send is tried again on the next run", async () => {
+      await dueIn(0);
+      sent.length = 0;
+      const failing = async (mail) => {
+        sent.push(mail);
+        return { success: false, message: "SMTP down" };
+      };
+      await runPolicyReviewJob({ send: failing });
+      assert.equal((await loadFire()).reviewRemindersSent.length, 0, "claim not given back");
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 2);
+      assert.match(fireMail()[1].subject, /due today/);
+    });
+
+    await check("overdue: one reminder per week, picked up after a missed day", async () => {
+      await dueIn(-8);
+      sent.length = 0;
+      await runPolicyReviewJob({ send: fakeSend });
+      await runPolicyReviewJob({ send: fakeSend, now: new Date(Date.now() + 3 * DAY) });
+      assert.equal(fireMail().length, 1, "one per week, not per day");
+      await runPolicyReviewJob({ send: fakeSend, now: new Date(Date.now() + 6 * DAY) });
+      assert.equal(fireMail().length, 2, "the second week's reminder");
+      assert.match(fireMail()[1].html, /14 days overdue/);
+    });
+
+    await check("reviewing it stops the reminders", async () => {
+      await as(acmeAdmin, () => admin.markPolicyReviewed(fire, {}));
+      sent.length = 0;
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 0);
+      assert.equal((await loadFire()).reviewRemindersSent.length, 0);
+    });
+
+    await check("with no owner and no HR mailbox, nothing is sent and the gap is logged", async () => {
+      await as(acmeAdmin, () => Policy.updateOne({ _id: fire }, { ownerId: null }));
+      await dueIn(3);
+      sent.length = 0;
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 0);
+      const logged = await db.collection("auditlogs").findOne({
+        action: "Policy.reviewReminder",
+        status: "failure",
+        errorMessage: "No recipient",
+      });
+      assert(logged, "no audit entry for the missing recipient");
+      await as(acmeAdmin, () =>
+        Policy.updateOne({ _id: fire }, { ownerId: byEmail["admin@acme.test"]._id }),
+      );
+    });
+
+    await check("a title is escaped in the email", async () => {
+      await as(acmeAdmin, () =>
+        Policy.updateOne({ _id: fire }, { title: "Fire <b>Evacuation</b> & Assembly" }),
+      );
+      await dueIn(10);
+      sent.length = 0;
+      await runPolicyReviewJob({ send: fakeSend });
+      const [mail] = fireMail();
+      assert(mail, "no reminder sent");
+      assert(mail.html.includes("Fire &lt;b&gt;Evacuation&lt;/b&gt; &amp; Assembly"), mail.html);
+      await as(acmeAdmin, () => Policy.updateOne({ _id: fire }, { title: "Fire Evacuation" }));
+    });
+
+    await check("archived policies and companies without the module are not reminded", async () => {
+      await dueIn(2);
+      await as(acmeAdmin, () => admin.setPolicyArchived(fire, true));
+      sent.length = 0;
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 0, "archived policy reminded");
+
+      await as(acmeAdmin, () => admin.setPolicyArchived(fire, false));
+      await db.collection("companies").updateOne(
+        { _id: acme._id },
+        { $set: { "features.policies": false } },
+      );
+      try {
+        await runPolicyReviewJob({ send: fakeSend });
+        assert.equal(fireMail().length, 0, "reminded with the module off");
+      } finally {
+        await db.collection("companies").updateOne(
+          { _id: acme._id },
+          { $unset: { "features.policies": "" } },
+        );
+      }
+      await runPolicyReviewJob({ send: fakeSend });
+      assert.equal(fireMail().length, 1, "not reminded once the module was back");
+    });
   } finally {
     // Leave the fixtures as they were found.
     await db.collection("rolebaseds").updateMany(
@@ -620,7 +871,7 @@ async function main() {
     );
     await db.collection("roletypes").deleteOne({ _id: financeDept });
     await db.collection("officeemployes").deleteOne({ _id: financePerson });
-    for (const name of ["policies", "policyversions", "policycategories"]) {
+    for (const name of ["policies", "policyversions", "policycategories", "policyreviews"]) {
       await db.collection(name).deleteMany({ tenantId: { $in: [acme._id, beta._id] } });
     }
     await db.collection("auditlogs").deleteMany({ module: "Policy" });

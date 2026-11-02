@@ -103,6 +103,7 @@ app.prepare().then(() => {
     scheduleShiftClose(port);
     scheduleDunning(port);
     scheduleCarryForwardExpiry(port);
+    schedulePolicyReviews(port);
   });
 });
 
@@ -180,6 +181,49 @@ function scheduleVisaReminders(serverPort) {
 
   console.log(
     `[visa-cron] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// Reminds policy owners that a review is coming up or overdue. Same shape and
+// hour as the visa job — a reminder is something to read at the start of the
+// working day, not at 04:00. Requires CRON_SECRET. Idempotent per policy, due
+// date and reminder, so a restart that runs it twice sends nothing twice.
+function schedulePolicyReviews(serverPort) {
+  const RUN_HOUR = 9;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[policy-reviews] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/policy-reviews`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      console.log("[policy-reviews] run complete:", JSON.stringify(json));
+    } catch (err) {
+      console.error("[policy-reviews] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[policy-reviews] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
 }
 

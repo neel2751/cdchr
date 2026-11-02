@@ -58,6 +58,28 @@ const policySchema = new mongoose.Schema(
     visibleToEmployees: { type: Boolean, default: false },
     audience: { type: audienceSchema, default: () => ({}) },
 
+    // WHEN IT IS NEXT LOOKED AT. Every review — a "no changes" sign-off or a
+    // new version — resets the clock to reviewIntervalMonths from that day.
+    // A null interval means no regular review, and then nextReviewDate is
+    // whatever a manager set by hand, or nothing. Dates are working days
+    // (UTC midnight of a UK calendar day) — see lib/policies.js.
+    reviewIntervalMonths: { type: Number, default: null },
+    nextReviewDate: { type: Date, default: null },
+    lastReviewedAt: { type: Date, default: null },
+    lastReviewedByName: { type: String },
+    // Which reminders have gone out for the current due date. An entry is
+    // claimed before the email is sent, so two runs cannot both send it, and
+    // released if the send fails, so the next run tries again. Emptied when
+    // the policy is reviewed: the next due date starts its own set.
+    reviewRemindersSent: [
+      {
+        _id: false,
+        milestone: { type: String, required: true },
+        dueDate: { type: Date, required: true },
+        sentAt: { type: Date, default: Date.now },
+      },
+    ],
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "OfficeEmploye" },
     createdByName: { type: String },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "OfficeEmploye" },
@@ -69,6 +91,7 @@ const policySchema = new mongoose.Schema(
 
 policySchema.index({ tenantId: 1, categoryId: 1, isDeleted: 1 });
 policySchema.index({ tenantId: 1, status: 1, visibleToEmployees: 1 });
+policySchema.index({ tenantId: 1, status: 1, nextReviewDate: 1 });
 
 applyTenantScope(policySchema, "Policy");
 

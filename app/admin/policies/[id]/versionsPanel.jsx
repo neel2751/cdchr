@@ -60,6 +60,8 @@ export default function VersionsPanel({ policy }) {
         queryClient.invalidateQueries({ queryKey: ["policy", policy._id] });
         queryClient.invalidateQueries({ queryKey: ["policies"] });
         queryClient.invalidateQueries({ queryKey: ["myPolicies"] });
+        // Publishing is a review, so it can take a policy off the dashboard.
+        queryClient.invalidateQueries({ queryKey: ["policyReviewsDue"] });
       } else {
         toast.error(res?.message || "That did not work");
       }

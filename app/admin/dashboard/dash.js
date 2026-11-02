@@ -10,6 +10,7 @@ import AnnouncementsCard from "./components/announcementsCard";
 import AttendanceToday from "./components/attendanceToday";
 import DashCount from "./components/dashCard";
 import HoursTrend from "./components/hoursTrend";
+import PolicyReviewsCard from "./components/policyReviewsCard";
 import WhereTheyAre from "./components/whereTheyAre";
 
 /**
@@ -102,6 +103,9 @@ const Dash = () => {
           {/* Renders nothing when there are no announcements, so it costs the
               dashboard no space until a company starts using the feature. */}
           <AnnouncementsCard />
+          {/* The same: only there when a policy is due, and only for the
+              people who maintain them. */}
+          <PolicyReviewsCard />
         </div>
       </div>
 
