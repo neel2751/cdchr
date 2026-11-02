@@ -1,8 +1,8 @@
 "use server";
 import { connect } from "@/db/db";
+import { permissionRefusal } from "@/lib/actionAccess";
 import { getWorkingDate } from "@/lib/clockTime";
 import { workedMinutes } from "@/server/clockServer/shiftCloser";
-import AttendanceModel from "@/models/attendanceModel";
 import ClockRecordModel from "@/models/clockInModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
@@ -10,20 +10,38 @@ import ProjectSiteModel from "@/models/siteProjectModel";
 
 const DAY_MS = 86400000;
 
+/**
+ * Everything the dashboard's headcount cards and hours chart show.
+ *
+ * Checked here because a server action is a POST endpoint anyone signed in can
+ * call, whatever proxy.js lets them open. Unchecked, an ordinary employee
+ * could read the company's headcounts and hours. The rule is the one the
+ * dashboard's other card applies (getAttendancePulse): the dashboard is every
+ * admin's landing page, so any admin or super admin, and nobody else.
+ *
+ * Only this function is exported. Each export of a "use server" file is an
+ * endpoint of its own, so the queries below stay private to it — exported,
+ * each would be a way round this check.
+ *
+ * Today's pay is no longer fetched. Nothing on the dashboard shows it, but it
+ * was in the response all the same, with the names of the three best-paid
+ * people, for anyone who opened the network tab.
+ */
 export async function fetchCardData() {
+  const refusal = await permissionRefusal([], { roles: ["admin"] });
+  if (refusal) return refusal;
+
   try {
     const [
       NumberOfEmployeeData,
       NumberOfficeEmployeeData,
       NumbertotalFullSiteData,
       hoursLastFortnight,
-      CurrentDayTotalPay,
     ] = await Promise.all([
       getEmpSummaryData(),
       getOfficeEmpSummaryData(),
       getTotalSiteWorkingRightCount(),
       getHoursLastFortnight(),
-      getTodayTotalPayAndHours(),
     ]);
 
     return {
@@ -31,7 +49,6 @@ export async function fetchCardData() {
       NumberOfficeEmployeeData,
       NumbertotalFullSiteData,
       hoursLastFortnight,
-      CurrentDayTotalPay,
     };
   } catch (error) {
     console.error(error);
@@ -40,7 +57,7 @@ export async function fetchCardData() {
 }
 
 // Get All the Employee data form Once like active, inactive, total, enddate
-export const getEmpSummaryData = async () => {
+const getEmpSummaryData = async () => {
   try {
     await connect();
     const threeFromNow = new Date();
@@ -148,7 +165,7 @@ export const getEmpSummaryData = async () => {
 };
 
 // Get All the Office Employee data form Once like active, inactive, total, enddate
-export const getOfficeEmpSummaryData = async () => {
+const getOfficeEmpSummaryData = async () => {
   try {
     await connect();
     const threeFromNow = new Date();
@@ -276,7 +293,7 @@ export const getOfficeEmpSummaryData = async () => {
  * day nobody worked is a gap in the row and the browser never has to work out
  * dates in its own timezone.
  */
-export async function getHoursLastFortnight() {
+async function getHoursLastFortnight() {
   try {
     await connect();
     const today = getWorkingDate();
@@ -310,86 +327,8 @@ export async function getHoursLastFortnight() {
   }
 }
 
-// Get  total hours and pay for a specific date Now for Only today and top 7 total high pay employee
-export async function getTodayTotalPayAndHours() {
-  await connect();
-  // const now = new Date("2024-08-15" + "T" + "00:00:00.000Z");
-  const today = new Date().toISOString().split("T")[0];
-  const now = new Date(today + "T" + "00:00:00.000Z"); // get today date
-  const pipeline = [
-    { $match: { attendanceDate: now } },
-    { $unwind: "$employeAttendance" },
-    // { $match: { "employeAttendance.aDate": { $eq: now } } }, // Filter by today's date
-    {
-      $group: {
-        _id: "$employeAttendance.employeeId", // Group by employeeId
-        totalHours: { $sum: "$employeAttendance.totalHours" },
-        totalPay: { $sum: "$employeAttendance.totalPay" },
-      },
-    },
-    {
-      $lookup: {
-        from: "employes", // Replace with your employee collection name
-        localField: "_id",
-        foreignField: "_id",
-        as: "employeeData",
-      },
-    },
-    {
-      $unwind: "$employeeData", // Unwind the employee data array
-    },
-    {
-      $project: {
-        employeeId: "$_id",
-        firstName: "$employeeData.firstName",
-        lastName: "$employeeData.lastName",
-        payRate: "$employeeData.payRate",
-        paymentType: "$employeeData.paymentType",
-        totalHours: 1,
-        totalPay: 1,
-      },
-    },
-    {
-      $sort: { totalPay: -1 },
-    },
-    {
-      $group: {
-        _id: null,
-        employees: { $push: "$$ROOT" }, // Group by null to get all employees
-        totalHours: { $sum: "$totalHours" },
-        totalPay: { $sum: { $round: ["$totalPay", 2] } },
-      },
-    }, // Group by total hours and total pay
-    // we need only three employee under the employess  array , add totalPays  and totalHours
-    {
-      $project: {
-        _id: 0,
-        employees: { $slice: ["$employees", 3] },
-        // employees: 1,
-        totalHours: 1,
-        totalPay: { $round: ["$totalPay", 2] }, // Round total pay to 2 decimal places
-      },
-    }, // Project the desired fields
-  ];
-
-  try {
-    let totalPay = 0;
-    const result = await AttendanceModel.aggregate(pipeline); // Aggregate the data
-    totalPay = result[0]?.totalPay || 0;
-    return {
-      totalPay,
-      totalHours: result[0]?.totalHours || 0,
-      employees: JSON.stringify(result[0]?.employees || []),
-    }; // Return the total pay and hours
-    // console.log("Total pay for all employees today:", totalPay);
-  } catch (error) {
-    console.error("Error getting current date total pay: ", error);
-    return { status: false, message: "Error calculating total pay" };
-  }
-}
-
 // Get Total Site Working Right count total Site, active, complete, on hold, no status
-export async function getTotalSiteWorkingRightCount() {
+async function getTotalSiteWorkingRightCount() {
   try {
     const pipeline = [
       {

@@ -51,7 +51,9 @@ const Dash = () => {
   const { has } = useTenantFeatures();
 
   const mergeData = useMemo(() => {
-    if (!data) return [];
+    // A refusal has none of the fields below, and parsed as-is it drew every
+    // card heading over nothing.
+    if (!data || data.success === false) return [];
 
     try {
       return [
