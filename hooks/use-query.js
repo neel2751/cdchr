@@ -84,13 +84,14 @@ export const useFetchQuery = ({
   });
 };
 
-export const useFetchSelectQuery = ({ queryKey, fetchFn }) => {
+export const useFetchSelectQuery = ({ queryKey, fetchFn, enabled = true }) => {
   return useQuery({
     queryKey: queryKey,
     queryFn: async ({ signal }) => {
       const response = await fetchFn(signal);
       return unwrap(response) || [];
     },
+    enabled,
     keepPreviousData: true,
     staleTime: 1000 * 60 * 10, // 10 minutes
     cacheTime: 10 * 60 * 30, // 30 minutes

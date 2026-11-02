@@ -62,14 +62,26 @@ const personKey = (kind, id) => `${kind}:${id}`;
  * they name site staff outright: picking the "Site staff" role, and targeting a
  * project site.
  *
- * @param {{value: object, onChange: (next: object) => void}} props
+ * `officeOnly` drops every way of naming site staff — the site role, the
+ * site mode, the include toggle and the site staff in the people picker — for
+ * the screens whose readers have no site-staff app yet (policies). The server
+ * refuses them too; hiding them here just stops offering what will not save.
+ *
+ * @param {{value: object, onChange: (next: object) => void, officeOnly?: boolean}} props
  */
-export default function AudienceSelector({ value, onChange }) {
+export default function AudienceSelector({ value, onChange, officeOnly = false }) {
   const [peopleOpen, setPeopleOpen] = useState(false);
 
   const audience = value || { mode: "all" };
   const mode = audience.mode || "all";
   const set = (patch) => onChange({ ...audience, ...patch });
+
+  const modeOptions = officeOnly
+    ? AUDIENCE_MODE_OPTIONS.filter((o) => o.value !== "sites")
+    : AUDIENCE_MODE_OPTIONS;
+  const roleOptions = officeOnly
+    ? ROLE_OPTIONS.filter((r) => !r.field)
+    : ROLE_OPTIONS;
 
   const { data: departments = [] } = useFetchSelectQuery({
     queryKey: ["roleTypeSelect"],
@@ -81,14 +93,20 @@ export default function AudienceSelector({ value, onChange }) {
     fetchFn: getSelectOfficeEmployee,
   });
 
-  const { data: fieldStaff = [] } = useFetchSelectQuery({
+  const { data: fetchedFieldStaff = [] } = useFetchSelectQuery({
     queryKey: ["fieldStaffSelect"],
     fetchFn: getFieldStaffSelect,
+    enabled: !officeOnly,
   });
+  const fieldStaff = useMemo(
+    () => (officeOnly ? [] : fetchedFieldStaff),
+    [officeOnly, fetchedFieldStaff],
+  );
 
   const { data: sites = [] } = useFetchSelectQuery({
     queryKey: ["projectSiteSelect"],
     fetchFn: getAllProjects,
+    enabled: !officeOnly,
   });
 
   const selectedRoles = audience.roles || [];
@@ -118,14 +136,15 @@ export default function AudienceSelector({ value, onChange }) {
 
   // The toggle is meaningless in the two modes that already name site staff,
   // and showing it there would imply it does something.
-  const showFieldToggle = mode === "all" || mode === "departments";
+  const showFieldToggle =
+    !officeOnly && (mode === "all" || mode === "departments");
 
   return (
     <div className="space-y-4">
       <div>
         <Label className="text-sm font-medium text-neutral-500">Audience</Label>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {AUDIENCE_MODE_OPTIONS.map((option) => {
+          {modeOptions.map((option) => {
             const active = mode === option.value;
             return (
               <button
@@ -179,7 +198,7 @@ export default function AudienceSelector({ value, onChange }) {
 
       {mode === "roles" && (
         <div className="rounded-lg border p-2">
-          {ROLE_OPTIONS.map((role) => (
+          {roleOptions.map((role) => (
             <CheckRow
               key={role.value}
               id={`role-${role.value}`}

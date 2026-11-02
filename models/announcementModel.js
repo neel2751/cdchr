@@ -20,7 +20,10 @@ export const AUDIENCE_MODES = ["all", "roles", "departments", "sites", "people"]
  * present now for the same reason: adding them later would mean rewriting
  * documents.
  */
-const audienceSchema = new mongoose.Schema(
+// Exported because policies store their audience in exactly this shape:
+// visibilityFilter() in server/announcementServer/audience.js reads the
+// `audience.*` paths, and one definition is what keeps the two agreeing.
+export const audienceSchema = new mongoose.Schema(
   {
     mode: { type: String, enum: AUDIENCE_MODES, default: "all" },
     roles: [{ type: String }],

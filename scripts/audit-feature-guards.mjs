@@ -37,6 +37,7 @@ const EXPECT = [
   },
   { file: "server/document/documentManagementServer.js", mode: "helper", exempt: [] },
   { file: "server/announcementServer/announcementServer.js", mode: "helper", exempt: [] },
+  { file: "server/policyServer/policyServer.js", mode: "helper", exempt: [] },
   { file: "server/expenseServer/expenseServer.js", mode: "helper", exempt: [] },
 ];
 

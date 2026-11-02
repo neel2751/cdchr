@@ -222,6 +222,12 @@ export const MENU = [
     icon: "Megaphone",
   },
   {
+    name: "Policies",
+    path: "/admin/policies",
+    role: ["superAdmin", "admin"],
+    icon: "BookCheck",
+  },
+  {
     name: "Audit Logs",
     path: "/admin/auditLogs",
     role: ["superAdmin"],
@@ -354,6 +360,14 @@ export const COMMONMENUITEMS = [
     path: "/admin/my-announcements",
     role: ["superAdmin", "admin", "user"],
     icon: "Megaphone",
+  },
+  // The same reasoning as My Announcements: which policies a person may read
+  // is decided per policy, on the server, not by who may open this page.
+  {
+    name: "Company Policies",
+    path: "/admin/my-policies",
+    role: ["superAdmin", "admin", "user"],
+    icon: "BookOpen",
   },
   // `hidden` entries are permission bypasses without a sidebar link. They exist
   // because proxy.js decides what an ordinary employee may open by looking at

@@ -16,6 +16,16 @@ export const dynamic = "force-dynamic";
  */
 const PUBLIC_CATEGORIES = new Set(["branding", "qr-codes"]);
 
+/**
+ * Asset categories this route never serves, to anyone.
+ *
+ * A policy can be hidden from staff, or shown only to one department, and
+ * "signed in at the same company" — all this route checks — is not that. Its
+ * files are handed out only as short-lived signed links, by
+ * server/policyServer, after asking whether this person may read this policy.
+ */
+const SIGNED_LINK_ONLY = new Set(["policies"]);
+
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -49,6 +59,10 @@ export async function GET(req, { params }) {
     }
 
     const [, tenantId, category] = key.split("/");
+
+    if (SIGNED_LINK_ONLY.has(category)) {
+      return new NextResponse("Not found", { status: 404 });
+    }
 
     if (PUBLIC_CATEGORIES.has(category)) {
       // These appear before anyone has a session: a logo on the sign-in page, a

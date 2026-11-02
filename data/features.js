@@ -179,6 +179,20 @@ export const FEATURES = [
     requires: [],
     core: false,
   },
+  {
+    key: "policies",
+    group: "Communication & files",
+    label: "Policies",
+    description:
+      "A library of company policies by category, with version history and " +
+      "control over which staff can read each one. Reading policies already " +
+      "shared is never gated.",
+    // Only the managing side, for the same reason as announcements:
+    // /admin/my-policies must keep working when the module is switched off.
+    paths: ["/admin/policies"],
+    requires: [],
+    core: false,
+  },
 ];
 
 /**
