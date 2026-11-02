@@ -77,10 +77,7 @@ const Dash = () => {
     }
   }, [data, has]);
 
-  const chartData = useMemo(
-    () => data?.last90DaysDataForChartData || [],
-    [data],
-  );
+  const hoursData = useMemo(() => data?.hoursLastFortnight || [], [data]);
 
   return (
     <main className="space-y-6 p-4 md:p-6">
@@ -96,7 +93,7 @@ const Dash = () => {
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <WhereTheyAre />
         <div className="space-y-4">
-          <HoursTrend dayData={chartData} />
+          <HoursTrend dayData={hoursData} />
           {/* Renders nothing when there are no announcements, so it costs the
               dashboard no space until a company starts using the feature. */}
           <AnnouncementsCard />

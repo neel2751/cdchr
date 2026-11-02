@@ -1,53 +1,14 @@
 "use server";
 import { connect } from "@/db/db";
+import { getWorkingDate } from "@/lib/clockTime";
+import { workedMinutes } from "@/server/clockServer/shiftCloser";
 import AttendanceModel from "@/models/attendanceModel";
+import ClockRecordModel from "@/models/clockInModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import ProjectSiteModel from "@/models/siteProjectModel";
 
-/*
-@description: This function is used to get all function for promises
-@params: none
-@returns: 4 promises Data
-* 1. get all employee summary Data like total, active, inactive, VisaExp. Employee Function Name : getEmployeeSummary
-* 2. get all offices employee summary Data  like total, active, inactive, VisaExp. Employee  Function Name : getOfficeEmployeeSummary
-* 3. get last 90 days attendance data like date, totalpay, totalhours for Chart  Function Name : getLast90DaysDataForChart
-* 4. get Today total Pay  and total hours for only for report...  Function Name : getTodayTotalPayAndHours
-*/
-export async function fetchCardDataold() {
-  try {
-    const emploeyeeData = await getEmpSummaryData();
-    const officeEmployeeData = await getOfficeEmpSummaryData();
-    const totalFullSiteData = await getTotalSiteWorkingRightCount();
-    const last90DaysDataForChart = await getLast90DaysDataForChart();
-    const currentDateTotalPay = await getTodayTotalPayAndHours();
-
-    const data = await Promise.all([
-      emploeyeeData,
-      officeEmployeeData,
-      totalFullSiteData,
-      last90DaysDataForChart,
-      currentDateTotalPay,
-    ]); // wait for both promises to resolve
-
-    const NumberOfEmployeeData = data[0];
-    const NumberOfficeEmployeeData = data[1];
-    const NumbertotalFullSiteData = data[2]; // 2th element of the array
-    const last90DaysDataForChartData = data[3]; // 3nd element of the array
-    const CurrentDayTotalPay = data[4];
-
-    return {
-      NumberOfEmployeeData,
-      NumberOfficeEmployeeData,
-      NumbertotalFullSiteData,
-      last90DaysDataForChartData,
-      CurrentDayTotalPay,
-    };
-  } catch (error) {
-    console.error(error);
-    return { status: false, message: "Server Error" };
-  }
-}
+const DAY_MS = 86400000;
 
 export async function fetchCardData() {
   try {
@@ -55,13 +16,13 @@ export async function fetchCardData() {
       NumberOfEmployeeData,
       NumberOfficeEmployeeData,
       NumbertotalFullSiteData,
-      last90DaysDataForChartData,
+      hoursLastFortnight,
       CurrentDayTotalPay,
     ] = await Promise.all([
       getEmpSummaryData(),
       getOfficeEmpSummaryData(),
       getTotalSiteWorkingRightCount(),
-      getLast90DaysDataForChart(),
+      getHoursLastFortnight(),
       getTodayTotalPayAndHours(),
     ]);
 
@@ -69,7 +30,7 @@ export async function fetchCardData() {
       NumberOfEmployeeData,
       NumberOfficeEmployeeData,
       NumbertotalFullSiteData,
-      last90DaysDataForChartData,
+      hoursLastFortnight,
       CurrentDayTotalPay,
     };
   } catch (error) {
@@ -298,58 +259,54 @@ export const getOfficeEmpSummaryData = async () => {
   }
 };
 
-// Get Last 3 Month Data for Chart
-export async function getLast90DaysDataForChart() {
-  await connect();
-  const startDate = new Date();
-  const endDate = new Date();
-  let daysToSubtract = 90;
-  startDate.setDate(endDate.getDate() - daysToSubtract);
-  const pipeline = [
-    { $unwind: "$employeAttendance" },
-    {
-      $project: {
-        day: { $dayOfMonth: "$employeAttendance.aDate" },
-        month: { $month: "$employeAttendance.aDate" },
-        year: { $year: "$employeAttendance.aDate" },
-        totalHours: "$employeAttendance.totalHours",
-        totalPay: "$employeAttendance.totalPay",
-        aDate: "$employeAttendance.aDate", // Include aDate for filtering
-      },
-    },
-    {
-      $match: {
-        aDate: {
-          $gte: startDate,
-          $lte: endDate,
-        },
-      },
-    },
-    {
-      $group: {
-        _id: { day: "$day", month: "$month", year: "$year" },
-        totalHours: { $sum: "$totalHours" },
-        // totalPay: { $sum: "$totalPay" }, // Include totalPay for filtering
-        totalPay: { $sum: { $round: ["$totalPay", 2] } },
-      },
-    },
-  ];
+/**
+ * Hours worked on each of the last fourteen days, for the dashboard chart.
+ *
+ * Read from clock records. It used to sum `totalHours` out of the site
+ * attendance collection, which nothing has written to since clocking in
+ * replaced manual site attendance — so the chart said "0 hours over the last
+ * fortnight" however many shifts had actually been worked.
+ *
+ * Hours are worked minutes — the shift less its breaks — the same figure
+ * overtime is judged on, so the two cannot disagree. A shift still open has no
+ * length yet and is left out rather than counted as zero; it lands on the
+ * chart when it is clocked out.
+ *
+ * All fourteen days come back, keyed "YYYY-MM-DD" on the UK working day, so a
+ * day nobody worked is a gap in the row and the browser never has to work out
+ * dates in its own timezone.
+ */
+export async function getHoursLastFortnight() {
   try {
-    const result = await AttendanceModel.aggregate(pipeline);
-    // make a date  string for the result
-    const formattedResult = result.map((item) => {
+    await connect();
+    const today = getWorkingDate();
+    const start = new Date(today.getTime() - 13 * DAY_MS);
+
+    const records = await ClockRecordModel.find(
+      { date: { $gte: start, $lte: today }, isDeleted: false },
+      { date: 1, clockIn: 1, clockOut: 1, breaks: 1 },
+    ).lean();
+
+    const minutesByDay = new Map();
+    for (const record of records) {
+      const minutes = workedMinutes(record);
+      if (minutes === null) continue;
+      const key = record.date.toISOString().slice(0, 10);
+      minutesByDay.set(key, (minutesByDay.get(key) || 0) + minutes);
+    }
+
+    return Array.from({ length: 14 }, (_, i) => {
+      const key = new Date(start.getTime() + i * DAY_MS)
+        .toISOString()
+        .slice(0, 10);
       return {
-        TotalHours: item.totalHours, // Remove the _id field
-        TotalPay: item.totalPay, // Remove the _id field
-        date: `${item._id.year}-${item._id.month}-${item._id.day}`,
+        date: key,
+        TotalHours: Math.round(((minutesByDay.get(key) || 0) / 60) * 100) / 100,
       };
-    }); // format the date
-    //send a date like Asc order
-    return formattedResult.sort((a, b) => {
-      return new Date(a.date) - new Date(b.date);
-    }); // sort the result by date in descending order
+    });
   } catch (error) {
-    return { status: false, message: "Error in fetching data" };
+    console.error("Error getting hours for the dashboard chart: ", error);
+    return [];
   }
 }
 

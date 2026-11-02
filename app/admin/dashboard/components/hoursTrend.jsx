@@ -28,37 +28,32 @@ import {
 const DAY_LETTER = ["S", "M", "T", "W", "T", "F", "S"];
 
 export default function HoursTrend({ dayData = [] }) {
-  const days = React.useMemo(() => {
-    const byDate = new Map(
+  // The server sends every one of the fourteen days, a day nobody worked
+  // included, so an absent Tuesday is a gap rather than a short week. See
+  // getHoursLastFortnight.
+  //
+  // Each date is a UK working day and is read as UTC. Building the days here
+  // from local midnight and calling toISOString() moved every bar back a day
+  // during BST, when local midnight is 23:00 the evening before.
+  const days = React.useMemo(
+    () =>
       (dayData || [])
         .filter((d) => d?.date)
-        .map((d) => [
-          new Date(d.date).toISOString().slice(0, 10),
-          Number(d.TotalHours) || 0,
-        ]),
-    );
-
-    // Built forward from a fixed start rather than filtered from the data, so
-    // a day nobody worked is a gap in the row instead of being missing from
-    // it. An absent Tuesday that simply is not drawn reads as a short week.
-    const out = [];
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - 13);
-
-    for (let i = 0; i < 14; i++) {
-      const day = new Date(start);
-      day.setDate(start.getDate() + i);
-      const key = day.toISOString().slice(0, 10);
-      out.push({
-        key,
-        hours: byDate.get(key) || 0,
-        weekday: day.getDay(),
-        label: day.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
-      });
-    }
-    return out;
-  }, [dayData]);
+        .map((d) => {
+          const day = new Date(`${d.date}T00:00:00Z`);
+          return {
+            key: d.date,
+            hours: Number(d.TotalHours) || 0,
+            weekday: day.getUTCDay(),
+            label: day.toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+              timeZone: "UTC",
+            }),
+          };
+        }),
+    [dayData],
+  );
 
   const peak = Math.max(...days.map((d) => d.hours), 1);
   const total = days.reduce((t, d) => t + d.hours, 0);
