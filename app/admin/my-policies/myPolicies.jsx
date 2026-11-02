@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, FileText, Loader2, Search } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  CircleAlert,
+  CircleCheck,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Search,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useFetchQuery } from "@/hooks/use-query";
 import {
+  acknowledgeMyPolicy,
   getMyPolicies,
   openMyPolicy,
 } from "@/server/policyServer/myPolicyServer";
@@ -39,9 +49,26 @@ const formatDate = (value) =>
  *
  * "Updated" stays on a policy for a month after a new version, with what
  * changed, so somebody who read the old one knows to read it again.
+ *
+ * Some policies ask to be confirmed. The button for that stays disabled until
+ * the policy has been opened — the server refuses it otherwise — because a
+ * confirmation pressed from a list, unread, is what it exists to rule out.
  */
 export default function MyPolicies() {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["myPolicies"] });
+
+  const { mutate: acknowledge, isPending: acknowledging } = useMutation({
+    mutationFn: (policyId) => acknowledgeMyPolicy(policyId),
+    onSuccess: (res) => {
+      if (!res?.success) return toast.error(res?.message || "Could not confirm");
+      toast.success(res.message || "Confirmed");
+      refresh();
+    },
+    onError: (err) => toast.error(err?.message || "Could not confirm"),
+  });
 
   const { data, isLoading, isError } = useFetchQuery({
     queryKey: ["myPolicies"],
@@ -66,6 +93,10 @@ export default function MyPolicies() {
   }, [groups, search]);
 
   const total = groups.reduce((n, g) => n + g.policies.length, 0);
+  const toConfirm = groups.reduce(
+    (n, g) => n + g.policies.filter((p) => p.requireAck && !p.acknowledgedAt).length,
+    0,
+  );
 
   return (
     <div className="p-4">
@@ -94,6 +125,14 @@ export default function MyPolicies() {
         </CardHeader>
 
         <CardContent>
+          {toConfirm ? (
+            <p className="mb-6 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <CircleAlert className="size-4 shrink-0" />
+              {toConfirm === 1
+                ? "One policy needs you to confirm you have read it."
+                : `${toConfirm} policies need you to confirm you have read them.`}
+            </p>
+          ) : null}
           {isLoading ? (
             <div className="flex h-20 items-center justify-center">
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
@@ -150,14 +189,43 @@ export default function MyPolicies() {
                               : ` · published ${formatDate(policy.publishedAt)}`}
                           </p>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openSignedFile(() => openMyPolicy(policy._id))}
-                        >
-                          <ExternalLink className="mr-1.5 size-3.5" />
-                          Open
-                        </Button>
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              await openSignedFile(() => openMyPolicy(policy._id));
+                              // Opening is what unlocks the confirm button.
+                              refresh();
+                            }}
+                          >
+                            <ExternalLink className="mr-1.5 size-3.5" />
+                            Open
+                          </Button>
+                          {policy.requireAck ? (
+                            policy.acknowledgedAt ? (
+                              <span className="flex items-center gap-1 text-xs text-green-700">
+                                <CircleCheck className="size-3.5" />
+                                Confirmed {formatDate(policy.acknowledgedAt)}
+                              </span>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  disabled={!policy.openedAt || acknowledging}
+                                  onClick={() => acknowledge(policy._id)}
+                                >
+                                  I have read and understood
+                                </Button>
+                                {!policy.openedAt ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    Open it first
+                                  </span>
+                                ) : null}
+                              </>
+                            )
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>

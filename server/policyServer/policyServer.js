@@ -9,7 +9,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { connect } from "@/db/db";
-import { recordAudit, withAudit } from "@/lib/audit";
+import { logAuditDirect, recordAudit, withAudit } from "@/lib/audit";
 import { getWorkingDate, toWorkingDate } from "@/lib/clockTime";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import {
@@ -39,6 +39,12 @@ import {
 } from "../aws/storageGuard";
 import { deleteFileFromS3, generateDownloadUrl } from "../aws/upload";
 import { getServerSideProps } from "../session/session";
+import {
+  emailPolicyReaders,
+  outstandingReaders,
+  policyReaderRows,
+  summariseReaders,
+} from "./policyReaders";
 
 /**
  * The policy library, from the side of the people who maintain it.
@@ -588,6 +594,16 @@ export async function getPolicies(filterData = {}) {
     );
     const drafted = new Set(withDraft.map(String));
 
+    // How far staff have got with each visible policy. One audience
+    // resolution per row; a page is at most 100 rows and usually 10.
+    const readers = Object.fromEntries(
+      await Promise.all(
+        rows
+          .filter((r) => r.visibleToEmployees && r.status === "active")
+          .map(async (r) => [String(r._id), summariseReaders(await policyReaderRows(r))]),
+      ),
+    );
+
     return {
       success: true,
       data: JSON.stringify(
@@ -599,6 +615,7 @@ export async function getPolicies(filterData = {}) {
           // Counted here, against the UK day, so the browser's own clock and
           // timezone cannot disagree with the reminders about what is overdue.
           daysUntilReview: daysUntilReview(r, today),
+          readers: readers[String(r._id)] || null,
         })),
       ),
       totalCount,
@@ -775,6 +792,9 @@ export const setPolicyVisibility = withAudit(
       if (!before) return fail("Policy not found");
 
       const visibleToEmployees = !!data.visibleToEmployees;
+      // Left as it was when the form does not mention it.
+      const requireAck =
+        data.requireAck === undefined ? !!before.requireAck : !!data.requireAck;
       const audience = sanitizeAudience(data.audience);
       const problem = audienceProblem(audience);
       if (problem) return fail(problem);
@@ -793,7 +813,7 @@ export const setPolicyVisibility = withAudit(
 
       const after = await PolicyModel.findByIdAndUpdate(
         before._id,
-        { visibleToEmployees, audience, updatedBy: toOid(user._id) },
+        { visibleToEmployees, audience, requireAck, updatedBy: toOid(user._id) },
         { new: true },
       ).lean();
 
@@ -802,7 +822,7 @@ export const setPolicyVisibility = withAudit(
         before,
         after,
         description: visibleToEmployees
-          ? `Showed policy "${before.title}" to ${count} ${count === 1 ? "person" : "people"}`
+          ? `Showed policy "${before.title}" to ${count} ${count === 1 ? "person" : "people"}${requireAck ? ", asking each to confirm they have read it" : ""}`
           : `Hid policy "${before.title}" from staff`,
       });
 
@@ -1498,6 +1518,137 @@ export async function getPolicyReviewsDue() {
     return none;
   }
 }
+
+/* ------------------------------------------------------------------------ *
+ * Readers
+ * ------------------------------------------------------------------------ */
+
+// One round of "please read this" email per policy per day. Enough to chase
+// people; not enough to become the thing they filter to junk.
+const NOTIFY_COOLDOWN_MS = 20 * 60 * 60 * 1000;
+
+/**
+ * Who this policy is for, and where each of them has got to with the version
+ * in force. Empty, with `visible: false`, while staff cannot see it.
+ */
+export async function getPolicyReaders(id) {
+  try {
+    const user = await requirePolicyManager();
+    if (!user) return fail("Not authorized");
+    if (!isValidObjectId(id)) return fail("Invalid policy");
+
+    await connect();
+    const policy = await PolicyModel.findOne({ _id: id, isDeleted: false }).lean();
+    if (!policy) return fail("Policy not found");
+
+    const visible = policy.visibleToEmployees && policy.status === "active";
+    const rows = visible ? await policyReaderRows(policy) : [];
+
+    return {
+      success: true,
+      data: JSON.stringify({
+        visible,
+        requireAck: !!policy.requireAck,
+        versionNumber: policy.currentVersionNumber,
+        lastNotifiedAt: policy.lastNotifiedAt,
+        // Decided here, where notifyPolicyReaders enforces it, so the button
+        // and the action cannot disagree.
+        notifyCoolingDown:
+          !!policy.lastNotifiedAt &&
+          Date.now() - new Date(policy.lastNotifiedAt).getTime() < NOTIFY_COOLDOWN_MS,
+        summary: summariseReaders(rows),
+        outstanding: outstandingReaders(policy, rows).length,
+        rows,
+      }),
+    };
+  } catch (error) {
+    console.log("Error listing policy readers:", error);
+    return fail("Could not load who has read this policy");
+  }
+}
+
+/**
+ * Email everyone who still has something to do with this policy: confirm it,
+ * if it asks for that, or else open it.
+ *
+ * Once a day at most, claimed before sending — a double click, or two
+ * managers at once, sends one round. The sending carries on after this
+ * returns, in batches, the same as announcement email: a few hundred people
+ * take a while, and nobody should watch a spinner for it. The outcome goes
+ * to the audit log.
+ */
+export const notifyPolicyReaders = withAudit(
+  "Policy.notifyReaders",
+  async (id) => {
+    try {
+      const user = await requirePolicyManager();
+      if (!user) return fail("Not authorized");
+      if (!user.tenantId) return fail("No company in context");
+      if (!isValidObjectId(id)) return fail("Invalid policy");
+
+      await connect();
+      const policy = await PolicyModel.findOne({ _id: id, isDeleted: false }).lean();
+      if (!policy) return fail("Policy not found");
+      if (!policy.visibleToEmployees || policy.status !== "active") {
+        return fail("Staff cannot see this policy yet, so there is nothing to ask them to read.");
+      }
+
+      const outstanding = outstandingReaders(policy, await policyReaderRows(policy));
+      if (!outstanding.length) {
+        return fail(
+          policy.requireAck
+            ? "Everyone has already confirmed they have read it."
+            : "Everyone has already opened it.",
+        );
+      }
+
+      const since = new Date(Date.now() - NOTIFY_COOLDOWN_MS);
+      const claim = await PolicyModel.updateOne(
+        {
+          _id: policy._id,
+          $or: [{ lastNotifiedAt: null }, { lastNotifiedAt: { $lt: since } }],
+        },
+        { lastNotifiedAt: new Date() },
+      );
+      if (!claim.modifiedCount) {
+        return fail("Staff were already emailed about this policy in the last day.");
+      }
+
+      const tenantId = String(user.tenantId);
+      emailPolicyReaders({ policy, recipients: outstanding, tenantId })
+        .then((result) =>
+          logAuditDirect({
+            actor: { _id: user._id, name: user.name, email: user.email, role: user.role },
+            action: "Policy.readersEmailed",
+            module: "Policy",
+            entityId: policy._id,
+            tenantId,
+            description: `Emailed ${result.sent} of ${outstanding.length} people to read policy "${policy.title}"`,
+            status: result.failed ? "failure" : "success",
+            metadata: { ...result, outstanding: outstanding.length },
+          }),
+        )
+        .catch((error) => console.log("[policy-mail] run failed:", error?.message));
+
+      const noEmail = outstanding.filter((r) => !r.email).length;
+      recordAudit({
+        entityId: policy._id,
+        description: `Asked ${outstanding.length} people to read policy "${policy.title}"`,
+      });
+
+      return {
+        success: true,
+        message: `Emailing ${outstanding.length - noEmail} ${outstanding.length - noEmail === 1 ? "person" : "people"}.${
+          noEmail ? ` ${noEmail} ${noEmail === 1 ? "has" : "have"} no email address.` : ""
+        }`,
+      };
+    } catch (error) {
+      console.log("Error emailing policy readers:", error);
+      return fail("Could not email staff about this policy");
+    }
+  },
+  { module: "Policy" },
+);
 
 /** Whether the signed-in user may manage policies — for conditional UI. */
 export async function canManagePolicies() {

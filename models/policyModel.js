@@ -57,6 +57,12 @@ const policySchema = new mongoose.Schema(
 
     visibleToEmployees: { type: Boolean, default: false },
     audience: { type: audienceSchema, default: () => ({}) },
+    // Ask each reader to confirm they have read and understood the version
+    // in force. Per version: a new version asks again. See PolicyReceipt.
+    requireAck: { type: Boolean, default: false },
+    // When staff were last emailed to read it. One email round a day at
+    // most — see notifyPolicyReaders.
+    lastNotifiedAt: { type: Date, default: null },
 
     // WHEN IT IS NEXT LOOKED AT. Every review — a "no changes" sign-off or a
     // new version — resets the clock to reviewIntervalMonths from that day.

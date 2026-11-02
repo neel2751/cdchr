@@ -39,6 +39,7 @@ import {
 } from "@/server/policyServer/policyServer";
 import { describeReviewDue, reviewUrgency } from "@/lib/policies";
 import PolicyDetailsForm from "../policyDetailsForm";
+import ReadersPanel from "./readersPanel";
 import ReviewPanel from "./reviewPanel";
 import VersionsPanel from "./versionsPanel";
 import VisibilityPanel from "./visibilityPanel";
@@ -204,6 +205,7 @@ export default function PolicyDetail({ id }) {
         <TabsList>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="visibility">Who can see it</TabsTrigger>
+          <TabsTrigger value="readers">Readers</TabsTrigger>
           <TabsTrigger value="review">Review</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
@@ -216,6 +218,10 @@ export default function PolicyDetail({ id }) {
             again from what was saved rather than holding the old form. */}
         <TabsContent value="visibility">
           <VisibilityPanel key={policy.updatedAt} policy={policy} />
+        </TabsContent>
+
+        <TabsContent value="readers">
+          <ReadersPanel policy={policy} />
         </TabsContent>
 
         <TabsContent value="review">

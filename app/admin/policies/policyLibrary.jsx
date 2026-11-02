@@ -344,7 +344,16 @@ export default function PolicyLibrary({ searchParams }) {
                         </TableCell>
                         <TableCell>
                           {row.visibleToEmployees ? (
-                            describeAudience(row.audience, departmentNames)
+                            <div>
+                              <div>{describeAudience(row.audience, departmentNames)}</div>
+                              {row.readers ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {row.requireAck
+                                    ? `${row.readers.acknowledged} of ${row.readers.total} confirmed`
+                                    : `${row.readers.acknowledged + row.readers.opened} of ${row.readers.total} opened`}
+                                </div>
+                              ) : null}
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-muted-foreground">
                               <EyeOff className="size-3.5" />

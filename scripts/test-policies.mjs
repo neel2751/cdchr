@@ -40,6 +40,11 @@ process.env.AWS_ACCESS_ID = "test";
 process.env.AWS_ACCESS_PORTAL_KEY = "test";
 process.env.AWS_REGION = "eu-west-2";
 process.env.AWS_BUCKET_NAME = "policy-tests-not-a-bucket";
+// And no mail server: "email the outstanding readers" runs for real in these
+// tests, and with no sender configured every send fails before leaving.
+process.env.EMAIL_HOST = "";
+process.env.EMAIL_USERNAME = "";
+process.env.EMAIL_PASSWORD = "";
 
 const MODE = process.env.TENANT_ENFORCEMENT || "shadow";
 // Company isolation is the tenant plugin's job, and shadow mode adds no
@@ -79,6 +84,8 @@ async function main() {
   const admin = await import("@/server/policyServer/policyServer");
   const reader = await import("@/server/policyServer/myPolicyServer");
   const PolicyReview = (await import("@/models/policyReviewModel")).default;
+  const PolicyReceipt = (await import("@/models/policyReceiptModel")).default;
+  const { emailPolicyReaders } = await import("@/server/policyServer/policyReaders");
   const { runPolicyReviewJob } = await import("@/server/policyServer/policyReviewJob");
   const { getWorkingDate } = await import("@/lib/clockTime");
   const { addMonthsToDay, reviewMilestone } = await import("@/lib/policies");
@@ -86,6 +93,7 @@ async function main() {
   await Promise.all([
     PolicyVersion.syncIndexes(),
     PolicyCategory.syncIndexes(),
+    (await import("@/models/policyReceiptModel")).default.syncIndexes(),
   ]);
 
   const [acme, beta] = await Promise.all([
@@ -863,6 +871,178 @@ async function main() {
       await runPolicyReviewJob({ send: fakeSend });
       assert.equal(fireMail().length, 1, "not reminded once the module was back");
     });
+
+    /* ------------------------------------------------------ acknowledging */
+
+    const myRow = async (user) => {
+      const groups = parse(await as(user, () => reader.getMyPolicies())) || [];
+      return groups.flatMap((g) => g.policies).find((p) => String(p._id) === String(fire));
+    };
+    const readerRow = (report, name) => report.rows.find((r) => r.name === name);
+    const report = async () => parse(await as(acmeAdmin, () => admin.getPolicyReaders(fire)));
+
+    await as(acmeAdmin, () =>
+      admin.setPolicyVisibility(fire, { visibleToEmployees: true, audience: { mode: "all" } }),
+    );
+
+    await check("opening a policy records it, once, under the right company", async () => {
+      const mine = () =>
+        as(acmeUser, () =>
+          PolicyReceipt.find({ policyId: fire, employeeId: acmeUser._id }).lean(),
+        );
+      // An earlier test already opened version 2 as this person.
+      const before = (await mine())[0]?.openCount || 0;
+      await as(acmeUser, () => reader.openMyPolicy(fire));
+      await as(acmeUser, () => reader.openMyPolicy(fire));
+      const receipts = await mine();
+      assert.equal(receipts.length, 1);
+      assert.equal(receipts[0].openCount, before + 2);
+      assert.equal(receipts[0].versionNumber, 2);
+      assert(receipts[0].firstOpenedAt <= receipts[0].lastOpenedAt);
+      // Checked in shadow mode too: an upsert would have stored no company.
+      assert.equal(String(receipts[0].tenantId), A);
+    });
+
+    await check("a policy that does not ask cannot be confirmed", async () => {
+      const res = await as(acmeUser, () => reader.acknowledgeMyPolicy(fire));
+      assert.equal(res.success, false);
+      assert.match(res.message, /does not ask/);
+    });
+
+    await as(acmeAdmin, () =>
+      admin.setPolicyVisibility(fire, {
+        visibleToEmployees: true,
+        audience: { mode: "all" },
+        requireAck: true,
+      }),
+    );
+
+    await check("confirming needs the policy opened first", async () => {
+      const res = await as(acmeFinance, () => reader.acknowledgeMyPolicy(fire));
+      assert.equal(res.success, false);
+      assert.match(res.message, /Open the policy/);
+      const row = await myRow(acmeFinance);
+      assert.equal(row.requireAck, true);
+      assert.equal(row.openedAt, null);
+    });
+
+    await check("once opened, confirming is recorded and keeps the first time", async () => {
+      const first = await as(acmeUser, () => reader.acknowledgeMyPolicy(fire));
+      assert.equal(first.success, true, first.message);
+      const when = (await myRow(acmeUser)).acknowledgedAt;
+      assert(when, "no acknowledgedAt on the reader's list");
+      const again = await as(acmeUser, () => reader.acknowledgeMyPolicy(fire));
+      assert.equal(again.success, true);
+      assert.equal((await myRow(acmeUser)).acknowledgedAt, when);
+    });
+
+    await check("nobody outside the audience can confirm, or be counted", async () => {
+      await as(acmeAdmin, () =>
+        admin.setPolicyVisibility(fire, {
+          visibleToEmployees: true,
+          audience: { mode: "departments", departments: [String(financeDept)] },
+        }),
+      );
+      const res = await as(acmeUser, () => reader.acknowledgeMyPolicy(fire));
+      assert.equal(res.success, false);
+      const r = await report();
+      assert.equal(readerRow(r, "Amy Acme"), undefined, "left the audience but still counted");
+      assert.equal(readerRow(r, "Fiona Finance").status, "not-opened");
+      await as(acmeAdmin, () =>
+        admin.setPolicyVisibility(fire, { visibleToEmployees: true, audience: { mode: "all" } }),
+      );
+    });
+
+    await check("the readers report: confirmed, opened, not opened", async () => {
+      await as(acmeFinance, () => reader.openMyPolicy(fire));
+      const r = await report();
+      assert.equal(r.requireAck, true);
+      assert.equal(readerRow(r, "Amy Acme").status, "acknowledged");
+      assert.equal(readerRow(r, "Fiona Finance").status, "opened");
+      assert.equal(readerRow(r, "Alan Acme").status, "not-opened");
+      if (ENFORCING) {
+        assert.deepEqual(r.summary, { total: 4, acknowledged: 1, opened: 1, notOpened: 2 });
+        assert.equal(r.outstanding, 3);
+      }
+      const forbidden = await as(acmeUser, () => admin.getPolicyReaders(fire));
+      assert.equal(forbidden.success, false);
+    });
+
+    await check("the library shows how many have confirmed", async () => {
+      const rows = parse(await as(acmeAdmin, () => admin.getPolicies({})));
+      const row = rows.find((r) => String(r._id) === String(fire));
+      assert(row.readers, "no reader summary on the row");
+      assert.equal(row.readers.acknowledged, 1);
+    });
+
+    await check("a new version asks everyone again", async () => {
+      const draft3 = await insertDraft(acmeAdmin, fire, "v3.pdf");
+      await as(acmeAdmin, () =>
+        PolicyVersion.updateOne({ _id: draft3._id }, { changeNote: "New assembly point." }),
+      );
+      const res = await as(acmeAdmin, () => admin.publishPolicyVersion(String(draft3._id)));
+      assert.equal(res.success, true, res.message);
+      const row = await myRow(acmeUser);
+      assert.equal(row.versionNumber, 3);
+      assert.equal(row.acknowledgedAt, null);
+      assert.equal(row.openedAt, null);
+      assert.equal(readerRow(await report(), "Amy Acme").status, "not-opened");
+    });
+
+    await check("another company's staff cannot confirm it", async () => {
+      const res = await as(betaAdmin, () => reader.acknowledgeMyPolicy(fire));
+      if (ENFORCING) assert.equal(res.success, false);
+      else assert.equal(res.message, "Open the policy and read it first.", "shadow mode must not filter");
+    });
+
+    await check("the reminder email asks for a confirmation and links to the reader page", async () => {
+      const mails = [];
+      const policy = await loadFire();
+      const result = await as(acmeAdmin, () =>
+        emailPolicyReaders({
+          policy: { ...policy, title: "Fire <i>Evacuation</i>" },
+          recipients: [
+            { name: "Amy Acme", email: "user@acme.test" },
+            { name: "No Email", email: "" },
+          ],
+          tenantId: A,
+          send: async (mail) => {
+            mails.push(mail);
+            return { success: true };
+          },
+          pauseMs: 0,
+        }),
+      );
+      assert.deepEqual(result, { sent: 1, failed: 0, noEmail: 1 });
+      assert.equal(mails[0].subject, "Please read and confirm: Fire <i>Evacuation</i>");
+      assert.equal(mails[0].feature, "Noreply");
+      assert(mails[0].html.includes("Fire &lt;i&gt;Evacuation&lt;/i&gt;"), "title not escaped");
+      assert(mails[0].html.includes("/admin/my-policies"), "no link to the reader page");
+      assert(mails[0].html.includes("New assembly point."), "what changed is missing");
+    });
+
+    await check("emailing the outstanding happens once a day at most", async () => {
+      const first = await as(acmeAdmin, () => admin.notifyPolicyReaders(fire));
+      assert.equal(first.success, true, first.message);
+      assert.match(first.message, /^Emailing \d+ (person|people)/);
+      const second = await as(acmeAdmin, () => admin.notifyPolicyReaders(fire));
+      assert.equal(second.success, false);
+      assert.match(second.message, /already emailed/);
+      assert.equal((await report()).notifyCoolingDown, true);
+      // Let the background send finish before anything is torn down.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    });
+
+    await check("a hidden policy cannot be sent to staff", async () => {
+      await as(acmeAdmin, () =>
+        admin.setPolicyVisibility(fire, { visibleToEmployees: false, audience: { mode: "all" } }),
+      );
+      await as(acmeAdmin, () => Policy.updateOne({ _id: fire }, { lastNotifiedAt: null }));
+      const res = await as(acmeAdmin, () => admin.notifyPolicyReaders(fire));
+      assert.equal(res.success, false);
+      assert.match(res.message, /cannot see this policy/);
+      assert.equal((await report()).visible, false);
+    });
   } finally {
     // Leave the fixtures as they were found.
     await db.collection("rolebaseds").updateMany(
@@ -871,7 +1051,13 @@ async function main() {
     );
     await db.collection("roletypes").deleteOne({ _id: financeDept });
     await db.collection("officeemployes").deleteOne({ _id: financePerson });
-    for (const name of ["policies", "policyversions", "policycategories", "policyreviews"]) {
+    for (const name of [
+      "policies",
+      "policyversions",
+      "policycategories",
+      "policyreviews",
+      "policyreceipts",
+    ]) {
       await db.collection(name).deleteMany({ tenantId: { $in: [acme._id, beta._id] } });
     }
     await db.collection("auditlogs").deleteMany({ module: "Policy" });

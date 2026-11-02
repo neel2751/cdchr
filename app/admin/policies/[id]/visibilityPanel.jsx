@@ -33,6 +33,7 @@ export default function VisibilityPanel({ policy }) {
   const queryClient = useQueryClient();
   const [visible, setVisible] = useState(!!policy.visibleToEmployees);
   const [audience, setAudience] = useState(policy.audience || { mode: "all" });
+  const [requireAck, setRequireAck] = useState(!!policy.requireAck);
 
   const nothingPublished = !policy.currentVersionId;
   const archived = policy.status === "archived";
@@ -49,11 +50,16 @@ export default function VisibilityPanel({ policy }) {
 
   const dirty =
     visible !== !!policy.visibleToEmployees ||
+    requireAck !== !!policy.requireAck ||
     JSON.stringify(audience) !== JSON.stringify(policy.audience || { mode: "all" });
 
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
-      setPolicyVisibility(policy._id, { visibleToEmployees: visible, audience }),
+      setPolicyVisibility(policy._id, {
+        visibleToEmployees: visible,
+        audience,
+        requireAck,
+      }),
     onSuccess: (res) => {
       if (!res?.success) {
         toast.error(res?.message || "Could not save");
@@ -63,6 +69,7 @@ export default function VisibilityPanel({ policy }) {
       queryClient.invalidateQueries({ queryKey: ["policy", policy._id] });
       queryClient.invalidateQueries({ queryKey: ["policies"] });
       queryClient.invalidateQueries({ queryKey: ["myPolicies"] });
+      queryClient.invalidateQueries({ queryKey: ["policyReaders", policy._id] });
     },
     onError: (err) => toast.error(err?.message || "Could not save"),
   });
@@ -102,6 +109,25 @@ export default function VisibilityPanel({ policy }) {
       </Card>
 
       <Card className={visible ? "" : "opacity-60"}>
+        <CardContent className="flex items-start justify-between gap-4 p-4">
+          <div>
+            <Label htmlFor="policy-require-ack">
+              Ask staff to confirm they have read it
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Each reader presses “I have read and understood” after opening
+              it. A new version asks everyone again.
+            </p>
+          </div>
+          <Switch
+            id="policy-require-ack"
+            checked={requireAck}
+            onCheckedChange={setRequireAck}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className={visible ? "" : "opacity-60"}>
         <CardContent className="space-y-4 p-4">
           <AudienceSelector value={audience} onChange={setAudience} officeOnly />
           {visible ? (
@@ -130,6 +156,7 @@ export default function VisibilityPanel({ policy }) {
           variant="outline"
           disabled={!dirty || isPending}
           onClick={() => {
+            setRequireAck(!!policy.requireAck);
             setVisible(!!policy.visibleToEmployees);
             setAudience(policy.audience || { mode: "all" });
           }}

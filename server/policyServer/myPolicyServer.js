@@ -2,8 +2,10 @@
 
 import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
+import { isReadOnly } from "@/lib/tenantContext";
 import PolicyCategoryModel from "@/models/policyCategoryModel";
 import PolicyModel from "@/models/policyModel";
+import PolicyReceiptModel from "@/models/policyReceiptModel";
 import PolicyVersionModel from "@/models/policyVersionModel";
 import { getViewer, visibilityFilter } from "../announcementServer/audience";
 import { generateDownloadUrl } from "../aws/upload";
@@ -67,12 +69,12 @@ export async function getMyPolicies() {
     if (!viewer) return empty;
 
     const policies = await PolicyModel.find(readableFilter(viewer))
-      .select("_id title summary categoryId currentVersionId currentVersionNumber currentPublishedAt")
+      .select("_id title summary categoryId currentVersionId currentVersionNumber currentPublishedAt requireAck")
       .sort({ title: 1 })
       .lean();
     if (!policies.length) return empty;
 
-    const [categories, versions] = await Promise.all([
+    const [categories, versions, receipts] = await Promise.all([
       PolicyCategoryModel.find({
         _id: { $in: policies.map((p) => p.categoryId) },
       })
@@ -83,9 +85,18 @@ export async function getMyPolicies() {
       })
         .select("_id changeNote effectiveDate file.fileType")
         .lean(),
+      PolicyReceiptModel.find({
+        employeeId: viewer.employeeId,
+        versionId: { $in: policies.map((p) => p.currentVersionId) },
+      })
+        .select("versionId firstOpenedAt acknowledgedAt")
+        .lean(),
     ]);
 
     const versionOf = Object.fromEntries(versions.map((v) => [String(v._id), v]));
+    // Receipts for the version in force only: a confirmation of version 2
+    // says nothing about version 3.
+    const receiptOf = Object.fromEntries(receipts.map((r) => [String(r.versionId), r]));
     const recentSince = Date.now() - RECENT_DAYS * 86400000;
 
     const groups = categories
@@ -97,6 +108,7 @@ export async function getMyPolicies() {
           .filter((p) => String(p.categoryId) === String(category._id))
           .map((p) => {
             const version = versionOf[String(p.currentVersionId)] || {};
+            const receipt = receiptOf[String(p.currentVersionId)] || {};
             const recent =
               p.currentPublishedAt &&
               new Date(p.currentPublishedAt).getTime() > recentSince;
@@ -110,6 +122,9 @@ export async function getMyPolicies() {
               changeNote: version.changeNote || "",
               fileType: version.file?.fileType || "",
               badge: recent ? (p.currentVersionNumber > 1 ? "updated" : "new") : null,
+              requireAck: !!p.requireAck,
+              openedAt: receipt.firstOpenedAt || null,
+              acknowledgedAt: receipt.acknowledgedAt || null,
             };
           }),
       }))
@@ -133,7 +148,7 @@ export async function openMyPolicy(policyId) {
       _id: createObjectId(policyId),
       ...readableFilter(viewer),
     })
-      .select("currentVersionId")
+      .select("currentVersionId currentVersionNumber")
       .lean();
     // The same answer for "does not exist" and "not for you": whether a
     // hidden policy exists is itself something a reader should not learn.
@@ -150,9 +165,108 @@ export async function openMyPolicy(policyId) {
 
     const res = await generateDownloadUrl({ key: version.file.key, expiresIn: 300 });
     if (!res?.success) return fail("Could not open the policy");
+
+    // Recorded only once the link exists: a failure to sign is not a read.
+    // And a failure to record must not stop somebody reading the policy.
+    await recordOpen(policy, viewer).catch((error) =>
+      console.log("Could not record a policy open:", error?.message),
+    );
+
     return { success: true, data: JSON.stringify({ url: res.url }) };
   } catch (error) {
     console.log("Error opening policy:", error);
     return fail("Could not open the policy");
+  }
+}
+
+/**
+ * "I have read and understood this policy" — for the version in force.
+ *
+ * Only on a policy that asks, and only after opening it: a confirmation
+ * pressed on a list without the document ever being opened is the thing an
+ * acknowledgement is meant to rule out. Pressing it twice keeps the first
+ * time, which is the one that answers "when did they confirm".
+ */
+export async function acknowledgeMyPolicy(policyId) {
+  try {
+    if (!isValidObjectId(policyId)) return fail("Invalid policy");
+    const viewer = await currentViewer();
+    if (!viewer) return fail("Policy not found");
+    if (await isReadOnly()) return fail("This session is read-only.");
+
+    const policy = await PolicyModel.findOne({
+      _id: createObjectId(policyId),
+      ...readableFilter(viewer),
+    })
+      .select("currentVersionId requireAck")
+      .lean();
+    if (!policy) return fail("Policy not found");
+    if (!policy.requireAck) {
+      return fail("This policy does not ask for a confirmation.");
+    }
+
+    const query = { versionId: policy.currentVersionId, employeeId: viewer.employeeId };
+    const receipt = await PolicyReceiptModel.findOne(query)
+      .select("firstOpenedAt acknowledgedAt")
+      .lean();
+    if (!receipt?.firstOpenedAt) {
+      return fail("Open the policy and read it first.");
+    }
+    if (receipt.acknowledgedAt) {
+      return { success: true, message: "You have already confirmed this one." };
+    }
+
+    await PolicyReceiptModel.updateOne(
+      { ...query, acknowledgedAt: null },
+      { $set: { acknowledgedAt: new Date() } },
+    );
+    return { success: true, message: "Thank you — confirmed." };
+  } catch (error) {
+    console.log("Error acknowledging policy:", error);
+    return fail("Could not record your confirmation");
+  }
+}
+
+/**
+ * Note that this person opened the version in force.
+ *
+ * Created with create() rather than an upsert, for the reason given on
+ * stamp() in myAnnouncementServer.js: under TENANT_ENFORCEMENT=shadow an
+ * upserted document would be inserted with no tenantId, while the save hook
+ * stamps it in both modes. Two opens racing to create the first receipt meet
+ * on the unique index, and the loser becomes an update.
+ *
+ * Nothing is written during a read-only support visit — the policy still
+ * opens, it is just not counted as read by someone who is not the reader.
+ */
+async function recordOpen(policy, viewer) {
+  if (await isReadOnly()) return;
+
+  const now = new Date();
+  const query = { versionId: policy.currentVersionId, employeeId: viewer.employeeId };
+  const touch = () =>
+    PolicyReceiptModel.updateOne(query, {
+      $set: { lastOpenedAt: now },
+      $inc: { openCount: 1 },
+    });
+
+  if (await PolicyReceiptModel.exists(query)) {
+    await touch();
+    return;
+  }
+
+  try {
+    await PolicyReceiptModel.create({
+      ...query,
+      policyId: policy._id,
+      versionNumber: policy.currentVersionNumber,
+      employeeKind: viewer.kind,
+      firstOpenedAt: now,
+      lastOpenedAt: now,
+      openCount: 1,
+    });
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+    await touch();
   }
 }
