@@ -12,6 +12,8 @@ import { formatDate, getUKTime } from "@/utils/time";
 import EmployeModel from "@/models/employeModel";
 import ClockRecordModel from "@/models/clockInModel";
 import { currentlyEmployedMatch } from "@/lib/employeeStatus";
+import CompanyModel from "@/models/companyModel";
+import { aroundToday, localTodayExpr } from "@/lib/resolveTimeZone";
 
 export default async function fetchEmployeeWithHoliday() {
   try {
@@ -663,6 +665,47 @@ export async function fetchLiveOfficeClock({
     // would drift across a BST change.
     const endExclusive = new Date(end.getTime() + 24 * 60 * 60 * 1000);
 
+    // With no dates asked for the board shows today, and today is not the
+    // same date everywhere: at 20:00 in London it is already tomorrow in
+    // Dhaka. So each person's day is their company's, and a clock record
+    // counts when it is dated today in the zone it was taken in.
+    const isToday = !fromDate && !toDate;
+    const now = new Date();
+    const todayWindow = aroundToday(now);
+
+    const todayStages = isToday
+      ? [
+          {
+            $lookup: {
+              from: CompanyModel.collection.name,
+              localField: "company",
+              foreignField: "_id",
+              as: "companyZone",
+            },
+          },
+          {
+            $addFields: {
+              localToday: localTodayExpr(
+                { $arrayElemAt: ["$companyZone.timeZone", 0] },
+                now,
+              ),
+            },
+          },
+          { $unset: "companyZone" },
+        ]
+      : [];
+
+    const clockDateMatch = isToday
+      ? [
+          { $gte: ["$date", todayWindow.$gte] },
+          { $lte: ["$date", todayWindow.$lte] },
+          { $eq: ["$date", localTodayExpr("$timeZone", now)] },
+        ]
+      : [
+          { $gte: ["$date", start] },
+          { $lte: ["$date", end] },
+        ];
+
     // Approved leave covering any day in the requested range. Without this the
     // table cannot tell "did not come in" apart from "booked the day off", and
     // everyone on holiday reads as absent.
@@ -670,7 +713,13 @@ export async function fetchLiveOfficeClock({
       {
         $lookup: {
           from: "leaverequests",
-          let: { eid: "$_id" },
+          let: {
+            eid: "$_id",
+            from: isToday ? "$localToday" : start,
+            to: isToday
+              ? { $add: ["$localToday", 24 * 60 * 60 * 1000] }
+              : endExclusive,
+          },
           pipeline: [
             {
               $match: {
@@ -687,8 +736,8 @@ export async function fetchLiveOfficeClock({
                               as: "d",
                               cond: {
                                 $and: [
-                                  { $gte: ["$$d", start] },
-                                  { $lt: ["$$d", endExclusive] },
+                                  { $gte: ["$$d", "$$from"] },
+                                  { $lt: ["$$d", "$$to"] },
                                 ],
                               },
                             },
@@ -717,6 +766,8 @@ export async function fetchLiveOfficeClock({
       const [employee] = await OfficeEmployeeModel.aggregate([
         { $match: { _id: createObjectId(employeeId) } },
 
+        ...todayStages,
+
         {
           $lookup: {
             from: "clockrecords",
@@ -728,8 +779,7 @@ export async function fetchLiveOfficeClock({
                     $and: [
                       { $eq: ["$employeeId", "$$eid"] },
                       { $eq: ["$isDeleted", false] },
-                      { $gte: ["$date", start] },
-                      { $lte: ["$date", end] },
+                      ...clockDateMatch,
                     ],
                   },
                 },
@@ -797,6 +847,8 @@ export async function fetchLiveOfficeClock({
     const basePipeline = [
       { $match: queryObj },
 
+      ...todayStages,
+
       {
         $lookup: {
           from: "clockrecords",
@@ -808,8 +860,7 @@ export async function fetchLiveOfficeClock({
                   $and: [
                     { $eq: ["$employeeId", "$$eid"] },
                     { $eq: ["$isDeleted", false] },
-                    { $gte: ["$date", start] },
-                    { $lte: ["$date", end] },
+                    ...clockDateMatch,
                   ],
                 },
               },

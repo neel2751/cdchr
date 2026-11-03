@@ -17,8 +17,14 @@ import {
   DEFAULT_FIXED_WEEKLY_HOURS,
 } from "@/lib/workHours";
 import { withAudit, recordAudit } from "@/lib/audit";
-import { resolveTimeZone } from "@/lib/resolveTimeZone";
-import { timeForRecord } from "@/lib/timeZone";
+import {
+  aroundToday,
+  localTodayExpr,
+  resolveTimeZone,
+  todayFor,
+} from "@/lib/resolveTimeZone";
+import { getZonedNow, timeForRecord } from "@/lib/timeZone";
+import ProjectSiteModel from "@/models/siteProjectModel";
 
 // Assign or update today's site assignment
 export const assignEmployeesToSite = withAudit(
@@ -1095,11 +1101,6 @@ export async function fetchClockRecordsTest({
 }) {
   await connect();
 
-  // normalize dates (your helper)
-  const today = normalizeDateToUTC(new Date());
-  const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
-  const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
-
   // validate optional siteId/employeeId
   if (siteId && siteId !== "All" && !isValidObjectId(siteId)) {
     return { success: false, message: "Invalid siteId" };
@@ -1107,6 +1108,17 @@ export async function fetchClockRecordsTest({
   if (employeeId && !isValidObjectId(employeeId)) {
     return { success: false, message: "Invalid employeeId" };
   }
+
+  // One employee's today is the date where they are working, which is not
+  // the server's: at 20:00 in London it is already tomorrow in Dhaka.
+  const today = employeeId
+    ? await todayFor({
+        siteId: siteId && siteId !== "All" ? siteId : null,
+        employeeId,
+      })
+    : normalizeDateToUTC(new Date());
+  const start = fromDate ? normalizeDateToUTC(new Date(fromDate)) : today;
+  const end = toDate ? normalizeDateToUTC(new Date(toDate)) : today;
 
   // Build facet pipelines:
   // assigned facet -> list of assigned employeeIds within date range (for given site if provided)
@@ -1868,6 +1880,14 @@ export async function fetchAssignedWithClocksNew({
     filter.siteId = createObjectId(siteId);
   }
 
+  // With no dates asked for the board shows today, and today is not the same
+  // date everywhere: at 20:00 in London it is already tomorrow in Dhaka. So
+  // an assignment is today's when it is dated today in its site's zone, and
+  // a clock record when it is dated today in the zone it was taken in.
+  const isToday = !fromDate && !toDate;
+  const now = new Date();
+  const todayWindow = aroundToday(now);
+
   const basePipeline = [
     { $match: filter },
     { $unwind: "$assignedEmployees" },
@@ -1882,11 +1902,33 @@ export async function fetchAssignedWithClocksNew({
         ]
       : []),
 
-    {
-      $match: {
-        assignDate: { $gte: start, $lte: end },
-      },
-    },
+    ...(isToday
+      ? [
+          { $match: { assignDate: todayWindow } },
+          {
+            $lookup: {
+              from: ProjectSiteModel.collection.name,
+              localField: "siteId",
+              foreignField: "_id",
+              as: "siteZone",
+            },
+          },
+          {
+            $match: {
+              $expr: {
+                $eq: [
+                  "$assignDate",
+                  localTodayExpr(
+                    { $arrayElemAt: ["$siteZone.timeZone", 0] },
+                    now,
+                  ),
+                ],
+              },
+            },
+          },
+          { $unset: "siteZone" },
+        ]
+      : [{ $match: { assignDate: { $gte: start, $lte: end } } }]),
 
     // -------------------------------------------
     // Lookup office and site employees
@@ -1984,8 +2026,16 @@ export async function fetchAssignedWithClocksNew({
                   { $eq: ["$isDeleted", false] },
 
                   // keep your date filter (range or exact date depending on your system)
-                  { $gte: ["$date", start] },
-                  { $lte: ["$date", end] },
+                  ...(isToday
+                    ? [
+                        { $gte: ["$date", todayWindow.$gte] },
+                        { $lte: ["$date", todayWindow.$lte] },
+                        { $eq: ["$date", localTodayExpr("$timeZone", now)] },
+                      ]
+                    : [
+                        { $gte: ["$date", start] },
+                        { $lte: ["$date", end] },
+                      ]),
                 ],
               },
             },
@@ -2319,15 +2369,23 @@ export const canEmployeeClockToday = async () => {
     if (!employeeId)
       return { success: false, message: "Please contact the admin" };
 
-    const assignDate = normalizeDateToUTC(new Date());
-
-    const result = await SiteAssignmentModel.findOne({
-      assignDate,
+    // Today is the site's own date, so a Dhaka site's day starts six hours
+    // before London's. Every zone's today is within a day of UTC's, so look
+    // there and keep the assignment dated today where its site is.
+    const now = new Date();
+    const candidates = await SiteAssignmentModel.find({
+      assignDate: aroundToday(now),
       "assignedEmployees.employeeId": createObjectId(employeeId),
     }).populate({
       path: "siteId",
-      select: "siteName",
+      select: "siteName timeZone",
     });
+    const result = candidates.find(
+      (a) =>
+        a.siteId &&
+        a.assignDate.toISOString().slice(0, 10) ===
+          getZonedNow(a.siteId.timeZone, now).date,
+    );
 
     if (result) return { success: true, data: JSON.stringify(result.siteId) };
     return { success: false, message: "Admin didn't assign site today" };
