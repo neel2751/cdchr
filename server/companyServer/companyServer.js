@@ -2,6 +2,7 @@
 import { connect } from "@/db/db";
 import { isValidObjectId } from "@/lib/mongodb";
 import CompanyModel from "@/models/companyModel";
+import { isValidTimeZone } from "@/lib/timeZone";
 
 export async function getCompanies(filterData) {
   try {
@@ -49,6 +50,8 @@ export const handleCompany = async (data, id) => {
   // make artifical  delay
   // await new Promise((resolve) => setTimeout(resolve, 1000));
   if (!data) return { success: false, message: "No Data Provided" };
+  if (data.timeZone && !isValidTimeZone(data.timeZone))
+    return { success: false, message: "Unknown time zone" };
   try {
     if (id) {
       let company = await CompanyModel.findById(id);

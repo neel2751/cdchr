@@ -1,9 +1,9 @@
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import {
+  getClockNow,
   updateClockManuallyById,
   updateClockManuallyByIdNew,
 } from "@/server/timeOffServer/updateClockServer";
-import { getUKTime } from "@/utils/time";
 import { toast } from "sonner";
 
 export const handleTimeAction = async ({
@@ -14,10 +14,22 @@ export const handleTimeAction = async ({
   actionType = null, // 'clockIn', 'clockOut', etc.
   manualTimes = null, // { clockIn, clockOut, breakIn, breakOut }
 }) => {
-  const now = getUKTime({ format: "HH:mm" });
+  // The time where the employee is working — the server knows the site's and
+  // company's zone, the admin's browser does not.
+  const clockNow = await getClockNow({
+    clockId,
+    recordType: type,
+    siteId: type === "site" ? siteId : null,
+    employeeId,
+  });
+  if (!clockNow?.success) {
+    toast.error("⚠️ Could not get the current time");
+    return;
+  }
+  const now = clockNow.time;
   const fullDate = new Date();
 
-  const date = normalizeDateToUTC(new Date());
+  const date = new Date(clockNow.date);
   const payload = {
     id: clockId,
     type, // required to know which model to update
@@ -110,13 +122,26 @@ export const handleTimeActionNew = async ({
   currentBreaks = [], // pass current breaks from UI if needed
   selectedDate = null, // date currently being viewed (defaults to today)
 }) => {
-  const now = getUKTime({ format: "HH:mm" });
+  // The time where the employee is working — the server knows the site's and
+  // company's zone, the admin's browser does not.
+  const clockNow = await getClockNow({
+    clockId,
+    recordType: "record",
+    siteId,
+    employeeId,
+  });
+  if (!clockNow?.success) {
+    toast.error("⚠️ Could not get the current time");
+    return;
+  }
+  const now = clockNow.time;
   const fullDate = new Date();
   // Use the date the admin is actually viewing so that fixing a missed
-  // clock in/out on a past date writes to that date, not today.
+  // clock in/out on a past date writes to that date, not today — and
+  // otherwise today where the employee is.
   const date = selectedDate
     ? normalizeDateToUTC(new Date(selectedDate))
-    : normalizeDateToUTC(new Date());
+    : new Date(clockNow.date);
 
   const payload = {
     id: clockId,

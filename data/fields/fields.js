@@ -1,5 +1,6 @@
 import { COUNTRIES } from "../countries";
 import { MENU } from "../menu";
+import { TIME_ZONE_OPTIONS } from "@/lib/timeZone";
 
 export const PATTERN = {
   pattern: {
@@ -795,6 +796,14 @@ export const SITEFIELD = [
     validationOptions: { required: "Site Type is required" },
   },
   {
+    name: "timeZone",
+    labelText: "Time Zone",
+    type: "select",
+    helperText:
+      "*Clock times on this site are recorded in this zone. Leave empty to use the employee's company zone, or UK time.",
+    options: TIME_ZONE_OPTIONS,
+  },
+  {
     name: "startDate",
     labelText: "Start Date",
     type: "date",
@@ -1152,6 +1161,15 @@ export const COMPANYFIELD = [
         message: "Company Name cannot be more than 20 characters",
       },
     },
+  },
+  {
+    name: "timeZone",
+    labelText: "Time Zone",
+    type: "select",
+    size: true,
+    helperText:
+      "*Office clock times for this company's staff are recorded in this zone. Leave empty for UK time.",
+    options: TIME_ZONE_OPTIONS,
   },
   {
     name: "description",

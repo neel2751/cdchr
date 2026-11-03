@@ -17,6 +17,8 @@ import {
   DEFAULT_FIXED_WEEKLY_HOURS,
 } from "@/lib/workHours";
 import { withAudit, recordAudit } from "@/lib/audit";
+import { resolveTimeZone } from "@/lib/resolveTimeZone";
+import { timeForRecord } from "@/lib/timeZone";
 
 // Assign or update today's site assignment
 export const assignEmployeesToSite = withAudit(
@@ -2078,6 +2080,7 @@ export async function fetchAssignedWithClocksNew({
         date: { $ifNull: ["$clockRecord.date", null] },
         clockIn: { $ifNull: ["$clockRecord.clockIn", null] },
         clockOut: { $ifNull: ["$clockRecord.clockOut", null] },
+        timeZone: { $ifNull: ["$clockRecord.timeZone", null] },
         breaks: { $ifNull: ["$clockRecord.breaks", []] },
       },
     },
@@ -2340,11 +2343,15 @@ export async function storeSiteEmployeeClockTime(decode) {
     const action = decode.action;
     const siteId = decode?.siteId;
 
-    const { success, date, currentTime } = await getCurrentTimeAndDate();
-    if (!success) return { success: false, message: "Error getting time" };
-
     const employeeOid = createObjectId(employeeId);
     await connect();
+
+    const current = await getCurrentTimeAndDate(
+      await resolveTimeZone({ siteId, employeeId }),
+    );
+    if (!current.success)
+      return { success: false, message: "Error getting time" };
+    const { date, instant } = current;
 
     const existing = await EmployeModel.findById(employeeOid);
     if (!existing) return { success: false, message: "Employee not found" };
@@ -2354,6 +2361,7 @@ export async function storeSiteEmployeeClockTime(decode) {
       siteId: createObjectId(siteId),
       date: date,
     });
+    const currentTime = timeForRecord(existingAttendance, current);
 
     const MIN_BREAK_DURATION_MINUTES = 30;
     const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
@@ -2369,6 +2377,8 @@ export async function storeSiteEmployeeClockTime(decode) {
         date: date,
         siteId,
         clockIn: currentTime,
+        clockInAt: instant,
+        timeZone: current.timeZone,
         status: "checked-in",
         isLocked: true,
         clockInStatus: true,
@@ -2458,7 +2468,11 @@ export async function storeSiteEmployeeClockTime(decode) {
       await SiteClockModel.updateOne(
         { employeeId: employeeOid, date: date },
         {
-          $set: { clockOut: currentTime, status: "clocked-out" },
+          $set: {
+            clockOut: currentTime,
+            clockOutAt: instant,
+            status: "clocked-out",
+          },
           // $push: {
           //   actions: {
           //     action: "clockOut",

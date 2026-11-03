@@ -44,6 +44,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import SearchDebounce from "@/components/search/searchDebounce";
 import { moveEmployeeToNewSite } from "@/server/timeOffServer/updateClockServer";
+import TimeZoneTag from "../_components/timeZoneTag";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { useCommonContext } from "@/context/commonContext";
 import { useSession } from "next-auth/react";
@@ -487,6 +488,7 @@ const EmployeeSiteManagement = () => {
                             <div className="flex items-center gap-1 text-green-600 font-medium">
                               <Clock className="h-4 w-4" />
                               {assignment.clockIn}
+                              <TimeZoneTag timeZone={assignment.timeZone} />
                             </div>
                           ) : (
                             "-"
@@ -509,6 +511,7 @@ const EmployeeSiteManagement = () => {
                             <div className="flex items-center gap-1 text-blue-600 font-medium">
                               <Clock className="h-4 w-4" />
                               {assignment.clockOut}
+                              <TimeZoneTag timeZone={assignment.timeZone} />
                             </div>
                           ) : (
                             "-"

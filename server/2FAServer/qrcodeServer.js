@@ -10,6 +10,12 @@ import { normalizeDateToUTC } from "@/lib/formatDate";
 import { format } from "date-fns";
 import { storeSiteEmployeeClockTime } from "../siteAssignmentServer/siteAssignmentServer";
 import ClockRecordModel from "@/models/clockInModel";
+import {
+  DEFAULT_TIME_ZONE,
+  getZonedNow,
+  timeForRecord,
+} from "@/lib/timeZone";
+import { resolveTimeZone } from "@/lib/resolveTimeZone";
 
 export async function getQRCodeToken(expiresIn = "20s") {
   try {
@@ -51,34 +57,21 @@ export async function verifyToken(token) {
   }
 }
 
-export async function getCurrentTimeAndDate() {
+// The date and HH:mm in the zone where the clock event happens — UK time
+// unless the site or company says otherwise. See lib/resolveTimeZone.js.
+export async function getCurrentTimeAndDate(timeZone = DEFAULT_TIME_ZONE) {
   try {
-    const formatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/London",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-
-    const parts = formatter.formatToParts(new Date());
-    const dateParts = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-
-    // Construct a valid ISO string manually (YYYY-MM-DDTHH:MM:SS)
-    const ukDate = new Date(
-      `${dateParts.year}-${dateParts.month}-${dateParts.day}T${dateParts.hour}:${dateParts.minute}:${dateParts.second}`
-    );
-
-    const currentTime = format(ukDate, "HH:mm");
-    const date = ukDate.toISOString().split("T")[0];
-
-    return { success: true, date, currentTime };
+    const now = getZonedNow(timeZone);
+    return {
+      success: true,
+      date: now.date,
+      currentTime: now.time,
+      instant: now.instant,
+      timeZone: now.timeZone,
+    };
   } catch (error) {
-    console.error("Error getting UK time:", error);
-    return { success: false, message: "Error getting current UK time" };
+    console.error("Error getting current time:", error);
+    return { success: false, message: "Error getting current time" };
   }
 }
 
@@ -311,9 +304,6 @@ export async function storeClockTime(token, codeSiteId, action) {
     if (!employeeId || !action)
       return { success: false, message: "Invalid token" };
 
-    const { success, date, currentTime } = await getCurrentTimeAndDate();
-    if (!success) return { success: false, message: "Error getting time" };
-
     const isValidId = isValidObjectId(employeeId);
     if (!isValidId) return { success: false, message: "Invalid Employee Id" };
 
@@ -334,10 +324,18 @@ export async function storeClockTime(token, codeSiteId, action) {
       const existing = await OfficeEmployeeModel.findById(employeeOid);
       if (!existing) return { success: false, message: "Employee not found" };
 
+      const current = await getCurrentTimeAndDate(
+        await resolveTimeZone({ employeeId }),
+      );
+      if (!current.success)
+        return { success: false, message: "Error getting time" };
+      const { date, instant } = current;
+
       const existingAttendance = await ClockModel.findOne({
         employeeId: employeeOid,
         date: date,
       });
+      const currentTime = timeForRecord(existingAttendance, current);
 
       const MIN_BREAK_DURATION_MINUTES = 30;
       const MIN_WORK_HOURS_TO_CLOCK_OUT = 2;
@@ -352,6 +350,8 @@ export async function storeClockTime(token, codeSiteId, action) {
           employeeId: employeeOid,
           date: date,
           clockIn: currentTime,
+          clockInAt: instant,
+          timeZone: current.timeZone,
           clockInStatus: true,
         }).save();
         return { success: true, message: "Clocked In", employeeId };
@@ -417,7 +417,7 @@ export async function storeClockTime(token, codeSiteId, action) {
         await ClockModel.updateOne(
           { employeeId: employeeOid, date: date },
           {
-            $set: { clockOut: currentTime },
+            $set: { clockOut: currentTime, clockOutAt: instant },
           }
         );
 
@@ -468,8 +468,12 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
 
     // Identify Location Type
     const locationType = codeSiteId ? "site" : "office";
-    const { success, date, currentTime } = await getCurrentTimeAndDate();
-    if (!success) return { success: false, message: "Error getting time" };
+    const current = await getCurrentTimeAndDate(
+      await resolveTimeZone({ siteId: codeSiteId, employeeId }),
+    );
+    if (!current.success)
+      return { success: false, message: "Error getting time" };
+    const { date, instant } = current;
 
     const clockData = {
       employeeId,
@@ -478,6 +482,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
       siteId: codeSiteId ? codeSiteId : undefined,
       action,
       date,
+      timeZone: current.timeZone,
     };
 
     // 3 Find or Create attendance record
@@ -485,6 +490,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
       employeeId: createObjectId(employeeId),
       date: date,
     });
+    const currentTime = timeForRecord(existingRecord, current);
 
     if (!existingRecord && action !== "clockIn") {
       return { success: false, message: "You must clock in first." };
@@ -499,6 +505,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
       await ClockRecordModel.create({
         ...clockData,
         clockIn: currentTime,
+        clockInAt: instant,
         clockInStatus: true,
       });
       return { success: true, message: "Clocked In", employeeId };
@@ -588,6 +595,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
           {
             $set: {
               clockOut: currentTime,
+              clockOutAt: instant,
               overtime: 0,
               status: "completed",
             },

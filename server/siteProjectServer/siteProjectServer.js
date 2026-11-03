@@ -1,6 +1,7 @@
 "use server";
 import { connect } from "@/db/db";
 import ProjectSiteModel from "@/models/siteProjectModel";
+import { isValidTimeZone } from "@/lib/timeZone";
 
 // # THIS IS THE WORKING ON THE NEW VERSION
 export const searchSiteProjectByKeywordNew = async (filterData) => {
@@ -57,6 +58,8 @@ export const searchSiteProjectByKeywordNew = async (filterData) => {
 
 // # UPDATE A SPECIFIC SITE PROJECT INFORMATION BY ID
 export const updateSiteProjectById = async (data, id) => {
+  if (data?.timeZone && !isValidTimeZone(data.timeZone))
+    return { success: false, message: "Unknown time zone" };
   try {
     await connect();
     if (id) {

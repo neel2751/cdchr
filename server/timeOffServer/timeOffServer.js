@@ -755,6 +755,7 @@ export async function fetchLiveOfficeClock({
             clockRecordId: { $ifNull: ["$clockRecord._id", null] },
             clockIn: "$clockRecord.clockIn",
             clockOut: "$clockRecord.clockOut",
+            timeZone: { $ifNull: ["$clockRecord.timeZone", null] },
 
             // ⭐ MULTI BREAKS HERE
             breaks: { $ifNull: ["$clockRecord.breaks", []] },
@@ -833,6 +834,7 @@ export async function fetchLiveOfficeClock({
           clockRecordId: { $ifNull: ["$clockRecord._id", null] },
           clockIn: "$clockRecord.clockIn",
           clockOut: "$clockRecord.clockOut",
+          timeZone: { $ifNull: ["$clockRecord.timeZone", null] },
 
           // ⭐ MULTI BREAKS
           breaks: { $ifNull: ["$clockRecord.breaks", []] },

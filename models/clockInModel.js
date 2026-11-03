@@ -48,6 +48,11 @@ const clockInSchema = new Schema(
       type: Number,
       default: 0,
     },
+    // Zone the HH:mm times above are in; missing means UK time. The *At
+    // fields hold the exact moment a scan happened. See lib/timeZone.js.
+    timeZone: String,
+    clockInAt: Date,
+    clockOutAt: Date,
     clockInLocation: String,
     clockBy: String,
     status: String,

@@ -29,6 +29,17 @@ const siteClockSchema = new mongoose.Schema(
       type: String,
       match: /^([01]\d|2[0-3]):([0-5]\d)$/,
     },
+    // Zone the HH:mm times above are in; missing means UK time. The *At
+    // fields hold the exact moment a scan happened. See lib/timeZone.js.
+    timeZone: {
+      type: String,
+    },
+    clockInAt: {
+      type: Date,
+    },
+    clockOutAt: {
+      type: Date,
+    },
     clockInLocation: {
       type: String,
     },

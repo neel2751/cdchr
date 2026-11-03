@@ -10,6 +10,12 @@ const projectSiteSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // IANA zone clock times on this site are taken in. Unset means the
+    // employee's company decides, then UK time. See lib/resolveTimeZone.js.
+    timeZone: {
+      type: String,
+      required: false,
+    },
     isActive: {
       type: Boolean,
       default: true,

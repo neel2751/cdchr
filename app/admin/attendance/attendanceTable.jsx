@@ -54,6 +54,7 @@ import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { handleTimeActionNew } from "../_components/handleTimeAction";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import { BreaksCell } from "../siteAssignEmployee/test";
+import TimeZoneTag from "../_components/timeZoneTag";
 import { sendNotification } from "@/server/attendanceServer/notificationServer";
 import { useBankHoliday } from "@/lib/holiday";
 
@@ -550,6 +551,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                             <div className="flex items-center gap-1 text-green-600 font-medium">
                               <Clock className="h-4 w-4" />
                               {assignment.clockIn}
+                              <TimeZoneTag timeZone={assignment.timeZone} />
                             </div>
                           ) : (
                             "-"
@@ -572,6 +574,7 @@ const EmployeeSiteManagement = ({ searchParams }) => {
                             <div className="flex items-center gap-1 text-blue-600 font-medium">
                               <Clock className="h-4 w-4" />
                               {assignment.clockOut}
+                              <TimeZoneTag timeZone={assignment.timeZone} />
                             </div>
                           ) : (
                             "-"

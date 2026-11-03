@@ -16,6 +16,53 @@ import EmployeModel from "@/models/employeModel";
 import { calculateDurationNew, formatMinutesNew } from "@/lib/utils";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
+import { resolveTimeZone } from "@/lib/resolveTimeZone";
+import {
+  DEFAULT_TIME_ZONE,
+  getZonedNow,
+  timeForRecord,
+} from "@/lib/timeZone";
+
+const CLOCK_MODELS = {
+  record: ClockRecordModel,
+  site: SiteClockModel,
+  office: ClockModel,
+};
+
+/**
+ * "Now" for an admin's clock in / break / clock out button: the date and
+ * HH:mm where the employee is working, not on the admin's own clock. An
+ * existing record answers in the zone it was opened in.
+ *
+ * `recordType` names the collection `clockId` lives in: "record" for
+ * ClockRecord, "site" for SiteClock, "office" for the legacy Clock.
+ */
+export async function getClockNow({
+  clockId = null,
+  recordType = "record",
+  siteId = null,
+  employeeId = null,
+}) {
+  try {
+    await connect();
+    const current = getZonedNow(await resolveTimeZone({ siteId, employeeId }));
+
+    const model = CLOCK_MODELS[recordType];
+    const record =
+      model && clockId && isValidObjectId(clockId)
+        ? await model.findById(createObjectId(clockId)).select("timeZone").lean()
+        : null;
+
+    return {
+      success: true,
+      date: current.date,
+      time: timeForRecord(record, current),
+    };
+  } catch (error) {
+    console.error("Error in getClockNow:", error);
+    return { success: false, message: "Error getting current time" };
+  }
+}
 
 export const updateClockManuallyById = withAudit(
   "Clock.update",
@@ -78,6 +125,10 @@ export const updateClockManuallyById = withAudit(
       });
     } else {
       const normalizedDate = date;
+      const timeZone = await resolveTimeZone({
+        siteId: type === "site" ? siteId : null,
+        employeeId,
+      });
       beforeDoc = await model
         .findOne({
           employeeId: createObjectId(employeeId),
@@ -98,6 +149,7 @@ export const updateClockManuallyById = withAudit(
             employeeId,
             siteId: type === "site" ? createObjectId(siteId) : undefined,
             date: normalizedDate,
+            timeZone,
           },
         },
         { new: true, upsert: true },
@@ -252,6 +304,7 @@ export const updateClockManuallyByIdNew = withAudit(
         date: normalizedDate,
         ...(siteId ? { siteId: createObjectId(siteId) } : { siteId: null }),
       };
+      const timeZone = await resolveTimeZone({ siteId, employeeId });
 
       updatedDoc = await ClockRecordModel.findOneAndUpdate(
         query,
@@ -261,6 +314,7 @@ export const updateClockManuallyByIdNew = withAudit(
             employeeId: createObjectId(employeeId),
             date: normalizedDate,
             ...(siteId ? { siteId: createObjectId(siteId) } : {}),
+            timeZone,
           },
         },
         { new: true, upsert: true },
@@ -476,6 +530,7 @@ export async function reportAllAttendanceData() {
       "Total Break Time",
       "Final Work Hours",
       "Status",
+      "Time Zone",
     ];
 
     // 4. Format the Rows
@@ -517,6 +572,8 @@ export async function reportAllAttendanceData() {
         formatMinutesNew(totalBreakMinutes),
         formatMinutesNew(finalWorkMinutes),
         log.status || "",
+        // Records from before zones existed were all taken in UK time.
+        log.timeZone || DEFAULT_TIME_ZONE,
       ];
     });
 
