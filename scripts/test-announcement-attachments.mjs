@@ -10,6 +10,9 @@
  *   MONGO_DB_URL="mongodb://127.0.0.1:27017/cdchr_dev?replicaSet=rs0" \
  *   TENANT_ENFORCEMENT=enforce npm run announcements:attachments:test
  *
+ * The last check covers the general uploader in server/aws/upload.js, whose
+ * signed links had the same empty-body checksum problem.
+ *
  * Needs the same local database and fixtures as scripts/test-announcements.mjs.
  */
 import assert from "node:assert";
@@ -89,6 +92,7 @@ async function main() {
   const { actAs } = await import("@/scripts/lib/session-stub");
   const Company = (await import("@/models/companyModel")).default;
   const attachments = await import("@/server/announcementServer/announcementAttachments");
+  const upload = await import("@/server/aws/upload");
 
   const [acme, beta] = await Promise.all([
     Company.findOne({ slug: "acme" }).lean(),
@@ -260,6 +264,28 @@ async function main() {
     );
     assert.equal(res.success, false);
     assert(!objects.has(key), "the oversize object was left in storage");
+  });
+
+  // The app's general uploader (hooks/useUploader.js) signs its links in
+  // server/aws/upload.js, with a client of its own and the same SDK default.
+  await check("the general uploader's links carry no empty-body checksum either", async () => {
+    const res = await as(acmeSuper, () =>
+      upload.generatePreSignedUrl({
+        path: "documents",
+        fileName: "passport.png",
+        contentType: "image/png",
+        fileSize: 5,
+      }),
+    );
+    assert.equal(res.success, true, res.message);
+    assert.equal(new URL(res.url).searchParams.get("x-amz-checksum-crc32"), null);
+    const sent = await put(res.url, Buffer.from("hello"), "image/png");
+    assert.equal(sent.status, 200);
+
+    const part = await as(acmeSuper, () =>
+      upload.getPresignedURLAWS("upload-id", 1, "big-video.mp4"),
+    );
+    assert.equal(new URL(part.url).searchParams.get("x-amz-checksum-crc32"), null);
   });
 
   await mongoose.disconnect();
