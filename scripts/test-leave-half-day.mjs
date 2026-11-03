@@ -11,6 +11,10 @@
  * request, and editing one) and adminEmployeeLeaveRequest (an admin recording
  * leave for somebody) — against a company set up through the real setup flow.
  *
+ * The last section is who may change whose leave: editing took the request id
+ * and the employee from the browser and checked neither, and the booking
+ * engine itself was exported, so any signed-in user could call it directly.
+ *
  * Needs a LOCAL database — it writes.
  *
  *   MONGO_DB_URL="mongodb://127.0.0.1:27017/cdchr_dev?replicaSet=rs0" \
@@ -52,10 +56,8 @@ async function main() {
   const CommonLeave = (await import("@/models/commonLeaveModel")).default;
   const LeaveRequest = (await import("@/models/leaveRequestModel")).default;
   const { completeLeaveSetup } = await import("@/server/leaveServer/leaveSetupServer");
-  const { storeEmployeeLeaveData } = await import("@/server/leaveServer/leaveRequestServer");
-  const { adminEmployeeLeaveRequest } = await import(
-    "@/server/leaveServer/leaveEmployeeServer"
-  );
+  const leaveActions = await import("@/server/leaveServer/leaveRequestServer");
+  const { storeEmployeeLeaveData, adminEmployeeLeaveRequest } = leaveActions;
   const { currentLeaveYear } = await import("@/lib/leaveYear");
   const { readDayLength, daysCharged } = await import("@/lib/leaveDayLength");
 
@@ -89,6 +91,36 @@ async function main() {
   const employeeId = String(founder._id);
   const superAdmin = { _id: employeeId, name: "Founder", email, role: "superAdmin", tenantId };
   const plainUser = { ...superAdmin, role: "user" };
+
+  // A colleague with no say over anybody's leave but their own. Made before
+  // the setup, so the setup gives them entitlements too.
+  const colleagueEmail = `colleague.${uniq()}@half-day-test.invalid`;
+  const colleagueDoc = await runWithTenant(tenantId, () =>
+    OfficeEmploye.create({
+      name: "Colleague",
+      email: colleagueEmail,
+      phoneNumber: Number(`78${Math.floor(Math.random() * 100000000)}`),
+      password: "$2a$10$notarealhashnotarealhashno",
+      roleType: "Staff",
+      department: department._id,
+      company: company._id,
+      employeType: "Full-Time",
+      immigrationType: "British",
+      joinDate: new Date(2020, 0, 1),
+      dayPerWeek: 5,
+      isActive: true,
+      isSuperAdmin: false,
+      delete: false,
+    }),
+  );
+  const colleagueId = String(colleagueDoc._id);
+  const colleague = {
+    _id: colleagueId,
+    name: "Colleague",
+    email: colleagueEmail,
+    role: "user",
+    tenantId,
+  };
 
   const as = (user, fn) =>
     runWithTenant(tenantId, async () => {
@@ -339,6 +371,104 @@ async function main() {
     assert(still, "the original request was cancelled");
     assert.equal(String(still._id), String(original._id));
     assert.deepEqual(await balance("Annual Leave"), before);
+  });
+
+  /* --- who may change whose leave --------------------------------------- */
+
+  await check("only the two guarded actions can be called from a browser", async () => {
+    // Every export of a "use server" file is an endpoint. The booking engine
+    // takes the employee and the approver from its caller, so it must not be one.
+    assert.deepEqual(Object.keys(leaveActions).sort(), [
+      "adminEmployeeLeaveRequest",
+      "storeEmployeeLeaveData",
+    ]);
+  });
+
+  const founderRequestOn = async (date) => {
+    const booked = await as(superAdmin, () =>
+      storeEmployeeLeaveData({ leaveType: "Annual Leave", dayLength: "full", leaveDates: [date] }),
+    );
+    assert.equal(booked.success, true, booked.message);
+    const [request] = await requestsOn(date);
+    return request;
+  };
+
+  await check("a colleague cannot edit somebody else's request", async () => {
+    const original = await founderRequestOn(day(10));
+    const before = await balance("Annual Leave");
+
+    const res = await as(colleague, () =>
+      storeEmployeeLeaveData(
+        { leaveType: "Annual Leave", dayLength: "full", leaveDates: [day(11)] },
+        String(original._id),
+      ),
+    );
+    assert.equal(res.success, false);
+    assert.equal(res.message, "Leave request not found");
+
+    const [still] = await requestsOn(day(10));
+    assert.equal(String(still?._id), String(original._id), "the request was changed");
+    assert.deepEqual(await balance("Annual Leave"), before);
+  });
+
+  await check("naming another employee in the form does not get round it", async () => {
+    const original = await founderRequestOn(day(14));
+    const res = await as(colleague, () =>
+      storeEmployeeLeaveData(
+        {
+          employeeId,
+          leaveType: "Annual Leave",
+          dayLength: "full",
+          leaveDates: [day(15)],
+        },
+        String(original._id),
+      ),
+    );
+    assert.equal(res.success, false);
+    assert.equal(String((await requestsOn(day(14)))[0]?._id), String(original._id));
+  });
+
+  await check("a colleague can still edit their own request", async () => {
+    const booked = await as(colleague, () =>
+      storeEmployeeLeaveData({ leaveType: "Annual Leave", dayLength: "full", leaveDates: [day(16)] }),
+    );
+    assert.equal(booked.success, true, booked.message);
+    const own = await runWithTenant(tenantId, () =>
+      LeaveRequest.findOne({ employeeId: colleagueId, leaveDates: day(16), leaveStatus: "Pending" }).lean(),
+    );
+    const res = await as(colleague, () =>
+      storeEmployeeLeaveData(
+        { leaveType: "Annual Leave", dayLength: "Second Half", leaveDates: [day(16)] },
+        String(own._id),
+      ),
+    );
+    assert.equal(res.success, true, res.message);
+    const now = await runWithTenant(tenantId, () =>
+      LeaveRequest.findOne({ employeeId: colleagueId, leaveDates: day(16), leaveStatus: "Pending" }).lean(),
+    );
+    assert.equal(now.isHalfDay, true);
+  });
+
+  await check("somebody who runs leave can edit anybody's, and it stays theirs", async () => {
+    const own = await runWithTenant(tenantId, () =>
+      LeaveRequest.findOne({ employeeId: colleagueId, leaveDates: day(16), leaveStatus: "Pending" }).lean(),
+    );
+    const res = await as(superAdmin, () =>
+      storeEmployeeLeaveData(
+        { leaveType: "Annual Leave", dayLength: "full", leaveDates: [day(17)] },
+        String(own._id),
+      ),
+    );
+    assert.equal(res.success, true, res.message);
+    // Booked to the colleague, whose request it was, not to the admin editing it.
+    const moved = await runWithTenant(tenantId, () =>
+      LeaveRequest.findOne({
+        leaveDates: day(17),
+        leaveStatus: { $in: ["Pending", "Approved"] },
+        isDeleted: false,
+      }).lean(),
+    );
+    assert.equal(String(moved.employeeId), colleagueId);
   });
 
   /* ---------------------------------------------------------------------- */

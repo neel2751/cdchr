@@ -17,7 +17,7 @@ import { AddLeaveRequest } from "../leaveRequest/request";
 import { isAfter } from "date-fns";
 import { toast } from "sonner";
 import { useSubmitMutation } from "@/hooks/use-mutate";
-import { adminEmployeeLeaveRequest } from "@/server/leaveServer/leaveEmployeeServer";
+import { adminEmployeeLeaveRequest } from "@/server/leaveServer/leaveRequestServer";
 import {
   sickNoteField,
   useSickNoteUpload,

@@ -5,7 +5,13 @@ import LeaveRequestModel from "@/models/leaveRequestModel";
 import { getServerSideProps } from "../session/session";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import { differenceInDays, weeksToDays } from "date-fns";
-import { createObjectId, withTransaction } from "@/lib/mongodb";
+import {
+  createObjectId,
+  isValidObjectId,
+  withTransaction,
+} from "@/lib/mongodb";
+import { permissionRefusal } from "@/lib/actionAccess";
+import { getCommonSpecificLeave } from "./getLeaveServer";
 import {
   adjustLeaveData,
   hasSufficientLeaveBalance,
@@ -125,6 +131,25 @@ function resolveSickNote({ leaveType, leaveDates, sickNote, uploadedBy }) {
   };
 }
 
+// The permission that lets somebody book and change leave for other people.
+const LEAVE_MANAGERS = ["/admin/leaveManagement"];
+
+/** The employee a live leave request belongs to, as a string, or null. */
+async function requestOwner(requestId) {
+  if (!isValidObjectId(requestId)) return null;
+  const request = await LeaveRequestModel.findOne({
+    _id: createObjectId(requestId),
+    isDeleted: false,
+  })
+    .select("employeeId")
+    .lean();
+  return request?.employeeId ? String(request.employeeId) : null;
+}
+
+/**
+ * An employee's own leave request: a new one for whoever is signed in, or an
+ * edit of one — their own, or anybody's for somebody who runs leave.
+ */
 export async function storeEmployeeLeaveData(data, requestId) {
   try {
     await connect();
@@ -136,9 +161,21 @@ export async function storeEmployeeLeaveData(data, requestId) {
     if (!asked.ok) return { success: false, message: asked.message };
 
     if (requestId) {
+      // Whose request it is comes from the request, never from the form: the
+      // form's employeeId is whatever the browser sent.
+      const owner = await requestOwner(requestId);
+      if (!owner) return { success: false, message: "Leave request not found" };
+
+      // Your own request, or anybody's if you run leave. The same answer as
+      // "not found" otherwise, so an id cannot be probed for whose it is.
+      if (owner !== String(employeeId)) {
+        const denied = await permissionRefusal(LEAVE_MANAGERS);
+        if (denied) return { success: false, message: "Leave request not found" };
+      }
+
       const response = await editLeaveRequestAdvanced({
         requestIds: [requestId],
-        employeeId: data.employeeId || employeeId,
+        employeeId: owner,
         newLeaveDates: data.leaveDates,
         leaveType: asked.leaveType,
         isHalfDay: asked.isHalfDay,
@@ -182,6 +219,80 @@ export async function storeEmployeeLeaveData(data, requestId) {
   }
 }
 
+/**
+ * An admin records leave for an employee, approved as it is entered.
+ *
+ * Guarded because it is an addressable endpoint: without the check any
+ * signed-in member of staff could book approved leave against anybody's
+ * balance, with themselves recorded as the approver.
+ *
+ * Full days or half days, of any leave type — see readDayLength(). The same
+ * clash rules as an employee's own request: a full day cannot land on a day
+ * already booked, and a half day only on the other half of one.
+ */
+export async function adminEmployeeLeaveRequest(data) {
+  const denied = await permissionRefusal(LEAVE_MANAGERS);
+  if (denied) return denied;
+
+  try {
+    await connect();
+    const { props } = await getServerSideProps();
+    const adminId = props?.session?.user?._id;
+
+    const asked = readDayLength(data);
+    if (!asked.ok) return { success: false, message: asked.message };
+
+    const { employeeId, leaveDates = [] } = data;
+    if (!isValidObjectId(employeeId)) {
+      return { success: false, message: "Choose an employee" };
+    }
+    // Historical records belong to the leave year of the days taken, not the
+    // year the admin happens to be entering them in.
+    const earliestLeaveDate = [...leaveDates]
+      .map((date) => new Date(date))
+      .sort((a, b) => a - b)[0];
+    const leaveYear = getLeaveYearString(earliestLeaveDate || new Date());
+    const commonLeave = await getCommonSpecificLeave({
+      employeeId,
+      leaveYear,
+      specificLeave: asked.leaveType,
+    });
+
+    if (!commonLeave)
+      return {
+        success: false,
+        message: "Leave Not Found Use the entitlement Tab",
+      };
+
+    if (asked.isHalfDay) {
+      const overlapCheck = await validateOverlappingHalfDayLeave(
+        employeeId,
+        leaveDates,
+        asked.halfDayType
+      );
+      if (!overlapCheck.success) return overlapCheck;
+
+      return await addHalfDayLeave({
+        data: { ...data, leaveType: asked.leaveType, halfDayType: asked.halfDayType },
+        employeeId,
+        adminId,
+      });
+    }
+
+    const overlapCheck = await validateOverlappingLeave(employeeId, leaveDates);
+    if (!overlapCheck.success) return overlapCheck;
+
+    return await addLeaveRequest({
+      data: { ...data, leaveType: asked.leaveType },
+      employeeId,
+      adminId,
+    });
+  } catch (error) {
+    console.log(error);
+    return { success: false, message: "Could not add the leave" };
+  }
+}
+
 // Five superseded functions were removed from this file: addLeaveRequestOld,
 // addLeaveRequestNew, addHalfDayLeaveOld, addHalfDayLeaveNew and
 // editLeaveRequestOld.
@@ -192,11 +303,17 @@ export async function storeEmployeeLeaveData(data, requestId) {
 // carried the fractional-balance defect that silently dropped a requested day
 // from the record, months after the supported path had it fixed.
 //
-// What survives below is the whole supported surface: addLeaveRequest,
+// What survives below is the whole supported engine: addLeaveRequest,
 // addHalfDayLeave, editLeaveRequest, editLeaveRequestAdvanced and
 // editHalfDayLeave. If a name here looks like it is missing a "new" or
 // "advanced" variant, it is not — this is the one.
-export async function addLeaveRequest({
+//
+// None of them is exported, for the reason above. They take the employee and
+// the approver from their caller, so as endpoints any signed-in user could book
+// approved leave for anybody or rewrite anybody's requests. They are reached
+// only through the two guarded actions in this file, storeEmployeeLeaveData and
+// adminEmployeeLeaveRequest, which decide those from the session.
+async function addLeaveRequest({
   data,
   employeeId,
   adminId,
@@ -449,7 +566,7 @@ export async function addLeaveRequest({
  * Every year's balance is planned before any is saved, so a booking that
  * crosses into a leave year with nothing set up changes nothing at all.
  */
-export async function addHalfDayLeave({
+async function addHalfDayLeave({
   data,
   employeeId,
   adminId,
@@ -617,7 +734,7 @@ export async function addHalfDayLeave({
   };
 }
 
-export async function editLeaveRequestAdvanced({
+async function editLeaveRequestAdvanced({
   requestIds, // array of old LeaveRequest IDs
   employeeId,
   newLeaveDates,
@@ -631,9 +748,11 @@ export async function editLeaveRequestAdvanced({
   return await withTransaction(async (session) => {
     const mongooseId = createObjectId(employeeId);
 
-    // 1️⃣ Fetch old leaves
+    // 1️⃣ Fetch old leaves — this employee's only, so an id belonging to
+    // somebody else is simply not found.
     const oldLeaves = await LeaveRequestModel.find({
       _id: { $in: requestIds },
+      employeeId: mongooseId,
       leaveStatus: { $in: ["Pending", "Approved"] },
       isDeleted: false,
     }).session(session);
