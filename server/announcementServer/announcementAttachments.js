@@ -1,10 +1,17 @@
 "use server";
 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
+import {
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { tenantAssetKey } from "@/lib/tenantAssets";
+import { isReadOnly } from "@/lib/tenantContext";
 import { withAudit, recordAudit } from "@/lib/audit";
 import AnnouncementModel from "@/models/announcementModel";
 import RoleBasedModel from "@/models/rolebasedModel";
@@ -34,6 +41,10 @@ const s3 = new S3Client({
     accessKeyId: process.env.AWS_ACCESS_ID,
     secretAccessKey: process.env.AWS_ACCESS_PORTAL_KEY,
   },
+  // Without this the SDK puts a checksum of the *empty* body it signed into
+  // every presigned PUT URL (x-amz-checksum-crc32=AAAAAA==), and storage then
+  // rejects the real file for not matching it.
+  requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
 async function requireAuthor() {
@@ -62,63 +73,112 @@ function safeName(name) {
     .slice(-120);
 }
 
+/** Where this company's announcement attachments live, ending in "/". */
+const attachmentPrefix = (tenantId) =>
+  `${tenantAssetKey({ tenantId, category: "announcements" })}/`;
+
 /**
- * Store one attachment and return the metadata the form should keep.
+ * Attachments are uploaded in three steps, because the file does not pass
+ * through this server — server actions accept at most 1 MB, and an
+ * attachment may be up to 25:
  *
- * Uploaded through the server rather than a browser-signed PUT because the
- * announcement may not exist yet — the form uploads while the author is still
- * writing — and a signed URL handed to the browser is authorised before we know
- * whether the draft will ever be saved.
+ *   1. startAnnouncementAttachment   checks the author, the size and the
+ *                                    storage allowance, and signs a PUT for
+ *                                    one exact key
+ *   2. the browser PUTs the file straight to storage
+ *   3. finishAnnouncementAttachment  checks the object really is there, under
+ *                                    this company, at an allowed size, and
+ *                                    returns the metadata the form keeps
+ *
+ * Signed for a key rather than for an announcement, because the form uploads
+ * while the author is still writing and the announcement may not exist yet.
+ * A file uploaded for a draft that is never saved is orphaned in the bucket
+ * and swept by the media tooling, like any other detached file.
  *
  * The storage allowance is checked BEFORE the bytes are written. Without this
  * an announcement is a way around the per-company cap that every other upload
  * path enforces.
- *
- * @param {FormData} formData with a "file" entry
  */
-export const uploadAnnouncementAttachment = withAudit(
+export async function startAnnouncementAttachment(data = {}) {
+  try {
+    const user = await requireAuthor();
+    if (!user) return fail("Not authorized");
+    const tenantId = user.tenantId;
+    if (!tenantId) return fail("No company in context");
+    if (await isReadOnly()) return fail("This session is read-only.");
+
+    const fileSize = Number(data.fileSize) || 0;
+    if (fileSize <= 0) return fail("That file is empty.");
+    if (fileSize > MAX_BYTES) {
+      return fail(`Attachments are limited to ${MAX_BYTES / (1024 * 1024)} MB.`);
+    }
+
+    const room = await assertStorageAllows(tenantId, fileSize);
+    if (!room.allowed) return fail(room.message);
+
+    // The random part keeps the key unguessable and stops two files of the
+    // same name overwriting each other.
+    const key = `${attachmentPrefix(tenantId)}${randomUUID()}-${safeName(data.fileName)}`;
+
+    // Content type and length are part of the signature, so the PUT must send
+    // exactly the file that was checked above.
+    const url = await getSignedUrl(
+      s3,
+      new PutObjectCommand({
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: key,
+        ContentType: String(data.contentType || "") || "application/octet-stream",
+        ContentLength: fileSize,
+      }),
+      { expiresIn: 600 }
+    );
+
+    noteStorageDelta(tenantId, fileSize);
+
+    return { success: true, data: JSON.stringify({ url, key }) };
+  } catch (error) {
+    console.log("Error starting announcement attachment:", error);
+    return fail("Could not start the upload");
+  }
+}
+
+/**
+ * Confirm an uploaded attachment and return the metadata the form should keep.
+ *
+ * Nothing the browser says about the file is believed except its display
+ * name: the key must sit under this company's announcements prefix, and the
+ * type and size are read back from storage.
+ */
+export const finishAnnouncementAttachment = withAudit(
   "Announcement.attach",
-  async (formData) => {
+  async (data = {}) => {
     try {
       const user = await requireAuthor();
       if (!user) return fail("Not authorized");
-
       const tenantId = user.tenantId;
       if (!tenantId) return fail("No company in context");
 
-      const file = formData?.get?.("file");
-      if (!file || typeof file.arrayBuffer !== "function") {
-        return fail("No file received");
+      const key = String(data.key || "");
+      if (!key.startsWith(attachmentPrefix(tenantId)) || key.includes("..")) {
+        return fail("That file does not belong to this company.");
       }
-      if (file.size > MAX_BYTES) {
-        return fail(
-          `Attachments are limited to ${MAX_BYTES / (1024 * 1024)} MB.`
+
+      let head;
+      try {
+        head = await s3.send(
+          new HeadObjectCommand({ Bucket: process.env.AWS_BUCKET_NAME, Key: key })
         );
+      } catch {
+        return fail("The upload did not arrive. Try again.");
       }
 
-      const room = await assertStorageAllows(tenantId, file.size || 0);
-      if (!room.allowed) return fail(room.message);
+      const fileSize = Number(head.ContentLength) || 0;
+      if (fileSize > MAX_BYTES) {
+        await deleteFileFromS3(key).catch(() => {});
+        return fail(`Attachments are limited to ${MAX_BYTES / (1024 * 1024)} MB.`);
+      }
 
-      const fileName = safeName(file.name);
-      const key = tenantAssetKey({
-        tenantId,
-        category: "announcements",
-        // Prefixed with a timestamp so two files of the same name do not
-        // overwrite each other.
-        parts: [`${Date.now()}-${fileName}`],
-      });
-
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: process.env.AWS_BUCKET_NAME,
-          Key: key,
-          Body: Buffer.from(await file.arrayBuffer()),
-          ContentType: file.type || "application/octet-stream",
-        })
-      );
-
-      noteStorageDelta(tenantId, file.size || 0);
-
+      const fileName = safeName(data.fileName);
       recordAudit({
         description: `Uploaded announcement attachment ${fileName}`,
       });
@@ -128,12 +188,12 @@ export const uploadAnnouncementAttachment = withAudit(
         data: JSON.stringify({
           key,
           fileName,
-          fileType: file.type || "application/octet-stream",
-          fileSize: file.size || 0,
+          fileType: head.ContentType || "application/octet-stream",
+          fileSize,
         }),
       };
     } catch (error) {
-      console.log("Error uploading announcement attachment:", error);
+      console.log("Error finishing announcement attachment:", error);
       return fail("Could not upload the file");
     }
   },

@@ -95,7 +95,7 @@ function sanitizeInput(data = {}) {
     category: oneOf(data.category, CATEGORIES, "general"),
     priority: oneOf(data.priority, PRIORITIES, "normal"),
     requireAck: !!data.requireAck,
-    // Each entry was produced by uploadAnnouncementAttachment, which is where
+    // Each entry was produced by finishAnnouncementAttachment, which is where
     // the storage allowance and the tenant-prefixed key are enforced. Only the
     // metadata is copied through — a caller cannot invent a key here and have
     // it served, because getAttachmentUrl re-checks ownership before signing.

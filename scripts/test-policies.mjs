@@ -357,6 +357,9 @@ async function main() {
       assert(key.startsWith(`tenants/${A}/policies/${fire}/`), key);
       assert.match(key, /\/[0-9a-f-]{36}-Fire plan _v1_\.pdf$/);
       assert(url.includes("X-Amz-Signature"), "not a signed URL");
+      // The SDK's default signs a CRC32 of the empty body it was given, which
+      // real storage would hold the uploaded file to and refuse.
+      assert.equal(new URL(url).searchParams.get("x-amz-checksum-crc32"), null);
     });
 
     await check("a file from another policy's or company's folder is refused", async () => {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -60,10 +61,16 @@ import {
 } from "@/server/announcementServer/announcementServer";
 import {
   deleteAnnouncementAttachment,
-  uploadAnnouncementAttachment,
+  finishAnnouncementAttachment,
+  startAnnouncementAttachment,
 } from "@/server/announcementServer/announcementAttachments";
 import AudienceSelector from "./audienceSelector";
 import { CATEGORY_OPTIONS, PRIORITY_OPTIONS } from "./constants";
+
+// The same limits the server holds: 10 is what sanitizeInput keeps, 25 MB is
+// MAX_BYTES in announcementAttachments.js.
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 /** A Date (or ISO string) as the value a datetime-local input wants. */
 function toLocalInput(value) {
@@ -167,7 +174,8 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
       : emptyDraft
   );
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  // {name, percent} while a file is on its way up, otherwise null.
+  const [uploading, setUploading] = useState(null);
   const [confirming, setConfirming] = useState(false);
 
   const set = (name, value) => setValues((v) => ({ ...v, [name]: value }));
@@ -191,29 +199,73 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
 
   const recipientCount = reach?.count ?? null;
 
-  const onFilesPicked = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    setUploading(true);
+  /**
+   * Each file goes straight to storage on a signed PUT — see
+   * announcementAttachments.js for why it cannot come through a server action.
+   * Files are sent one at a time so the progress shown is for one file.
+   */
+  const uploadOne = async (file) => {
+    const started = await startAnnouncementAttachment({
+      fileName: file.name,
+      contentType: file.type,
+      fileSize: file.size,
+    });
+    if (!started?.success) throw new Error(started?.message);
+    const { url, key } = JSON.parse(started.data);
+
     try {
-      for (const file of files) {
-        const body = new FormData();
-        body.append("file", file);
-        const res = await uploadAnnouncementAttachment(body);
-        if (res?.success) {
-          const attachment = JSON.parse(res.data);
-          setValues((v) => ({
-            ...v,
-            attachments: [...v.attachments, attachment],
-          }));
-        } else {
-          toast.error(res?.message || `Could not upload ${file.name}`);
-        }
-      }
-    } finally {
-      setUploading(false);
-      e.target.value = "";
+      await axios.put(url, file, {
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        onUploadProgress: (e) =>
+          setUploading({
+            name: file.name,
+            percent: e.total ? Math.round((e.loaded * 100) / e.total) : 0,
+          }),
+      });
+    } catch {
+      throw new Error("The upload was interrupted. Try again.");
     }
+
+    const finished = await finishAnnouncementAttachment({ key, fileName: file.name });
+    if (!finished?.success) throw new Error(finished?.message);
+    return JSON.parse(finished.data);
+  };
+
+  const onFilesPicked = async (e) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!picked.length) return;
+
+    const room = MAX_ATTACHMENTS - values.attachments.length;
+    if (picked.length > room) {
+      toast.error(
+        room > 0
+          ? `Only ${room} more ${room === 1 ? "file fits" : "files fit"}; the limit is ${MAX_ATTACHMENTS}.`
+          : `The limit is ${MAX_ATTACHMENTS} files.`
+      );
+    }
+
+    for (const file of picked.slice(0, Math.max(room, 0))) {
+      // Turned away here as well as on the server, so a file that is too big
+      // is refused before it is uploaded rather than after.
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.error(
+          `${file.name} is ${formatBytes(file.size)}; the limit is ${formatBytes(MAX_ATTACHMENT_BYTES)}.`
+        );
+        continue;
+      }
+      setUploading({ name: file.name, percent: 0 });
+      try {
+        const attachment = await uploadOne(file);
+        setValues((v) => ({
+          ...v,
+          attachments: [...v.attachments, attachment],
+        }));
+      } catch (error) {
+        toast.error(error?.message || `Could not upload ${file.name}`);
+      }
+    }
+    setUploading(null);
   };
 
   const removeAttachment = async (attachment) => {
@@ -236,6 +288,11 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
    * @param {boolean} thenPublish send it as well as saving it
    */
   const save = async (thenPublish) => {
+    // A file still on its way up is not in `values` yet, and would be lost.
+    if (uploading) {
+      toast.error("Wait for the attachment to finish uploading.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -392,7 +449,10 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={uploading}
+                      disabled={
+                        !!uploading ||
+                        values.attachments.length >= MAX_ATTACHMENTS
+                      }
                       onClick={() =>
                         document.getElementById("attachments")?.click()
                       }
@@ -404,9 +464,10 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
                       )}
                       Attach files
                     </Button>
-                    <span className="text-xs text-neutral-500">
-                      Up to 10 files, 25 MB each. Counts towards your storage
-                      allowance.
+                    <span className="min-w-0 truncate text-xs text-neutral-500">
+                      {uploading
+                        ? `Uploading ${uploading.name}… ${uploading.percent}%`
+                        : `Up to ${MAX_ATTACHMENTS} files, 25 MB each. Counts towards your storage allowance.`}
                     </span>
                   </div>
                   <input
@@ -649,7 +710,7 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
                     type="button"
                     className="w-full"
                     size="lg"
-                    disabled={saving || !canSend}
+                    disabled={saving || !!uploading || !canSend}
                     onClick={() => setConfirming(true)}
                     title={
                       !canSend
@@ -669,7 +730,7 @@ export default function AnnouncementForm({ announcement, showHeader = true }) {
                   type="submit"
                   variant="outline"
                   className="w-full"
-                  disabled={saving}
+                  disabled={saving || !!uploading}
                 >
                   {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
                   Save {alreadyPublished ? "changes" : "as draft"}

@@ -70,6 +70,10 @@ const s3 = new S3Client({
     accessKeyId: process.env.AWS_ACCESS_ID,
     secretAccessKey: process.env.AWS_ACCESS_PORTAL_KEY,
   },
+  // Without this the SDK puts a checksum of the *empty* body it signed into
+  // every presigned PUT URL (x-amz-checksum-crc32=AAAAAA==), and storage then
+  // rejects the real file for not matching it.
+  requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
 /**
