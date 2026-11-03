@@ -298,8 +298,9 @@ export function hasStatutoryFloor(leaveType) {
  * go looking for.
  */
 export const HALF_DAY_EXPLANATION =
-  "Half days are not a leave type. Any leave can be booked as a half day — " +
-  "the request carries it, and half a day is deducted from that type's balance.";
+  "Any leave can be booked as a half day — there is no separate type to add. " +
+  "When booking, choose Morning or Afternoon instead of Full day, and half a " +
+  "day comes off that leave type's balance.";
 
 /** The leave year start months, for the setup screen. */
 export const LEAVE_YEAR_MONTHS = [

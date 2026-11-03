@@ -19,6 +19,11 @@ import { useSubmitMutation } from "@/hooks/use-mutate";
 import { storeEmployeeLeaveData } from "@/server/leaveServer/leaveRequestServer";
 import { AddEmploeeLeave } from "../addEmployeeLeave/addEmplyoeeLeave";
 import { sickNoteField, useSickNoteUpload } from "./sick-note-field";
+import { dayLengthField } from "./day-length-field";
+import { dayLengthOf, daysCharged } from "@/lib/leaveDayLength";
+
+// A new request starts as full days; the radio needs a value to show.
+const NEW_REQUEST = { dayLength: "full" };
 
 export default function LeaveContainer() {
   const { isClosedDay } = useBankHolidayRule();
@@ -45,12 +50,12 @@ export default function LeaveContainer() {
   });
 
   const handleAdd = () => {
-    setInitialValues(null);
+    setInitialValues(NEW_REQUEST);
     setIsEdit(false);
     setShowDialog(true);
   };
   const handleEdit = (item) => {
-    setInitialValues(item);
+    setInitialValues({ ...item, dayLength: dayLengthOf(item) });
     setIsEdit(true);
     setShowDialog(true);
   };
@@ -90,14 +95,16 @@ export default function LeaveContainer() {
     // const totalCount = differenceInDays(leaveEndDate, leaveStartDate) + 1;
 
     const result = leaveTypes.find((item) => item.label === leaveType);
+    // A half day takes half a day per date off the balance.
+    const charged = daysCharged(leaveDates.length, data.dayLength);
     if (!initialValues?._id) {
-      if (result?.total < leaveDates.length)
+      if (result?.total < charged)
         return toast.warning(
           `${leaveType} is only available for ${result?.total} days`
         );
       if (
         (!leaveType === "Annual Leave" || !leaveType === "Unpaid Leave") &&
-        leaveDates.length > result?.remaining
+        charged > result?.remaining
       )
         return toast.warning(
           `You have only ${result?.remaining} days left for ${leaveType}`
@@ -120,6 +127,7 @@ export default function LeaveContainer() {
         required: "Please select a leave type",
       },
     },
+    dayLengthField,
     // {
     //   name: "leaveStartDate",
     //   labelText: "Start Date",

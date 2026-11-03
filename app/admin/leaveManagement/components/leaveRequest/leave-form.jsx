@@ -52,6 +52,9 @@ const LeaveForm = ({
             fields={fields}
             onSubmit={handleSubmit}
             initialValues={initialValues}
+            // Said outright: GlobalForm otherwise reads "Update" whenever it has
+            // any initial values, and a new request now starts with some.
+            btnName={isEdit ? "Update" : "Submit"}
             // The negative margins bleed the bar through this container's p-6
             // so it spans the full dialog width and sits flush at the bottom.
             footerClassName={

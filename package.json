@@ -29,6 +29,7 @@
     "leave:test:ops": "node --import ./scripts/lib/action-loader.mjs scripts/test-leave-entitlement-ops.mjs",
     "leave:test:carry": "node --import ./scripts/lib/alias-loader.mjs scripts/test-carry-forward.mjs",
     "leave:test:planner": "node --import ./scripts/lib/alias-loader.mjs scripts/test-holiday-planner.mjs",
+    "leave:test:half-day": "node --import ./scripts/lib/action-loader.mjs scripts/test-leave-half-day.mjs",
     "ui:test:ticker": "node --import ./scripts/lib/alias-loader.mjs scripts/test-ticker.mjs",
     "leave:migrate:carry-mode": "node scripts/migrate-carry-forward-mode.mjs",
     "clock:dedupe": "node scripts/dedupe-clock-records.mjs",

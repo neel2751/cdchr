@@ -22,6 +22,7 @@ import {
   sickNoteField,
   useSickNoteUpload,
 } from "../leaveRequest/sick-note-field";
+import { dayLengthField } from "../leaveRequest/day-length-field";
 
 export const AddEmploeeLeave = () => {
   const { isClosedDay } = useBankHolidayRule();
@@ -30,7 +31,7 @@ export const AddEmploeeLeave = () => {
   // Memoised: GlobalForm resets whenever `initialValues` changes identity, so a
   // fresh object each render would reset the form on every keystroke.
   const defaultValues = React.useMemo(
-    () => ({ leaveSubmitDate: new Date() }),
+    () => ({ leaveSubmitDate: new Date(), dayLength: "full" }),
     []
   );
 
@@ -65,23 +66,9 @@ export const AddEmploeeLeave = () => {
         required: "Please select a leave type",
       },
     },
-    {
-      name: "halfDayType",
-      labelText: "Half Day Type",
-      type: "select",
-      showIf: {
-        field: "leaveType",
-        value: "Half Day",
-      },
-      options: [
-        { label: "First Half", value: "First Half" },
-        { label: "Second Half", value: "Second Half" },
-      ],
-      size: true,
-      validationOptions: {
-        required: "Please select a half day type",
-      },
-    },
+    // Any leave type can be a half day. This used to appear only for a type
+    // called "Half Day", which the setup no longer creates — so it never did.
+    dayLengthField,
     // {
     //   name: "leaveStartDate",
     //   labelText: "Start Date",

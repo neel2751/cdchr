@@ -177,7 +177,7 @@ export const FormRadio = ({ field }) => {
             <RadioGroup
               onValueChange={onChange}
               value={value}
-              className="flex space-x-4"
+              className="flex flex-wrap gap-x-4 gap-y-2"
             >
               {field.options.map((option) => (
                 <div key={option.value} className="flex items-center space-x-2">
@@ -197,6 +197,9 @@ export const FormRadio = ({ field }) => {
           </div>
         )}
       />
+      {field.description && (
+        <p className="text-xs text-muted-foreground">{field.description}</p>
+      )}
       {errors[field.name] && (
         <p className="text-sm text-destructive">
           {errors[field.name]?.message}

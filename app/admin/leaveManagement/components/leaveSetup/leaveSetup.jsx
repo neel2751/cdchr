@@ -5,9 +5,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   AlertTriangle,
+  CalendarClock,
   CalendarRange,
   CheckCircle2,
-  Info,
   Loader2,
   Lock,
   ShieldAlert,
@@ -346,10 +346,21 @@ export default function LeaveSetup() {
             </p>
           )}
 
-          <p className="flex gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-            <Info className="mt-0.5 size-3.5 shrink-0" />
-            <span>{setup.halfDayExplanation}</span>
-          </p>
+          {/* Not a checkbox, because there is nothing to switch on: half days
+              are built in. Shown like a leave type so it is found where
+              people look for it. */}
+          <div className="flex items-start gap-2.5 rounded-md border border-primary/30 bg-primary/5 p-3">
+            <CalendarClock className="mt-0.5 size-4 shrink-0 text-primary" />
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="text-sm font-medium">Half days</span>
+                <Badge variant="secondary">always available</Badge>
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {setup.halfDayExplanation}
+              </span>
+            </span>
+          </div>
         </CardContent>
       </Card>
 

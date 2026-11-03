@@ -17,6 +17,11 @@ import React from "react";
 import { toast } from "sonner";
 import { useBankHolidayRule } from "@/lib/holiday";
 import { sickNoteField, useSickNoteUpload } from "./sick-note-field";
+import { dayLengthField } from "./day-length-field";
+import { dayLengthOf, daysCharged } from "@/lib/leaveDayLength";
+
+// A new request starts as full days; the radio needs a value to show.
+const NEW_REQUEST = { dayLength: "full" };
 
 const LeaveRequestNew = ({
   showDialog,
@@ -29,6 +34,15 @@ const LeaveRequestNew = ({
   //   const [initialValues, setInitialValues] = React.useState(null);
 
   const { isClosedDay } = useBankHolidayRule();
+
+  // Memoised: GlobalForm resets whenever its initial values change identity.
+  const formValues = React.useMemo(
+    () =>
+      initialValues
+        ? { ...initialValues, dayLength: dayLengthOf(initialValues) }
+        : NEW_REQUEST,
+    [initialValues]
+  );
 
   const { data: leaveTypes = [] } = useFetchSelectQuery({
     queryKey: ["leave-types"],
@@ -66,7 +80,8 @@ const LeaveRequestNew = ({
       return toast.warning(noteResult.message);
     }
 
-    const totalCount = leaveDates?.length || 0;
+    // A half day takes half a day per date off the balance.
+    const totalCount = daysCharged(leaveDates?.length || 0, data.dayLength);
     const payload = { ...data, sickNote: noteResult.sickNote, totalCount };
 
     const result = newData?.leaveData?.find(
@@ -98,6 +113,7 @@ const LeaveRequestNew = ({
         required: "Please select a leave type",
       },
     },
+    dayLengthField,
     // Leave is booked as a list of individual days — the same shape the server
     // stores and the admin form sends. A start/end pair was dropped on the way
     // in, so a request made here never reached the balance engine.
@@ -143,7 +159,8 @@ const LeaveRequestNew = ({
             <GlobalForm
               fields={fields}
               onSubmit={handleSubmit}
-              initialValues={initialValues}
+              initialValues={formValues}
+              btnName={initialValues?._id ? "Update" : "Submit"}
               // Pinned to the bottom like the admin forms. The negative margins
               // bleed the bar through this container's p-6 so it spans the full
               // dialog width.
