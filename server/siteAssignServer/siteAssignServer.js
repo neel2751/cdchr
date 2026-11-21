@@ -1,16 +1,21 @@
 "use server";
 import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { getSiteById } from "../siteProjectServer/siteProjectServer";
-import { getEmployeById } from "../officeServer/officeServer";
+import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { connect } from "@/db/db";
 import { getServerSideProps } from "../session/session";
-import { createObjectId } from "@/lib/mongodb";
+import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { checkPermission } from "../permissionServer/permissionServer";
 import { featureRefusal } from "@/lib/requireFeature";
+import { permissionRefusal } from "@/lib/actionAccess";
 
 // Site managers belong to the site projects module — see data/features.js. The
 // plan check is repeated per action because each is a directly callable POST
 // endpoint, not because proxy.js is unreliable.
+
+// The screen that hands out manager links. Not exported: every export of a
+// "use server" module must be an async function.
+const MANAGERS_SCREEN = "/admin/siteAssign";
 
 export async function getAllSiteAssign(filterData) {
   if (!filterData)
@@ -165,39 +170,51 @@ export async function handleSiteAssignManager(data, id) {
   if (!data) return { success: false, message: "No data provided" };
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
+  // A manager link decides which sites somebody can see and change (see
+  // lib/siteAccess.js), so writing one is the Site Managers screen's job.
+  // Before this, any signed-in account could make itself manager of any site.
+  const denied = await permissionRefusal([MANAGERS_SCREEN]);
+  if (denied) return denied;
   try {
-    // check if employed id and  site id exists in database with status true and delete false to already assigned error
+    await connect();
     const proId = data?.projectSiteID;
     const roleId = data?.roleId;
+    if (!proId || !roleId || !isValidObjectId(proId) || !isValidObjectId(roleId))
+      return { success: false, message: "Required fields are missing" };
+
+    const startDate = data?.startDate ? new Date(data.startDate) : null;
+    const endDate = data?.endDate ? new Date(data.endDate) : null;
+    if (!startDate || Number.isNaN(startDate.getTime()))
+      return { success: false, message: "Start date is required" };
+    if (endDate && Number.isNaN(endDate.getTime()))
+      return { success: false, message: "Invalid end date" };
+    if (endDate && endDate < startDate)
+      return { success: false, message: "End date is before the start date" };
+
     const siteData = await isSiteandNameisExists(id, proId, roleId);
     if (!siteData?.success) return siteData;
-    //Getting the site information to check if it exists
     const siteInfo = await getSiteById(proId);
     if (!siteInfo?.success) return siteInfo;
 
-    const employeInfo = await getEmployeById(roleId);
-    if (!employeInfo?.success)
+    const employee = await OfficeEmployeeModel.findById(roleId)
+      .select("_id")
+      .lean();
+    if (!employee)
       return { success: false, message: `Failed to retrieve employee` };
 
-    const info = JSON.parse(employeInfo?.data);
-    const password = info?.password;
-    const email = info?.email;
-
-    // we have to add permission to the site assign manager
-    if (!proId || !roleId || !password || !email)
-      return { success: false, message: "Required fields are missing" };
+    // The link names a person and a site for a period, and nothing else. It
+    // used to carry a copy of the person's email and password hash, which
+    // went stale on every password change and was one more place a password
+    // could leak from. Sign-in uses the staff account itself.
+    const fields = { projectSiteID: proId, roleId, startDate, endDate };
 
     if (id) {
-      const updateAssign = {
-        password,
-        email,
-        projectSiteID: proId,
-        roleId: roleId,
-        isActive: true,
-      };
       const updateAssignData = await SiteAssignManagerModel.updateOne(
         { _id: id },
-        { $set: updateAssign }
+        {
+          $set: { ...fields, isActive: true },
+          $unset: { email: "", password: "" },
+        }
       ).exec();
 
       if (!updateAssignData)
@@ -210,7 +227,14 @@ export async function handleSiteAssignManager(data, id) {
       // generate the Random Interger using  crypto
       const loginSiteId = crypto.randomUUID();
       //   const loginSiteId = randomInt(1000000, 9999999).toString();
-      const assignData = { ...data, loginSiteId, email, password };
+      // Named fields only: spreading the caller's object let it set anything
+      // on the document, `isActive` and `isDelete` included.
+      //
+      // Active from the start. The model defaults `isActive` to false and
+      // nothing here set it, so every new manager was saved switched off and
+      // managed nothing until somebody happened to edit the link — editing is
+      // what switched it on.
+      const assignData = { ...fields, loginSiteId, isActive: true };
 
       const result = await assignSiteData(assignData);
       if (!result) return { success: false, message: "Failed to Assign" };
@@ -311,6 +335,8 @@ export const handleSiteAssignManagerStatus = async (data) => {
   if (!data) return { success: false, message: "Not found" };
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
+  const denied = await permissionRefusal([MANAGERS_SCREEN]);
+  if (denied) return denied;
   try {
     const id = data?.id;
     const isActive = !data?.status;
@@ -329,6 +355,8 @@ export const handleSiteAssignManagerDelete = async (data) => {
   if (!data) return { success: false, message: "Not found" };
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
+  const denied = await permissionRefusal([MANAGERS_SCREEN]);
+  if (denied) return denied;
   try {
     const id = data?.id;
     const isActive = false;

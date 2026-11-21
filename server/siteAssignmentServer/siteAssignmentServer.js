@@ -21,6 +21,11 @@ import { toDayKey } from "@/lib/bankHolidays";
 import { getWorkSettings } from "../settingsServer/workSettings";
 import { getBankHolidays } from "../holidayServer/holidayServer";
 import { permissionRefusal } from "@/lib/actionAccess";
+import {
+  getSiteScope,
+  scopedSiteMatch,
+  siteRefusal,
+} from "@/lib/siteAccess";
 
 /**
  * fetchFilterClockRecordData backs /admin/filterAttendance — everybody's clock
@@ -62,6 +67,11 @@ export const assignEmployeesToSite = withAudit(
     if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
       return { success: false, message: "Select at least one employee" };
     }
+
+    // Only onto a site the caller manages. See lib/siteAccess.js.
+    const scope = await getSiteScope();
+    const siteDenied = siteRefusal(scope, siteId, { write: true });
+    if (siteDenied) return siteDenied;
 
     const today = new Date(assignDate).toISOString().split("T")[0];
     const date = new Date(`${today}T00:00:00.000Z`);
@@ -109,6 +119,19 @@ export const assignEmployeesToSite = withAudit(
         success: false,
         message:
           "Some employees are already assigned to another site on this date. Enable move option to reassign them.",
+      };
+    }
+
+    // Moving someone takes them off another site, which is that site's
+    // manager's call, not this caller's.
+    const foreignSites = employeesToMove.filter(
+      (m) => siteRefusal(scope, m.fromSiteId, { write: true }),
+    );
+    if (moveExisting && foreignSites.length > 0) {
+      return {
+        success: false,
+        message:
+          "Some employees are assigned to a site you do not manage on this date.",
       };
     }
 
@@ -238,6 +261,8 @@ export const getTodayAssignedEmployeesBySite = async (siteId) => {
   // Returns a bare array, not the usual { success } envelope, so a refusal
   // object would be read as one assigned employee. Empty list is the refusal.
   if (await featureRefusal("siteProjects")) return [];
+  const scope = await getSiteScope();
+  if (scope?.selfOnly || siteRefusal(scope, siteId)) return [];
 
   const today = new Date().setHours(0, 0, 0, 0);
   const assignment = await SiteAssignmentModel.findOne({
@@ -252,11 +277,19 @@ export const getTodayAssignedEmployees = async () => {
   const refusal = await featureRefusal("siteProjects");
   if (refusal) return refusal;
 
+  const scope = await getSiteScope();
+  if (!scope) return { success: false, message: "Not signed in" };
+  if (scope.selfOnly) {
+    return { success: false, message: "You do not have access to this" };
+  }
+  const mySites = scopedSiteMatch(scope);
+
   const today = new Date().toISOString().split("T")[0];
   const date = new Date(`${today}T00:00:00.000Z`);
 
   const assignment = await SiteAssignmentModel.find({
     assignDate: date,
+    ...(mySites ? { siteId: mySites } : {}),
   })
     .populate({
       path: "assignedEmployees.employeeId",
@@ -281,6 +314,19 @@ export async function fetchClockRecordsTest({
   paymentType = null,
 }) {
   await connect();
+
+  // Reception and site-wide staff read any site; a site employee reads only
+  // their own records; a site manager must name a site they manage. These
+  // took any employee and site id from the caller. See lib/siteAccess.js.
+  const scope = await getSiteScope();
+  if (!scope) return { success: false, message: "Not signed in", data: "[]" };
+  if (scope.selfOnly) {
+    employeeId = String(scope.user._id);
+  } else if (!scope.all) {
+    const named = siteId && siteId !== "All" ? siteId : null;
+    const siteDenied = siteRefusal(scope, named);
+    if (siteDenied) return { ...siteDenied, data: "[]" };
+  }
 
   // normalize dates (your helper)
   const today = getWorkingDate();
@@ -874,6 +920,20 @@ export async function fetchClockRecordsTestOffice({
   paymentType = null,
 }) {
   await connect();
+
+  // Reception and site-wide staff read any site; a site employee reads only
+  // their own records; a site manager must name a site they manage. These
+  // took any employee and site id from the caller. See lib/siteAccess.js.
+  const scope = await getSiteScope();
+  if (!scope) return { success: false, message: "Not signed in", data: "[]" };
+  if (scope.selfOnly) {
+    employeeId = String(scope.user._id);
+  } else if (!scope.all) {
+    const named = siteId && siteId !== "All" ? siteId : null;
+    const siteDenied = siteRefusal(scope, named);
+    if (siteDenied) return { ...siteDenied, data: "[]" };
+  }
+
   const today = getWorkingDate();
   const start = fromDate ? toWorkingDate(fromDate) : today;
   const end = toDate ? toWorkingDate(toDate) : today;
@@ -1043,6 +1103,13 @@ export async function fetchAssignedWithClocksNew({
 }) {
   await connect();
 
+  // The board answers for the sites the caller manages, not whichever site id
+  // the browser sent: "All" is all of *my* sites. A site employee sees only
+  // their own rows. See lib/siteAccess.js.
+  const scope = await getSiteScope();
+  if (!scope) return { success: false, message: "Not signed in", data: "[]" };
+  if (scope.selfOnly) employeeId = String(scope.user._id);
+
   const today = getWorkingDate();
   const start = fromDate ? toWorkingDate(fromDate) : today;
   const end = toDate ? toWorkingDate(toDate) : today;
@@ -1050,9 +1117,14 @@ export async function fetchAssignedWithClocksNew({
   const filter = {};
   if (siteId && siteId !== "All") {
     if (!isValidObjectId(siteId)) {
-      return { success: false, message: "Invalid site ID" };
+      return { success: false, message: "Invalid site ID", data: "[]" };
     }
+    const refusal = siteRefusal(scope, siteId);
+    if (refusal) return { ...refusal, data: "[]" };
     filter.siteId = createObjectId(siteId);
+  } else {
+    const mySites = scopedSiteMatch(scope);
+    if (mySites) filter.siteId = mySites;
   }
 
   const basePipeline = [
@@ -1578,6 +1650,19 @@ export async function fetchFilterClockRecordData({
   if (hasSite && !isValidObjectId(siteId)) {
     return { success: false, message: "Invalid site ID" };
   }
+
+  // Worked time on a site is reported to whoever manages that site; with no
+  // site picked, "All" is all of the caller's sites. Records with no site are
+  // office time and leave is not attributable to a site, so neither is
+  // narrowed here. See lib/siteAccess.js.
+  const scope = await getSiteScope();
+  if (hasSite) {
+    const siteDenied = siteRefusal(scope, siteId);
+    if (siteDenied) return siteDenied;
+  } else if (!scope) {
+    return { success: false, message: "Not signed in" };
+  }
+  const mySites = hasSite ? undefined : scopedSiteMatch(scope);
   if (employeeId && !isValidObjectId(employeeId)) {
     return { success: false, message: "Invalid employee ID" };
   }
@@ -1624,6 +1709,7 @@ export async function fetchFilterClockRecordData({
         date: { $gte: start, $lte: end },
         ...(employeeId ? { employeeId: createObjectId(employeeId) } : {}),
         ...(hasSite ? { siteId: createObjectId(siteId) } : {}),
+        ...(mySites ? { siteId: { $in: [...mySites.$in, null] } } : {}),
       },
     },
     {

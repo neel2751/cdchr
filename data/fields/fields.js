@@ -1082,9 +1082,7 @@ export const ASSIGNSITEMANAGERFIELD = [
     labelText: "End Date",
     type: "date",
     placeholder: "End Date",
-    validationOptions: {
-      required: "End Date is required",
-    },
+    helperText: "*Leave empty if they manage this site until further notice.",
   },
 ];
 

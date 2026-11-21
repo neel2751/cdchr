@@ -17,6 +17,12 @@ import { validateShift } from "@/lib/clockRules";
 import { deriveClockStatus } from "@/lib/clockStatus";
 import { getClockRules } from "@/server/settingsServer/workSettings";
 import { canManageAttendance } from "@/server/clockServer/clockAuth";
+import {
+  getSiteScope,
+  scopedSiteMatch,
+  siteRefusal,
+} from "@/lib/siteAccess";
+import { permissionRefusal } from "@/lib/actionAccess";
 import { resolveOrCreateLocationForSite } from "@/server/clockServer/clockLocationStore";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
@@ -112,6 +118,16 @@ export const updateClockManuallyByIdNew = withAudit(
       return { success: false, message: "Invalid siteId" };
     }
 
+    // Attendance on a site is changed by whoever manages that site. Checked
+    // before the location lookup below, which creates one if it is missing.
+    // An existing record is checked again against its own site once it has
+    // been read. See lib/siteAccess.js.
+    const scope = await getSiteScope();
+    if (siteId) {
+      const siteDenied = siteRefusal(scope, siteId, { write: true });
+      if (siteDenied) return siteDenied;
+    }
+
     const updateFields = {};
 
     // set individual fields if provided
@@ -198,6 +214,13 @@ export const updateClockManuallyByIdNew = withAudit(
 
     if (id && !beforeDoc) {
       return { success: false, message: "Clock record not found" };
+    }
+
+    if (beforeDoc?.siteId) {
+      const recordDenied = siteRefusal(scope, beforeDoc.siteId, {
+        write: true,
+      });
+      if (recordDenied) return recordDenied;
     }
 
     // What the record will look like once this update lands. Validating the
@@ -316,6 +339,12 @@ export const moveEmployeeToNewSite = withAudit(
       return { success: false, message: permitted.reason };
     }
 
+    // And only between sites the caller manages — both ends, checked below
+    // once the current site is known. See lib/siteAccess.js.
+    const scope = await getSiteScope();
+    const toDenied = siteRefusal(scope, toSiteId, { write: true });
+    if (toDenied) return toDenied;
+
     let movedFromSiteId = null;
     const result = await withTransaction(async (session) => {
     const { props } = await getServerSideProps();
@@ -335,6 +364,9 @@ export const moveEmployeeToNewSite = withAudit(
     }
 
     const fromSiteId = fromAssignment.siteId;
+    if (siteRefusal(scope, fromSiteId, { write: true })) {
+      throw new Error("This employee is on a site you do not manage.");
+    }
     movedFromSiteId = fromSiteId;
     const assignedEmployee = fromAssignment.assignedEmployees.find((e) =>
       e.employeeId.equals(eid),
@@ -442,10 +474,24 @@ export const moveEmployeeToNewSite = withAudit(
 
 export async function reportAllAttendanceData() {
   try {
+    // Every clock record in the company, with names, and it had no check of
+    // any kind — while the /visitor page that calls it is open without signing
+    // in on the form domain. It is the attendance report as one file, so it
+    // gets the report's rule: the report's screen, and only the caller's
+    // sites. See lib/siteAccess.js.
+    const denied = await permissionRefusal(["/admin/filterAttendance"]);
+    if (denied) return denied;
+    const scope = await getSiteScope();
+    if (!scope) return { success: false, message: "Not signed in" };
+    const mySites = scopedSiteMatch(scope);
+
     await connect();
 
     // 1. Fetch all clock records
-    const logs = await ClockRecordModel.find({ isDeleted: false }).lean();
+    const logs = await ClockRecordModel.find({
+      isDeleted: false,
+      ...(mySites ? { siteId: { $in: [...mySites.$in, null] } } : {}),
+    }).lean();
 
     // 2. Fetch both employee types to build a master name map
     const [fieldStaff, officeStaff] = await Promise.all([

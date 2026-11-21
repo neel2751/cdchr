@@ -73,8 +73,14 @@ const SiteAssignTable = () => {
                   <TableStatus isActive={item?.isActive} />
                 </div>
               </TableCell>
-              <TableCell>{format(item?.startDate, "PPP") || "-"}</TableCell>
-              <TableCell>{format(item?.endDate, "PPP") || "-"}</TableCell>
+              {/* `format(null)` reads as 1 January 1970, and no end date is
+                  a real answer now: it means until further notice. */}
+              <TableCell>
+                {item?.startDate ? format(item.startDate, "PPP") : "-"}
+              </TableCell>
+              <TableCell>
+                {item?.endDate ? format(item.endDate, "PPP") : "No end date"}
+              </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   {(session?.user?.role === "superAdmin" ||

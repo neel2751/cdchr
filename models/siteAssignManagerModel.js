@@ -7,15 +7,17 @@ const siteAssignManagerSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // No longer written. Links used to carry a copy of the manager's email
+    // and password hash; scripts/strip-manager-credentials.mjs removes the
+    // old copies. Kept in the schema only so those documents still load.
     email: {
       type: String,
       lowercase: true,
       trim: true,
-      required: true,
     },
     password: {
       type: String,
-      required: true,
+      select: false,
     },
     roleId: {
       type: mongoose.Types.ObjectId,

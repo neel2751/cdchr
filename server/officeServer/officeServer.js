@@ -639,21 +639,6 @@ export const getOfficeEmployee = async (filterData) => {
   }
 };
 
-export const getEmployeById = async (empId) => {
-  if (!empId) return { success: false, message: "No Employee Id Provided" };
-  try {
-    const response = await OfficeEmployeeModel.findOne({ _id: empId });
-    if (!response)
-      return {
-        success: false,
-        message: `Employee not found with the provided Id ${empId}`,
-      };
-    return { success: true, data: JSON.stringify(response) };
-  } catch (error) {
-    return { success: false, message: "Server error" };
-  }
-};
-
 export const isPossibleBcryptHash = async (password) => {
   const bcryptPattern = /^\$2[ay]\$\d+\$[0-9a-zA-Z./]+$/;
   return bcryptPattern.test(password);

@@ -18,10 +18,10 @@ import LeaveCategoryModel from "@/models/leaveCategoryModel";
 import { currentLeaveYear } from "@/lib/leaveYear";
 import CommonLeaveModel from "@/models/commonLeaveModel";
 import mongoose from "mongoose";
-import SiteAssignManagerModel from "@/models/siteAssignManagerModel";
 import { createObjectId } from "@/lib/mongodb";
 import FormTemplateModel from "@/models/formTemplateModel";
 import { permissionRefusal } from "@/lib/actionAccess";
+import { getSiteScope } from "@/lib/siteAccess";
 
 /**
  * The shared dropdown sources. Guarded as "administers something" rather than
@@ -77,27 +77,22 @@ export const getSelectRoleType = async () => {
 };
 
 export const getSelectProjects = async () => {
-  // fetch all project only for super admin and admin otherwise fetch only for employee assigned projects
-  const { props } = await getServerSideProps();
-  const role = props?.session?.user?.role;
-  const employeeId = props?.session?.user?._id;
-  const roles = await RoleBasedModel.findOne({
-    employeeId: employeeId,
+  // Every site for whoever may see every site, otherwise the sites the caller
+  // manages today — the rule the site board, report and assignment enforce
+  // too, so the picker never offers a site the action behind it would refuse.
+  // See lib/siteAccess.js.
+  const scope = await getSiteScope();
+  if (!scope) return { success: false, message: "Not signed in" };
+  if (scope.all) return getAllProjects();
+  return listProjects({
+    _id: { $in: scope.siteIds.map((id) => createObjectId(id)) },
   });
-  const permissions = roles?.permissions || [];
-  const permissionsStatic = ["/admin/employee", "/admin/siteAssign"];
-  const canViewAllProjects = permissions.some((permission) =>
-    permissionsStatic.includes(permission)
-  );
-
-  if (role === "superAdmin" || role === "admin" || canViewAllProjects) {
-    return getAllProjects();
-  } else {
-    return getEmployeeAssignedProjects(employeeId);
-  }
 };
 
-export const getAllProjects = async () => {
+export const getAllProjects = async () => listProjects();
+
+// Not exported: a "use server" export is an endpoint, and this takes a filter.
+async function listProjects(match = {}) {
   const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
   if (denied) return denied;
 
@@ -109,7 +104,7 @@ export const getAllProjects = async () => {
         // documents written before the field existed, which left five of one
         // company's seven active sites unpickable in every site dropdown: the
         // rota, site assignment and expenses all read this list.
-        $match: { siteDelete: { $ne: true }, isActive: true },
+        $match: { siteDelete: { $ne: true }, isActive: true, ...match },
       },
       {
         $project: {
@@ -133,61 +128,7 @@ export const getAllProjects = async () => {
     console.log(err);
     return { status: false, message: "Error Occured" };
   }
-};
-
-export const getEmployeeAssignedProjects = async (employeeId) => {
-  const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
-  if (denied) return denied;
-
-  try {
-    await connect();
-    const assignSite = await SiteAssignManagerModel.aggregate([
-      {
-        $match: {
-          isDelete: false,
-          isActive: true,
-          roleId: employeeId ? createObjectId(employeeId) : null,
-        },
-      },
-      {
-        $lookup: {
-          from: "projectsites",
-          localField: "projectSiteID",
-          foreignField: "_id",
-          as: "siteData",
-        },
-      },
-      {
-        $unwind: "$siteData",
-      },
-      {
-        $project: {
-          _id: 0,
-          value: "$siteData._id", // Renames `_id` to `value`
-          label: "$siteData.siteName", // Renames `roleTitle` to `name`
-        },
-      },
-      {
-        $sort: {
-          label: 1,
-        },
-      },
-    ]).exec();
-    if (!assignSite || assignSite.length === 0) {
-      return { success: false, message: "No Data Found" };
-    } else {
-      const roleData = JSON.stringify(assignSite);
-      const data = {
-        success: true,
-        data: roleData,
-      };
-      return data;
-    }
-  } catch (err) {
-    console.log("Error fetching employee assigned projects:", err);
-    return { status: false, message: "Error Occured" };
-  }
-};
+}
 
 export const getSelectOfficeEmployee = async () => {
   const denied = await permissionRefusal([], ADMINISTERS_SOMETHING);
