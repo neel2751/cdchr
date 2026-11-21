@@ -26,6 +26,7 @@ import LeaveRequestModel from "@/models/leaveRequestModel";
 import WeeklyRotaModel from "@/models/weeklyRotaModel";
 import BookingModel from "@/models/bookingModel";
 import { FEATURE_BY_KEY, FEATURE_KEYS } from "@/data/features";
+import { INDUSTRY_TEMPLATES } from "@/data/terminology";
 import {
   isFeatureEnabled,
   resolveFeatureDependencies,
@@ -313,7 +314,10 @@ export async function getTenantModuleUsage(tenantId) {
 }
 
 /** Plan, seats and feature flags. */
-export async function updateTenantPlan(tenantId, { plan, seats, features, limits } = {}) {
+export async function updateTenantPlan(
+  tenantId,
+  { plan, seats, features, limits, industry } = {}
+) {
   return asPlatformAdmin(
     tenantId,
     async (id) => {
@@ -323,6 +327,14 @@ export async function updateTenantPlan(tenantId, { plan, seats, features, limits
 
       const set = {};
       if (plan !== undefined) set["billing.plan"] = String(plan).trim();
+      // Which industry's words the company's screens use (data/terminology.js).
+      // Words the company has changed itself are left alone.
+      if (industry !== undefined) {
+        if (!INDUSTRY_TEMPLATES.some((t) => t.key === industry)) {
+          return { success: false, message: "Unknown industry" };
+        }
+        set.industry = industry;
+      }
       if (seats !== undefined) {
         const n = parseInt(seats, 10);
         set["billing.seats"] = Number.isFinite(n) && n > 0 ? n : null;

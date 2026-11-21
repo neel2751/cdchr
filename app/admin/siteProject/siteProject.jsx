@@ -5,7 +5,7 @@ import {
   siteProjectStatus,
   updateSiteProjectById,
 } from "@/server/siteProjectServer/siteProjectServer";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import SiteTable from "./siteTable";
 import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import { SITEFIELD } from "@/data/fields/fields";
+import { useTerms } from "@/app/admin/providers";
 import { CommonContext } from "@/context/commonContext";
 import { useFetchQuery } from "@/hooks/use-query";
 import { useSubmitMutation } from "@/hooks/use-mutate";
@@ -28,6 +29,10 @@ import Alert from "@/components/alert/alert";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 
 const SiteProject = ({ searchParams }) => {
+  // The company's words for a site — "Class" for a tuition centre. See
+  // data/terminology.js.
+  const { t, fill, fillDeep } = useTerms();
+  const fields = useMemo(() => fillDeep(SITEFIELD), [fillDeep]);
   const query = searchParams.query;
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
@@ -69,7 +74,7 @@ const SiteProject = ({ searchParams }) => {
       await updateSiteProjectById(data, initialValues._id),
     invalidateKey: queryKey,
     onSuccessMessage: (response) =>
-      `Site ${initialValues._id ? "Updated" : "Create"} successfully`,
+      `${t("site")} ${initialValues._id ? "updated" : "created"} successfully`,
     onClose: initialValues._id ? handleEditClose : handleClose,
   });
   const onSubmit = (data) => {
@@ -103,7 +108,7 @@ const SiteProject = ({ searchParams }) => {
       invalidateKey: queryKey,
       onSuccessMessage: (response) =>
         `${
-          alert.type === "Delete" ? "Site Delete" : "Status Update"
+          alert.type === "Delete" ? `${t("site")} deleted` : "Status updated"
         } successfully`,
       onClose: alertClose,
     });
@@ -119,7 +124,7 @@ const SiteProject = ({ searchParams }) => {
           siteProjectData,
           isPending,
           onSubmit,
-          field: SITEFIELD,
+          field: fields,
           initialValues,
           handleEdit,
           handleEditClose,
@@ -132,7 +137,7 @@ const SiteProject = ({ searchParams }) => {
           <Card>
             <CardHeader>
               <div className="mb-4">
-                <CardTitle>Project Sites</CardTitle>
+                <CardTitle>{t("siteList")}</CardTitle>
               </div>
               <div className="flex items-center justify-between">
                 <SearchDebounce />
@@ -151,9 +156,9 @@ const SiteProject = ({ searchParams }) => {
                   <Dialog open={open} onOpenChange={handleClose}>
                     <DialogContent className="sm:max-w-2xl max-h-max">
                       <DialogHeader>
-                        <DialogTitle>Add New Site</DialogTitle>
+                        <DialogTitle>{fill("Add New {Site}")}</DialogTitle>
                         <DialogDescription>
-                          Please fill the form to add new site project
+                          {fill("Please fill the form to add a new {site}")}
                         </DialogDescription>
                       </DialogHeader>
                       <EmployeeForm />

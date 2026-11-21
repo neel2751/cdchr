@@ -21,6 +21,7 @@ import React from "react";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import { Status, TableStatus } from "@/components/tableStatus/status";
 import { useCommonContext } from "@/context/commonContext";
+import { useTerms } from "@/app/admin/providers";
 
 const SiteTable = () => {
   const {
@@ -30,6 +31,7 @@ const SiteTable = () => {
     setIsEdit,
     handleAlert,
   } = useCommonContext();
+  const { fill } = useTerms();
   return (
     <>
       <Table>
@@ -38,8 +40,8 @@ const SiteTable = () => {
             {[
               "id",
               "name",
-              "siteType",
-              "Sitestatus",
+              fill("{site} type"),
+              fill("{site} status"),
               "status",
               "date",
               "Actions",
@@ -83,7 +85,7 @@ const SiteTable = () => {
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-xl max-h-max">
                       <DialogHeader>
-                        <DialogTitle>Edit Site</DialogTitle>
+                        <DialogTitle>{fill("Edit {Site}")}</DialogTitle>
                         <DialogDescription>
                           Make changes to here. Click update when you're done.
                         </DialogDescription>

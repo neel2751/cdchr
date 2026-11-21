@@ -25,11 +25,14 @@ import {
   getSelectSiteEmployee,
 } from "@/server/selectServer/selectServer";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
+import { useTerms } from "@/app/admin/providers";
 
+// Labels hold data/terminology.js tokens; the component fills them with the
+// company's words ("Student" for a tuition centre).
 const WORKFORCE_OPTIONS = [
   { label: "All Employees", value: "" },
   { label: "Office Employee", value: "office" },
-  { label: "Site Employee", value: "site" },
+  { label: "{SiteEmployee}", value: "site" },
 ];
 
 const PAYMENT_OPTIONS = [
@@ -72,6 +75,7 @@ function StatCard({ label, value, hint, className }) {
 }
 
 const FilterAttendance = ({ searchParams }) => {
+  const { t, fill, fillDeep } = useTerms();
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
@@ -184,7 +188,8 @@ const FilterAttendance = ({ searchParams }) => {
       return {
         Employee: item?.name || "-",
         Workforce: item?.workforce || "-",
-        Site: item?.siteName || (isLeave ? "-" : "Office"),
+        // The key is the column heading, on screen and in the CSV.
+        [t("site")]: item?.siteName || (isLeave ? "-" : "Office"),
         Date: format(new Date(item?.date), "PPP"),
         Status: STATUS_LABEL[item?.kind] || item?.kind,
         PaymentType: item?.paymentType || "-",
@@ -222,7 +227,7 @@ const FilterAttendance = ({ searchParams }) => {
           : "-",
       };
     });
-  }, [newData]);
+  }, [newData, t]);
 
   const exportedCSV = () => {
     if (!newData || totalCount === 0) return [];
@@ -232,7 +237,7 @@ const FilterAttendance = ({ searchParams }) => {
     // figures as the screen rather than needing them re-derived.
     const totals = [
       ["Range", `${format(new Date(date.from), "PPP")} - ${format(new Date(date.to), "PPP")}`],
-      ["Workforce", isOffice ? "Office" : isSite ? "Site" : "All"],
+      ["Workforce", isOffice ? "Office" : isSite ? t("sites") : "All"],
       ["Employees", summary?.employeeCount ?? 0],
       ["Days Worked", summary?.workDays ?? 0],
       ["Total Hours", hm(summary?.totalSpanMinutes)],
@@ -305,7 +310,7 @@ const FilterAttendance = ({ searchParams }) => {
               <SelectFilter
                 label="Type"
                 value={filter.employeeType}
-                frameworks={WORKFORCE_OPTIONS}
+                frameworks={fillDeep(WORKFORCE_OPTIONS)}
                 placeholder="All Employees"
                 // Switching workforce clears the narrower filters below it —
                 // a site or a person from the old workforce cannot match.
@@ -324,10 +329,10 @@ const FilterAttendance = ({ searchParams }) => {
                   where it can actually narrow anything. */}
               {!isOffice && siteData && (
                 <SelectFilter
-                  label="Site"
+                  label={t("site")}
                   value={filter.siteId}
-                  frameworks={[{ label: "All Sites", value: "" }, ...siteData]}
-                  placeholder="All Sites"
+                  frameworks={[{ label: fill("All {Sites}"), value: "" }, ...siteData]}
+                  placeholder={fill("All {Sites}")}
                   onChange={(e) => setFilter({ ...filter, siteId: e })}
                   noData="No Data found"
                 />

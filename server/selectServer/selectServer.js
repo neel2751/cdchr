@@ -5,6 +5,8 @@ import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
 import CompanyModel from "@/models/companyModel";
 import { filterMenuByFeatures } from "@/lib/tenantPlan";
 import { getTenantFeatures } from "@/lib/tenantFeatures";
+import { getTenantTerms } from "@/lib/tenantTerms";
+import { menuLabel } from "@/data/terminology";
 import { isValidObjectId } from "@/lib/mongodb";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
@@ -361,12 +363,18 @@ export const getEmployeeMenu = async () => {
     // Modules the company's plan excludes are removed for everyone, whatever
     // their role — a super admin of a company without the CRM should not see it.
     const features = await getTenantFeatures(props?.session?.user?.tenantId);
+    // Entries that name a site and the like are labelled in the company's own
+    // words. Done here, where every sidebar gets its menu, so the sidebar
+    // itself never has to know. See data/terminology.js.
+    const terms = await getTenantTerms(props?.session?.user?.tenantId);
+    const inTheirWords = (items) =>
+      items.map((item) => ({ ...item, name: menuLabel(item, terms) }));
     if (role === "superAdmin") {
       const menu = filterMenuByFeatures(
         MENU.filter((item) => item?.role?.includes(role)),
         features
       );
-      return { success: true, data: JSON.stringify(menu) };
+      return { success: true, data: JSON.stringify(inTheirWords(menu)) };
     } else {
       await connect();
       const menu = await RoleBasedModel.findOne({
@@ -388,7 +396,7 @@ export const getEmployeeMenu = async () => {
         );
         const data = {
           success: true,
-          data: JSON.stringify(menuItem),
+          data: JSON.stringify(inTheirWords(menuItem)),
         };
         return data;
       }

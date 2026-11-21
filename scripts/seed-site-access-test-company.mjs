@@ -176,7 +176,18 @@ async function main() {
       ...flags,
     });
   const manager = await staff("manager", "Tess Manager", {});
-  await staff("super", "Sid Super", { isSuperAdmin: true });
+  const superAdmin = await staff("super", "Sid Super", { isSuperAdmin: true });
+
+  // Settings (branding, words, domains) opens only for a super admin holding
+  // a membership of the company, not for the role alone.
+  await upsert("tenantmemberships", { userId: superAdmin._id }, {
+    userId: superAdmin._id,
+    userModel: "OfficeEmploye",
+    email: superAdmin.email,
+    role: "superAdmin",
+    isDefault: true,
+    isActive: true,
+  });
 
   await upsert("rolebaseds", { employeeId: manager._id }, {
     name: "Site manager",

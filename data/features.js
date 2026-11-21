@@ -250,6 +250,24 @@ export const FEATURE_PRESETS = [
     description: "Salaried office staff. No sites, crews or device inventory.",
     off: ["siteProjects", "siteEmployees", "devices", "visitors"],
   },
+  // Branches are places and agency staff the second workforce, so both
+  // modules stay on; data/terminology.js gives them their restaurant names.
+  {
+    key: "restaurant",
+    label: "Restaurant / hospitality",
+    description:
+      "Branches, rotas and agency staff. No visitor log, CRM or devices.",
+    off: ["visitors", "crm", "devices"],
+  },
+  // Classes are places and students the second group. Enquiries (CRM) and the
+  // front desk stay: parents ask, and come in.
+  {
+    key: "tuition",
+    label: "Tuition / classes",
+    description:
+      "Classes, students and the teachers who run them. No device inventory.",
+    off: ["devices"],
+  },
 ];
 
 /**

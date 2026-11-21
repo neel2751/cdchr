@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 import { FEATURE_KEYS } from "@/data/features";
+import {
+  DEFAULT_INDUSTRY,
+  INDUSTRY_TEMPLATES,
+  TERM_KEYS,
+} from "@/data/terminology";
 
 /**
  * A company is the tenant boundary for the platform.
@@ -97,6 +102,15 @@ const localeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// What the company calls sites, site employees and the rest — see
+// data/terminology.js. Only the words it has changed from its industry's are
+// stored; an absent key means "the template's word". Built from TERM_KEYS so a
+// word added there is storable without a second edit, as featuresSchema is.
+const termsSchema = new mongoose.Schema(
+  Object.fromEntries(TERM_KEYS.map((key) => [key, { type: String, trim: true }])),
+  { _id: false }
+);
+
 const billingSchema = new mongoose.Schema(
   {
     plan: { type: String, default: "standard" },
@@ -136,6 +150,14 @@ const companySchema = new mongoose.Schema(
     features: { type: featuresSchema, default: () => ({}) },
     limits: { type: limitsSchema, default: () => ({}) },
     locale: { type: localeSchema, default: () => ({}) },
+    // Which INDUSTRY_TEMPLATES entry supplies the words. Construction is what
+    // every company was before there was a choice.
+    industry: {
+      type: String,
+      enum: INDUSTRY_TEMPLATES.map((t) => t.key),
+      default: DEFAULT_INDUSTRY,
+    },
+    terms: { type: termsSchema, default: () => ({}) },
     billing: { type: billingSchema, default: () => ({}) },
 
     // Legacy admin toggles. Still authoritative — see isTenantUsable().

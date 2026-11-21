@@ -7,6 +7,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCommonContext } from "@/context/commonContext";
+import { useTerms } from "@/app/admin/providers";
 import React from "react";
 import { Status, TableStatus } from "@/components/tableStatus/status";
 import {
@@ -29,13 +30,14 @@ const SiteAssignTable = () => {
     useCommonContext();
 
   const { data: session } = useSession();
+  const { fill } = useTerms();
 
   const tabelHead = [
     "id",
-    "sitename",
+    fill("{site} name"),
     "assign to",
-    "sitestatus",
-    "sitetype",
+    fill("{site} status"),
+    fill("{site} type"),
     "status",
     "startDate",
     "endDate",
@@ -96,7 +98,7 @@ const SiteAssignTable = () => {
                       <Dialog open={isEdit} onOpenChange={handleEditClose}>
                         <DialogContent className="sm:max-w-xl max-h-max">
                           <DialogHeader>
-                            <DialogTitle>Edit Site Assign</DialogTitle>
+                            <DialogTitle>{fill("Edit {SiteManager}")}</DialogTitle>
                             <DialogDescription>
                               Make changes to here. Click update when you're
                               done.

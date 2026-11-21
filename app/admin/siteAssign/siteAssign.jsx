@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { ASSIGNSITEMANAGERFIELD } from "@/data/fields/fields";
+import { useTerms } from "@/app/admin/providers";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,9 @@ import { checkPermission } from "@/server/permissionServer/permissionServer";
 
 const SiteAssign = ({ searchParams }) => {
   const { data: session } = useSession();
+  // The company's words: "Class Teachers" for a tuition centre. See
+  // data/terminology.js.
+  const { t, fill, fillDeep } = useTerms();
 
   const query = searchParams?.query;
   const currentPage = parseInt(searchParams?.page || "1");
@@ -65,7 +69,7 @@ const SiteAssign = ({ searchParams }) => {
   });
   const { newData = [], totalCount } = data || {};
 
-  const updatedRoleField = ASSIGNSITEMANAGERFIELD.map((field) => {
+  const updatedRoleField = fillDeep(ASSIGNSITEMANAGERFIELD).map((field) => {
     if (field.name === "projectSiteID") {
       return {
         ...field,
@@ -105,7 +109,7 @@ const SiteAssign = ({ searchParams }) => {
       await handleSiteAssignManager(data, initialValues._id),
     invalidateKey: queryKey,
     onSuccessMessage: (response) =>
-      `Site Assign${initialValues._id ? "Updated" : ""} successfully`,
+      `${t("siteManager")} ${initialValues._id ? "updated" : "added"} successfully`,
     onClose: initialValues._id ? handleEditClose : handleClose,
   });
 
@@ -118,7 +122,7 @@ const SiteAssign = ({ searchParams }) => {
       invalidateKey: queryKey,
       onSuccessMessage: (response) =>
         `${
-          alert.type === "Delete" ? "Deleted Site Assign" : "Status Updated"
+          alert.type === "Delete" ? `${t("siteManager")} removed` : "Status Updated"
         } successfully`,
       onClose: alertClose,
     });
@@ -162,7 +166,7 @@ const SiteAssign = ({ searchParams }) => {
         <Card>
           <CardHeader>
             <div className="mb-4">
-              <CardTitle>Site Managers</CardTitle>
+              <CardTitle>{t("siteManagers")}</CardTitle>
             </div>
             <div className="flex items-center justify-between">
               <SearchDebounce />
@@ -182,9 +186,9 @@ const SiteAssign = ({ searchParams }) => {
                 >
                   <DialogContent className="sm:max-w-2xl max-h-max">
                     <DialogHeader>
-                      <DialogTitle>Add New Site Assign</DialogTitle>
+                      <DialogTitle>{fill("Add New {SiteManager}")}</DialogTitle>
                       <DialogDescription>
-                        Please fill the form to add new site assign
+                        {fill("Choose who manages which {site}, and from when")}
                       </DialogDescription>
                     </DialogHeader>
                     <EmployeeForm />

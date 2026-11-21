@@ -32,6 +32,8 @@ import {
 import { mergeAndFilterMenusWithLabelAndValue } from "@/lib/object";
 import { useTenantFeatures } from "@/hooks/useTenantFeatures";
 import { isPathAllowed } from "@/lib/tenantPlan";
+import { useTerms } from "@/app/admin/providers";
+import { menuLabel } from "@/data/terminology";
 
 const Permission = ({ searchParams }) => {
   const currentPage = parseInt(searchParams?.page || "1");
@@ -49,6 +51,9 @@ const Permission = ({ searchParams }) => {
     });
 
   const { features } = useTenantFeatures();
+  // Screens that name a site and the like are offered in the company's words.
+  const { terms } = useTerms();
+  const menu = MENU.map((item) => ({ ...item, name: menuLabel(item, terms) }));
 
   const PERMISSIONFIELD = [
     {
@@ -74,7 +79,7 @@ const Permission = ({ searchParams }) => {
         // Modules the company's plan excludes are not offerable. Granting one
         // used to appear to work and then send the admin to /unauthorized, since
         // proxy.js gates on the plan before it ever looks at permissions.
-        ...mergeAndFilterMenusWithLabelAndValue(MENU, COMMONMENUITEMS).filter(
+        ...mergeAndFilterMenusWithLabelAndValue(menu, COMMONMENUITEMS).filter(
           (option) => isPathAllowed(features, option.value)
         ),
         // Capabilities gate data rather than a route, so they are not in MENU.

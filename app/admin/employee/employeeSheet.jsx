@@ -2,14 +2,20 @@ import TableSheet from "@/components/tableStatus/tableSheet";
 import { format } from "date-fns";
 
 const EmployeeSheet = ({ item }) => {
+  // Any detail may be missing — a record imported or created before a field
+  // was required has no address or pay rate — and one absent field must show
+  // as "-", not take the whole sheet down.
+  const payRate = Number(item.payRate);
   const data = [
     {
       label: "Employee ID",
-      value: item._id.slice(-4).padStart(item._id.length, "*"),
+      value: String(item._id || "")
+        .slice(-4)
+        .padStart(String(item._id || "").length, "*"),
     },
     {
       label: "Name",
-      value: item.firstName + " " + item.lastName,
+      value: [item.firstName, item.lastName].filter(Boolean).join(" ") || "-",
     },
     {
       label: "Email",
@@ -21,7 +27,7 @@ const EmployeeSheet = ({ item }) => {
     },
     {
       label: "Country",
-      value: item.eAddress.country,
+      value: item.eAddress?.country || "-",
     },
     {
       label: "Payment Type",
@@ -33,11 +39,11 @@ const EmployeeSheet = ({ item }) => {
     },
     {
       label: "PayRate",
-      value: `£${item.payRate.toFixed(2)}`,
+      value: Number.isFinite(payRate) ? `£${payRate.toFixed(2)}` : "-",
     },
     {
       label: "Address",
-      value: item.eAddress.address,
+      value: item.eAddress?.address || "-",
     },
     {
       label: "Immigration Type",

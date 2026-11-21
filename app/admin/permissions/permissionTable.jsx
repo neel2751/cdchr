@@ -23,9 +23,14 @@ import {
 import { CAPABILITIES, COMMONMENUITEMS, MENU } from "@/data/menu";
 import { Badge } from "@/components/ui/badge";
 import { mergeAndFilterMenus } from "@/lib/object";
+import { useTerms } from "@/app/admin/providers";
+import { menuLabel } from "@/data/terminology";
 
 const PermissionTable = () => {
   const { result, isEdit, setIsEdit, handleEdit } = useCommonContext();
+  // Granted screens are named in the company's words, as in the sidebar.
+  const { terms } = useTerms();
+  const menu = MENU.map((item) => ({ ...item, name: menuLabel(item, terms) }));
 
   const tableHead = [
     "name",
@@ -47,7 +52,7 @@ const PermissionTable = () => {
             <TableCell>{item?.result[0]?.name}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-2">
-                {[...mergeAndFilterMenus(COMMONMENUITEMS, MENU), ...CAPABILITIES]
+                {[...mergeAndFilterMenus(COMMONMENUITEMS, menu), ...CAPABILITIES]
                   .filter((it) => item?.permissions?.includes(it?.path))
                   .map((im) => (
                     <Badge key={im.name} variant="outline">

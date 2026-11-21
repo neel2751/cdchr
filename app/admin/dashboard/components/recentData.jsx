@@ -59,7 +59,9 @@ const RecentData = ({ data }) => {
                   </div>
                 </TableCell>
                 <TableCell className="hidden sm:table-cell">
-                  £{item.payRate.toFixed(2)}
+                  {Number.isFinite(Number(item?.payRate))
+                    ? `£${Number(item.payRate).toFixed(2)}`
+                    : "-"}
                 </TableCell>
                 <TableCell className="hidden sm:table-cell">
                   {item.totalHours.toFixed(2)}

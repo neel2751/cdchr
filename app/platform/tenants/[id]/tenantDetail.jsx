@@ -40,6 +40,11 @@ import {
   UNLINKED_FEATURE_KEYS,
   featuresForPreset,
 } from "@/data/features";
+import {
+  DEFAULT_INDUSTRY,
+  INDUSTRY_TEMPLATES,
+  industryTemplate,
+} from "@/data/terminology";
 import { resolveFeatureDependencies } from "@/lib/tenantPlan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +52,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   listSupportSessions,
@@ -405,6 +417,11 @@ const DomainsTab = ({ tenant, run, isPending }) => {
 
 const PlanTab = ({ tenant, run, isPending }) => {
   const [plan, setPlan] = useState(tenant.billing?.plan || "standard");
+  // Decides the words on the company's screens — "Classes", "Students" for
+  // tuition. See data/terminology.js.
+  const [industry, setIndustry] = useState(
+    tenant.industry || DEFAULT_INDUSTRY
+  );
   const [seats, setSeats] = useState(tenant.billing?.seats ?? "");
   const [storageMb, setStorageMb] = useState(
     tenant.limits?.maxStorageBytes
@@ -494,6 +511,38 @@ const PlanTab = ({ tenant, run, isPending }) => {
                 : "Current usage unavailable"}
             </p>
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="industry">Industry</Label>
+          <Select
+            value={industry}
+            onValueChange={(key) => {
+              setIndustry(key);
+              // The modules that suit it, as a starting point. Still only
+              // saved with Save plan, and every switch below stays editable.
+              const preset = industryTemplate(key).featurePreset;
+              if (preset) setFeatures(featuresForPreset(preset));
+            }}
+          >
+            <SelectTrigger id="industry" className="w-full sm:w-72">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {INDUSTRY_TEMPLATES.map((t) => (
+                <SelectItem key={t.key} value={t.key}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Sets what the company&apos;s screens call places and people (here
+            &ldquo;{industryTemplate(industry).terms.siteList}&rdquo; and
+            &ldquo;{industryTemplate(industry).terms.siteEmployees}&rdquo;),
+            and the modules below to suit it. The company can change any word
+            itself, under Settings → Words.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -615,6 +664,7 @@ const PlanTab = ({ tenant, run, isPending }) => {
             run(() =>
               updateTenantPlan(tenant._id, {
                 plan,
+                industry,
                 seats: seats === "" ? null : seats,
                 features,
                 limits: {

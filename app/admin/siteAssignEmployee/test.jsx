@@ -45,6 +45,7 @@ import SearchDebounce from "@/components/search/searchDebounce";
 import { moveEmployeeToNewSite } from "@/server/timeOffServer/updateClockServer";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { useCommonContext } from "@/context/commonContext";
+import { useTerms } from "@/app/admin/providers";
 import { useSession } from "next-auth/react";
 import AddSiteAssignment from "./addSiteAssignment";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
@@ -61,6 +62,9 @@ import {
 
 const EmployeeSiteManagement = () => {
   const { filter: searchParams, searchParams: siteId } = useCommonContext();
+  // The company's words: "Students" and "class" for a tuition centre. See
+  // data/terminology.js.
+  const { fill } = useTerms();
   const queryClient = useQueryClient();
   const [showEditForm, setShowEditForm] = useState({});
   const [moveSiteByEmployee, setMoveSiteByEmployee] = useState({});
@@ -266,7 +270,7 @@ const EmployeeSiteManagement = () => {
   const role = session?.user?.role;
   const commonHeaders = [
     "Name",
-    "SiteName",
+    fill("{Site}"),
     "Status",
     "Clock In",
     "Clock Out",
@@ -353,19 +357,20 @@ const EmployeeSiteManagement = () => {
           <div>
             <CardTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
-              Today's Assigned Employees{" "}
+              {fill("Today's Assigned {SiteEmployees}")}{" "}
               <span className="font-semibold">
                 ({attendanceList?.length || 0})
               </span>
             </CardTitle>
             <CardDescription>
-              View all employees assigned to sites today •{" "}
+              {fill("Everyone assigned to a {site} today")} •{" "}
               {format(new Date(), "PPP")}
             </CardDescription>
             {(role === "superAdmin" || role === "admin") && (
               <p className="text-xs text-muted-foreground mt-1">
-                Use Move to site in Actions to correct wrong site assignment for
-                the selected date.
+                {fill(
+                  "Use Move to {site} in Actions to correct a wrong {site} assignment for the selected date.",
+                )}
               </p>
             )}
           </div>
@@ -397,7 +402,7 @@ const EmployeeSiteManagement = () => {
               <p className="text-lg">No assignments found for this date</p>
 
               <p className="text-sm">
-                Select employees and a site to create assignments
+                {fill("Select people and a {site} to create assignments")}
               </p>
             </div>
           ) : (
@@ -694,7 +699,7 @@ const EmployeeSiteManagement = () => {
                                       }
                                     >
                                       <SelectTrigger className="h-8 min-w-[170px]">
-                                        <SelectValue placeholder="Move to site" />
+                                        <SelectValue placeholder={fill("Move to {site}")} />
                                       </SelectTrigger>
                                       <SelectContent>
                                         {sites

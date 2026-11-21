@@ -23,6 +23,7 @@ import {
   siteRefusal,
 } from "@/lib/siteAccess";
 import { permissionRefusal } from "@/lib/actionAccess";
+import { fillTerms } from "@/data/terminology";
 import { resolveOrCreateLocationForSite } from "@/server/clockServer/clockLocationStore";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
@@ -365,7 +366,9 @@ export const moveEmployeeToNewSite = withAudit(
 
     const fromSiteId = fromAssignment.siteId;
     if (siteRefusal(scope, fromSiteId, { write: true })) {
-      throw new Error("This employee is on a site you do not manage.");
+      throw new Error(
+        fillTerms("This person is on a {site} you do not manage.", scope.terms),
+      );
     }
     movedFromSiteId = fromSiteId;
     const assignedEmployee = fromAssignment.assignedEmployees.find((e) =>

@@ -5,6 +5,11 @@ import CompanyModel from "@/models/companyModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { isTenantUsable, resolveBranding } from "@/lib/tenant";
+import {
+  DEFAULT_INDUSTRY,
+  cleanTerms,
+  resolveTerms,
+} from "@/data/terminology";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { storeTenantLogo, ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES } from "../aws/branding";
@@ -12,6 +17,7 @@ import {
   addDomain,
   applyBranding,
   applySlug,
+  applyTerms,
   removeDomain,
   setPrimaryDomain,
   verifyDomain,
@@ -112,6 +118,11 @@ function serializeTenant(tenant) {
     // exactly as it does everywhere else.
     features: tenant.features || {},
     plan: tenant.billing?.plan || "",
+    // The Words tab: the industry, what the company has changed, and the
+    // words it ends up with (data/terminology.js).
+    industry: tenant.industry || DEFAULT_INDUSTRY,
+    storedTerms: cleanTerms(tenant.terms),
+    terms: resolveTerms(tenant),
     domains: (tenant.domains || []).map((d) => ({
       host: d.host,
       isPrimary: !!d.isPrimary,
@@ -172,6 +183,13 @@ export const updateTenantBranding = withAudit(
   "Tenant.updateBranding",
   async (tenantId, data) =>
     asCompanyAdmin(tenantId, (id) => applyBranding(id, data), "Updated branding"),
+  { module: "Tenant" }
+);
+
+export const updateTenantTerms = withAudit(
+  "Tenant.updateTerms",
+  async (tenantId, data) =>
+    asCompanyAdmin(tenantId, (id) => applyTerms(id, data), "Updated words"),
   { module: "Tenant" }
 );
 

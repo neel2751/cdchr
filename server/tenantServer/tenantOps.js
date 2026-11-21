@@ -8,6 +8,11 @@ import CompanyModel from "@/models/companyModel";
 import { createObjectId } from "@/lib/mongodb";
 import { normalizeHost, stripWww } from "@/lib/tenantHost";
 import { cacheInvalidate } from "@/lib/tenantCache";
+import {
+  INDUSTRY_TEMPLATES,
+  cleanTerms,
+  industryTemplate,
+} from "@/data/terminology";
 
 /**
  * Core tenant operations, shared by the two front doors that reach them:
@@ -62,6 +67,44 @@ export async function applyBranding(tenantId, data) {
     message: "Branding saved",
     before: before.branding || {},
     after: branding,
+  };
+}
+
+/**
+ * Set the industry whose words a company uses, and the words it has changed
+ * from them. See data/terminology.js.
+ *
+ * `terms` replaces the stored overrides outright rather than merging, so a
+ * word cleared on the form goes back to the template's. A word equal to the
+ * template's is not stored either: the company keeps following the template
+ * if that word is ever improved.
+ */
+export async function applyTerms(tenantId, { industry, terms } = {}) {
+  if (!INDUSTRY_TEMPLATES.some((t) => t.key === industry)) {
+    return { success: false, message: "Unknown industry" };
+  }
+  await connect();
+  const before = await CompanyModel.findById(tenantId).lean().exec();
+  if (!before) return { success: false, message: "Company not found" };
+
+  const template = industryTemplate(industry).terms;
+  const overrides = Object.fromEntries(
+    Object.entries(cleanTerms(terms)).filter(
+      ([key, word]) => word !== template[key]
+    )
+  );
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { industry, terms: overrides } }
+  );
+  cacheInvalidate();
+
+  return {
+    success: true,
+    message: "Words saved",
+    before: { industry: before.industry, terms: before.terms || {} },
+    after: { industry, terms: overrides },
   };
 }
 

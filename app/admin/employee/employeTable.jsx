@@ -132,7 +132,11 @@ const EmployeTabel = () => {
                 <EmployeeSheet item={item} />
               </TableCell>
               <TableCell>{item?.phone}</TableCell>
-              <TableCell>£{item?.payRate.toFixed(2)}</TableCell>
+              <TableCell>
+                {Number.isFinite(Number(item?.payRate))
+                  ? `£${Number(item.payRate).toFixed(2)}`
+                  : "-"}
+              </TableCell>
               <TableCell>{item?.employeType}</TableCell>
               <TableCell>{item?.paymentType}</TableCell>
               <TableCell>

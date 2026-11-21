@@ -1,5 +1,9 @@
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 
+// An entry that names a site, site employee or the like carries a `termKey`
+// from data/terminology.js. Its label is then the company's word for it — a
+// tuition centre sees "Classes" where a builder sees "Project Sites" — and
+// `name` is the construction word, used wherever no company is in view.
 export const MENU = [
   // {
   //   name: "Dashboard",
@@ -99,12 +103,14 @@ export const MENU = [
   },
   {
     name: "Site Employees",
+    termKey: "siteEmployees",
     path: "/admin/employee",
     role: ["superAdmin"],
     icon: "ClipboardIcon",
   },
   {
     name: "Project Sites",
+    termKey: "siteList",
     path: "/admin/siteProject",
     role: ["superAdmin"],
     icon: "NewspaperIcon",
@@ -128,6 +134,7 @@ export const MENU = [
   // the same thing.
   {
     name: "Site Managers",
+    termKey: "siteManagers",
     path: "/admin/siteAssign",
     role: ["superAdmin", "admin", "user"],
     icon: "RadioIcon",
@@ -155,6 +162,7 @@ export const MENU = [
   // server/clockServer/clockAuth.js.
   {
     name: "Site Assignments",
+    termKey: "siteAssignments",
     path: "/admin/siteAssignEmployee",
     role: ["superAdmin", "admin", "user"],
     icon: "Network",
@@ -284,6 +292,7 @@ export const MENU = [
   },
   {
     name: "Previous Site Employees",
+    termKey: "previousSiteEmployees",
     path: "/admin/previousEmployee",
     role: ["superAdmin", "admin"],
     icon: "UserX",

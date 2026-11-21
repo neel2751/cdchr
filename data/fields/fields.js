@@ -675,11 +675,11 @@ export const EMPLOYEFIELD = [
 
   {
     name: "projectSite",
-    labelText: "Project Site",
+    labelText: "{Site}",
     options: [],
     type: "select",
-    placeholder: "Select Project Site",
-    validationOptions: { required: " Project Site is required" },
+    placeholder: "Select {site}",
+    validationOptions: { required: "{Site} is required" },
   },
   //   {
   //     name: "oldData",
@@ -732,47 +732,50 @@ export const EMPLOYEFIELD = [
   ...EMERGENCYFIELD,
 ];
 
+// Labels below use data/terminology.js tokens ({Site}, {site}): the screen that
+// renders a field set fills them with the company's words before the form
+// sees them. siteProject.jsx, siteAssign.jsx and employee.jsx do.
 export const SITEFIELD = [
   {
     name: "siteName",
-    labelText: "Site Name",
+    labelText: "{Site} Name",
     type: "text",
-    helperText: "*This Name will appear be on Site Project.",
-    placeholder: "Enter your Site Name",
+    helperText: "*This name is how the {site} appears everywhere.",
+    placeholder: "Enter the {site} name",
     validationOptions: {
-      required: "This Site Name is required",
+      required: "The {site} name is required",
       minLength: {
         value: 3,
-        message: "This Site Name at least 3 character",
+        message: "The {site} name needs at least 3 characters",
       },
       maxLength: {
         value: 50,
-        message: "This Site Name at most 50 character",
+        message: "The {site} name can be at most 50 characters",
       },
       ...PATTERN,
     },
   },
   {
     name: "siteAddress",
-    labelText: "Site Address",
+    labelText: "{Site} Address",
     type: "text",
-    placeholder: "Enter Site address",
+    placeholder: "Enter the {site} address",
     validationOptions: {
-      required: "Site Address is required",
+      required: "{Site} Address is required",
       minLength: {
         value: 3,
-        message: "Site Address at least 3 character",
+        message: "{Site} Address needs at least 3 characters",
       },
       maxLength: {
         value: 50,
-        message: "Site Address at most 50 character",
+        message: "{Site} Address can be at most 50 characters",
       },
       ...PATTERN,
     },
   },
   {
     name: "status",
-    labelText: "Site Status",
+    labelText: "{Site} Status",
     type: "select",
     options: [
       { value: "Active", label: "Active" },
@@ -780,11 +783,11 @@ export const SITEFIELD = [
       { value: "Completed", label: "Completed" },
       { value: "No Status", label: "No Status" },
     ],
-    validationOptions: { required: "Site Status is required" },
+    validationOptions: { required: "{Site} Status is required" },
   },
   {
     name: "siteType",
-    labelText: "Site Type",
+    labelText: "{Site} Type",
     type: "select",
     options: [
       { value: "Residential", label: "Residential" },
@@ -792,7 +795,7 @@ export const SITEFIELD = [
       { value: "Industrial", label: "Industrial" },
       { value: "Other", label: "Other" },
     ],
-    validationOptions: { required: "Site Type is required" },
+    validationOptions: { required: "{Site} Type is required" },
   },
   {
     name: "startDate",
@@ -807,18 +810,18 @@ export const SITEFIELD = [
     name: "endDate",
     labelText: "End Date",
     type: "date",
-    placeholder: "site end date",
+    placeholder: "{site} end date",
     validationOptions: {
       required: "End Date is required",
     },
   },
   {
     name: "siteDescription",
-    labelText: "Site Description",
+    labelText: "{Site} Description",
     size: true,
     type: "textarea",
-    helperText: "*Describe the Site Project",
-    placeholder: "On this site we will be doing like loft conversion...",
+    helperText: "*Describe the {site}",
+    placeholder: "What happens at this {site}…",
     validationOptions: {
       ...PATTERN,
     },
@@ -1062,11 +1065,11 @@ export const ASSIGNSITEMANAGERFIELD = [
   },
   {
     name: "projectSiteID",
-    labelText: "Site Name",
+    labelText: "{Site} Name",
     options: [],
     type: "select",
-    selectLable: "Search site",
-    validationOptions: { required: "Site Name is required" },
+    selectLable: "Search {site}",
+    validationOptions: { required: "{Site} Name is required" },
   },
   {
     name: "startDate",
@@ -1082,7 +1085,7 @@ export const ASSIGNSITEMANAGERFIELD = [
     labelText: "End Date",
     type: "date",
     placeholder: "End Date",
-    helperText: "*Leave empty if they manage this site until further notice.",
+    helperText: "*Leave empty if they manage this {site} until further notice.",
   },
 ];
 

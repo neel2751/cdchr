@@ -26,6 +26,7 @@ import {
   scopedSiteMatch,
   siteRefusal,
 } from "@/lib/siteAccess";
+import { fillTerms } from "@/data/terminology";
 
 /**
  * fetchFilterClockRecordData backs /admin/filterAttendance — everybody's clock
@@ -130,8 +131,10 @@ export const assignEmployeesToSite = withAudit(
     if (moveExisting && foreignSites.length > 0) {
       return {
         success: false,
-        message:
-          "Some employees are assigned to a site you do not manage on this date.",
+        message: fillTerms(
+          "Some of them are assigned to a {site} you do not manage on this date.",
+          scope.terms,
+        ),
       };
     }
 

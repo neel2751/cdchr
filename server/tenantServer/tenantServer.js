@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { connect } from "@/db/db";
+import { resolveTerms } from "@/data/terminology";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
@@ -276,7 +277,7 @@ export async function getBrandingForCurrentUser() {
 
     await connect();
     const tenant = await CompanyModel.findById(tenantId)
-      .select("name branding locale")
+      .select("name branding locale industry terms")
       .lean()
       .exec();
     if (!tenant) return null;
@@ -284,10 +285,13 @@ export async function getBrandingForCurrentUser() {
     // `locale` rides along with branding rather than getting its own fetch and
     // its own context: every consumer that needs a currency is already a
     // consumer of branding, and one round trip beats two for the same page.
+    // The company's words (data/terminology.js) ride along for the same
+    // reason — useTerms() reads them from here.
     return {
       name: tenant.name,
       ...resolveBranding(tenant),
       locale: resolveLocale(tenant),
+      terms: resolveTerms(tenant),
     };
   } catch (error) {
     // Branding is cosmetic — never let it break the page it decorates.

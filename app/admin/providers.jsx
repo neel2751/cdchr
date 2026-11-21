@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { SessionProvider } from "next-auth/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -10,6 +10,11 @@ import SupportBanner from "@/components/supportBanner";
 import AnnouncementBanner from "@/components/announcementBanner";
 import ScreenViewLogger from "@/components/screenViewLogger";
 import CompanyChoicePrompt from "@/components/companyChoicePrompt";
+import {
+  fillTerms,
+  fillTermsDeep,
+  resolveTerms,
+} from "@/data/terminology";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -19,6 +24,30 @@ import CompanyChoicePrompt from "@/components/companyChoicePrompt";
 const BrandingContext = createContext({});
 
 export const useBranding = () => useContext(BrandingContext) || {};
+
+/**
+ * The company's words for sites, site employees and the rest
+ * (data/terminology.js), with the two ways to use them:
+ *
+ *   const { t, fill } = useTerms();
+ *   t("siteEmployees")          // "Site Employees" / "Students"
+ *   fill("Add new {site}")      // "Add new site" / "Add new class"
+ *
+ * Outside the admin shell there is no branding, and every call answers with
+ * the construction words — what those screens said before.
+ */
+export const useTerms = () => {
+  const terms = useBranding()?.terms;
+  return useMemo(() => {
+    const words = terms || resolveTerms(null);
+    return {
+      terms: words,
+      t: (key) => words[key] ?? key,
+      fill: (text) => fillTerms(text, words),
+      fillDeep: (value) => fillTermsDeep(value, words),
+    };
+  }, [terms]);
+};
 
 const AdminProviders = ({ children, branding }) => {
   // Created in state rather than at module scope so the cache is never shared

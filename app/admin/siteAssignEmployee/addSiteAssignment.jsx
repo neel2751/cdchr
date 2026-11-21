@@ -15,11 +15,15 @@ import {
   getSelectProjects,
 } from "@/server/selectServer/selectServer";
 import { assignEmployeesToSite } from "@/server/siteAssignmentServer/siteAssignmentServer";
+import { useTerms } from "@/app/admin/providers";
 import { PlusIcon } from "lucide-react";
 import React from "react";
 
 export default function AddSiteAssignment({ queryKey }) {
   const [open, setOpen] = React.useState(false);
+  // The company's words: "Enrol Student" in a tuition centre. See
+  // data/terminology.js.
+  const { fill } = useTerms();
   const { data: sites = [] } = useFetchSelectQuery({
     queryKey: ["selectSiteProject"],
     fetchFn: getSelectProjects,
@@ -42,11 +46,11 @@ export default function AddSiteAssignment({ queryKey }) {
   const fields = [
     {
       name: "siteId",
-      labelText: "Site Project",
+      labelText: fill("{Site}"),
       type: "select",
       options: sites,
       validationOptions: {
-        required: "Site Project is Required",
+        required: fill("{Site} is required"),
       },
     },
     {
@@ -60,17 +64,18 @@ export default function AddSiteAssignment({ queryKey }) {
     },
     {
       name: "employee",
-      labelText: "Employee",
+      labelText: fill("{SiteEmployees}"),
       type: "multipleSelect",
       options: employees,
       validationOptions: {
-        required: "Select atleast one employee",
+        required: fill("Select at least one {siteEmployee}"),
       },
     },
     {
       name: "moveExisting",
-      labelText:
-        "If employee is already assigned on the same date, move them to this site",
+      labelText: fill(
+        "If they are already assigned on the same date, move them to this {site}",
+      ),
       type: "checkbox",
     },
   ];
@@ -83,14 +88,14 @@ export default function AddSiteAssignment({ queryKey }) {
         className={"cursor-pointer"}
       >
         <PlusIcon />
-        Assign Employee
+        {fill("Assign to {site}")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Assign Employee to Site</DialogTitle>
+            <DialogTitle>{fill("Assign {SiteEmployees} to a {Site}")}</DialogTitle>
             <DialogDescription>
-              Select the employee and assign them to the site.
+              {fill("Choose the {site}, the date and who to assign.")}
             </DialogDescription>
           </DialogHeader>
           <GlobalForm

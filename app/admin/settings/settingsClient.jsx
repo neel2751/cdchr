@@ -3,13 +3,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Building2, Check, Globe, Palette, SlidersHorizontal } from "lucide-react";
+import {
+  Building2,
+  Check,
+  Globe,
+  Palette,
+  SlidersHorizontal,
+  Type,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BrandingForm from "./brandingForm";
 import DomainsPanel from "./domainsPanel";
 import PlanPanel from "./planPanel";
+import TermsPanel from "./termsPanel";
 
 /**
  * Settings for every company this account owns.
@@ -123,6 +131,10 @@ const SettingsClient = ({
                 <Palette className="size-4" />
                 Branding
               </TabsTrigger>
+              <TabsTrigger value="words" className="gap-2">
+                <Type className="size-4" />
+                Words
+              </TabsTrigger>
               <TabsTrigger value="domains" className="gap-2">
                 <Globe className="size-4" />
                 Domains
@@ -141,6 +153,10 @@ const SettingsClient = ({
                 run={run}
                 isPending={isPending}
               />
+            </TabsContent>
+
+            <TabsContent value="words">
+              <TermsPanel tenant={selected} run={run} isPending={isPending} />
             </TabsContent>
 
             <TabsContent value="domains">

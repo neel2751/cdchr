@@ -22,6 +22,7 @@ import {
   resetSiteEmployeePassword,
 } from "@/server/employeServer/employeServer";
 import { BANKFIELD, EMPLOYEFIELD } from "@/data/fields/fields";
+import { useTerms } from "@/app/admin/providers";
 import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
 import Pagination from "@/lib/pagination";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
@@ -53,6 +54,9 @@ const Employee = ({ searchParams, variant = "active" }) => {
   // "active" = the main Employee List page (active staff only);
   // "previous" = the Previous Employees page (inactive staff only).
   const isPrevious = variant === "previous";
+  // The company's words: "Students" for a tuition centre. See
+  // data/terminology.js.
+  const { t, fill, fillDeep } = useTerms();
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
   const [initialValues, setInitialValues] = useState({});
@@ -116,7 +120,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
   });
   const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
 
-  const field = EMPLOYEFIELD.filter(
+  const field = fillDeep(EMPLOYEFIELD).filter(
     // Bank and NI fields are only editable by users allowed to see them; the
     // server leaves the stored values alone when these fields are absent.
     (item) =>
@@ -200,7 +204,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
       invalidateKey: queryKey,
       onSuccessMessage: (response) =>
         `${
-          alert.type === "Delete" ? "Employee Delete" : "Status Update"
+          alert.type === "Delete" ? `${t("siteEmployee")} deleted` : "Status updated"
         } successfully`,
       onClose: alertClose,
     });
@@ -354,7 +358,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
             <CardHeader>
               <div className="mb-4">
                 <CardTitle>
-                  {isPrevious ? "Previous Site Employees" : "Site Employees"}
+                  {isPrevious ? t("previousSiteEmployees") : t("siteEmployees")}
                 </CardTitle>
               </div>
               <div className="flex items-center justify-between">
@@ -419,9 +423,9 @@ const Employee = ({ searchParams, variant = "active" }) => {
                   <Dialog open={open} onOpenChange={handleClose}>
                     <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
                       <DialogHeader>
-                        <DialogTitle>Add New Role</DialogTitle>
+                        <DialogTitle>{fill("Add New {SiteEmployee}")}</DialogTitle>
                         <DialogDescription>
-                          Please fill the form to add new role
+                          Fill in the form to add them.
                         </DialogDescription>
                       </DialogHeader>
                       <EmployeeForm />
