@@ -25,6 +25,7 @@ import {
 } from "@/lib/resolveTimeZone";
 import { getZonedNow, timeForRecord } from "@/lib/timeZone";
 import ProjectSiteModel from "@/models/siteProjectModel";
+import { calculateDurationNew } from "@/lib/utils";
 
 // Assign or update today's site assignment
 export const assignEmployeesToSite = withAudit(
@@ -2457,7 +2458,7 @@ export async function storeSiteEmployeeClockTime(decode) {
       !existingAttendance.clockOut
     ) {
       const timeSinceClockIn =
-        (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+        calculateDurationNew(existingAttendance.clockIn, currentTime) / 60; // in hours
 
       if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
         return {
@@ -2489,7 +2490,7 @@ export async function storeSiteEmployeeClockTime(decode) {
       !existingAttendance.clockOut
     ) {
       const breakDuration =
-        (currentTime - existingAttendance.breakIn) / (1000 * 60); // in minutes
+        calculateDurationNew(existingAttendance.breakIn, currentTime); // in minutes
       if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
         return {
           success: false,
@@ -2515,7 +2516,7 @@ export async function storeSiteEmployeeClockTime(decode) {
 
     if (action === "clockOut" && !existingAttendance.clockOut) {
       const hoursSinceClockIn =
-        (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+        calculateDurationNew(existingAttendance.clockIn, currentTime) / 60; // in hours
       if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
         return {
           success: false,

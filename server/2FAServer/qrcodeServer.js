@@ -16,6 +16,7 @@ import {
   timeForRecord,
 } from "@/lib/timeZone";
 import { resolveTimeZone } from "@/lib/resolveTimeZone";
+import { calculateDurationNew } from "@/lib/utils";
 
 export async function getQRCodeToken(expiresIn = "20s") {
   try {
@@ -363,7 +364,7 @@ export async function storeClockTime(token, codeSiteId, action) {
         !existingAttendance.clockOut
       ) {
         const timeSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+          calculateDurationNew(existingAttendance.clockIn, currentTime) / 60; // in hours
 
         if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
           return {
@@ -387,7 +388,7 @@ export async function storeClockTime(token, codeSiteId, action) {
         !existingAttendance.clockOut
       ) {
         const breakDuration =
-          (currentTime - existingAttendance.breakIn) / (1000 * 60); // in minutes
+          calculateDurationNew(existingAttendance.breakIn, currentTime); // in minutes
         if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
           return {
             success: false,
@@ -406,7 +407,7 @@ export async function storeClockTime(token, codeSiteId, action) {
 
       if (action === "clockOut" && !existingAttendance.clockOut) {
         const hoursSinceClockIn =
-          (currentTime - existingAttendance.clockIn) / (1000 * 60 * 60); // in hours
+          calculateDurationNew(existingAttendance.clockIn, currentTime) / 60; // in hours
         if (hoursSinceClockIn < MIN_WORK_HOURS_TO_CLOCK_OUT) {
           return {
             success: false,
@@ -524,7 +525,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
           return { success: false, message: "You must Break Out first." };
         }
         const timeSinceClockIn =
-          (currentTime - existingRecord.clockIn) / (1000 * 60 * 60); // in hours
+          calculateDurationNew(existingRecord.clockIn, currentTime) / 60; // in hours
         if (timeSinceClockIn < MIN_BREAK_TIME_HOURS) {
           return {
             success: false,
@@ -546,7 +547,7 @@ export async function storeClockTimeNew(token, codeSiteId, action) {
           return { success: false, message: "You must Break In first." };
         }
         const breakDuration =
-          (currentTime - existingRecord.breakIn) / (1000 * 60); // in minutes
+          calculateDurationNew(lastBreak.breakIn, currentTime); // in minutes
         if (breakDuration < MIN_BREAK_DURATION_MINUTES) {
           return {
             success: false,
