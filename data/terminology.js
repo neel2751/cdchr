@@ -92,6 +92,9 @@ export const INDUSTRY_TEMPLATES = [
     featurePreset: "construction",
     // Parts of the site employee form it uses (data/fieldBlocks.js).
     blocks: ["pay", "constructionTax", "employment", "rightToWork"],
+    // How people are put on a place by default: "day" (each day) or
+    // "ongoing" (from a date until further notice). See lib/roster.js.
+    assignmentStyle: "day",
     terms: {
       site: "Site",
       sites: "Sites",
@@ -110,6 +113,9 @@ export const INDUSTRY_TEMPLATES = [
     featurePreset: "restaurant",
     // Parts of the site employee form it uses (data/fieldBlocks.js).
     blocks: ["pay", "employment", "rightToWork"],
+    // How people are put on a place by default: "day" (each day) or
+    // "ongoing" (from a date until further notice). See lib/roster.js.
+    assignmentStyle: "day",
     terms: {
       site: "Branch",
       sites: "Branches",
@@ -128,6 +134,9 @@ export const INDUSTRY_TEMPLATES = [
     featurePreset: "tuition",
     // Parts of the site employee form it uses (data/fieldBlocks.js).
     blocks: ["guardian", "medical", "education"],
+    // How people are put on a place by default: "day" (each day) or
+    // "ongoing" (from a date until further notice). See lib/roster.js.
+    assignmentStyle: "ongoing",
     terms: {
       site: "Class",
       sites: "Classes",

@@ -9,7 +9,7 @@ import ClockLocationModel from "@/models/clockLocationModel";
 import ClockTagModel from "@/models/clockTagModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
-import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import { isRostered } from "@/lib/roster";
 import { getClockRules } from "../settingsServer/workSettings";
 import { getServerSideProps } from "../session/session";
 import { findActionRecord, performClockAction } from "./clockActions";
@@ -273,13 +273,12 @@ export async function storeClockTimeByTag(
     // were meant to be. A site's tag is only good for someone rostered to that
     // site that day.
     if (location.projectSiteId) {
-      const rostered = await SiteAssignmentModel.findOne({
-        assignDate: date,
+      // A day's assignment or an ongoing one (lib/roster.js).
+      const rostered = await isRostered({
         siteId: location.projectSiteId,
-        "assignedEmployees.employeeId": createObjectId(employeeId),
-      })
-        .select("_id")
-        .lean();
+        employeeId,
+        date,
+      });
       if (!rostered) {
         return {
           success: false,

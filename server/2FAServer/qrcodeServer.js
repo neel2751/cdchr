@@ -8,7 +8,7 @@ import {
   consumeClockToken,
   verifyClockToken,
 } from "@/server/clockServer/clockTokenStore";
-import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import { isRostered } from "@/lib/roster";
 import { resolveOrCreateLocationForSite } from "@/server/clockServer/clockLocationStore";
 import ClockLocationModel from "@/models/clockLocationModel";
 import { performClockAction } from "@/server/clockServer/clockActions";
@@ -58,13 +58,8 @@ async function canClockAtLocation({
     return { ok: true };
   }
 
-  const assigned = await SiteAssignmentModel.findOne({
-    assignDate: date,
-    siteId: createObjectId(siteId),
-    "assignedEmployees.employeeId": createObjectId(employeeId),
-  })
-    .select("_id")
-    .lean();
+  // A day's assignment or an ongoing one (lib/roster.js).
+  const assigned = await isRostered({ siteId, employeeId, date });
 
   if (!assigned) {
     return {

@@ -48,6 +48,7 @@ import { useCommonContext } from "@/context/commonContext";
 import { useFieldBlocks, useTerms } from "@/app/admin/providers";
 import { useSession } from "next-auth/react";
 import AddSiteAssignment from "./addSiteAssignment";
+import OngoingAssignments from "./ongoingAssignments";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import OfficeQRCode from "@/app/hr/code/code";
 import { checkPermission } from "@/server/permissionServer/permissionServer";
@@ -309,7 +310,12 @@ const EmployeeSiteManagement = () => {
             <CardTitle>Time Tracking Dashboard</CardTitle>
             <CardDescription>Current Time</CardDescription>
           </div>
-          {hasPermission && <AddSiteAssignment queryKey={queryKey} />}
+          {hasPermission && (
+            <div className="flex items-center gap-2">
+              <OngoingAssignments queryKey={queryKey} />
+              <AddSiteAssignment queryKey={queryKey} />
+            </div>
+          )}
         </CardHeader>
         <CardContent className={"grid grid-cols-5 gap-5"}>
           <Card className="bg-indigo-50 text-indigo-600 border-none shadow-none">
@@ -444,7 +450,16 @@ const EmployeeSiteManagement = () => {
 
                     return (
                       <TableRow key={index}>
-                        <TableCell>{assignment?.firstName}</TableCell>
+                        <TableCell>
+                          {assignment?.firstName}
+                          {/* On the board by an ongoing assignment rather
+                              than today's; ended from the Ongoing list. */}
+                          {assignment?.standing && (
+                            <Badge variant="secondary" className="ml-2">
+                              Ongoing
+                            </Badge>
+                          )}
+                        </TableCell>
 
                         <TableCell>{assignment?.siteName || "None"}</TableCell>
 
@@ -686,8 +701,12 @@ const EmployeeSiteManagement = () => {
                                   </Button>
                                 )}
 
+                                {/* Moving is for a day's assignment. An
+                                    ongoing one is ended and a new one made,
+                                    so its history stays readable. */}
                                 {(role === "superAdmin" ||
-                                  role === "admin") && (
+                                  role === "admin") &&
+                                  !assignment.standing && (
                                   <div className="flex items-center gap-2 min-w-[240px]">
                                     <Select
                                       value={

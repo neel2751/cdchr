@@ -1,6 +1,12 @@
 "use server";
 
 import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import ProjectSiteModel from "@/models/siteProjectModel";
+import {
+  rosteredSiteFor,
+  standingAsDailyStages,
+  standingEmployeeIds,
+} from "@/lib/roster";
 import { getServerSideProps } from "../session/session";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { getWorkingDate, toWorkingDate } from "@/lib/clockTime";
@@ -344,6 +350,18 @@ export async function fetchClockRecordsTest({
     return { success: false, message: "Invalid employeeId" };
   }
 
+  // People on the site by an ongoing assignment (lib/roster.js), read here
+  // and passed in as a list: a $unionWith inside the $facet below would not
+  // be scoped to the company by lib/tenantPlugin.js.
+  const standingIds = (
+    await standingEmployeeIds({
+      start,
+      end,
+      siteMatch:
+        siteId && siteId !== "All" ? createObjectId(siteId) : undefined,
+    })
+  ).map((id) => createObjectId(id));
+
   // Build facet pipelines:
   // assigned facet -> list of assigned employeeIds within date range (for given site if provided)
   const assignedFacetPipeline = [
@@ -407,6 +425,7 @@ export async function fetchClockRecordsTest({
           $setUnion: [
             { $map: { input: "$assigned", as: "a", in: "$$a.employeeId" } },
             { $map: { input: "$clocked", as: "c", in: "$$c.employeeId" } },
+            { $literal: standingIds },
           ],
         },
       },
@@ -483,7 +502,12 @@ export async function fetchClockRecordsTest({
 
     {
       $addFields: {
-        isAssigned: { $gt: [{ $size: "$assignmentForSite" }, 0] },
+        isAssigned: {
+          $or: [
+            { $gt: [{ $size: "$assignmentForSite" }, 0] },
+            { $in: ["$employeeId", { $literal: standingIds }] },
+          ],
+        },
       },
     },
 
@@ -1132,6 +1156,15 @@ export async function fetchAssignedWithClocksNew({
 
   const basePipeline = [
     { $match: filter },
+    // Ongoing assignments, as one row per covered day in the same shape, so
+    // a student enrolled for the year is on the board every class day without
+    // anyone assigning them again (lib/roster.js).
+    ...standingAsDailyStages({
+      start,
+      end,
+      siteMatch: filter.siteId,
+      employeeId,
+    }),
     { $unwind: "$assignedEmployees" },
 
     ...(employeeId
@@ -1147,6 +1180,30 @@ export async function fetchAssignedWithClocksNew({
     {
       $match: {
         assignDate: { $gte: start, $lte: end },
+      },
+    },
+
+    // Somebody with both a day's assignment and an ongoing one for the same
+    // site and day is one row, and the day's wins — it is the more specific
+    // instruction. Sorted, because paging an unsorted union could show a
+    // person on two pages or none.
+    { $sort: { standing: 1 } },
+    {
+      $group: {
+        _id: {
+          siteId: "$siteId",
+          assignDate: "$assignDate",
+          employeeId: "$assignedEmployees.employeeId",
+        },
+        doc: { $first: "$$ROOT" },
+      },
+    },
+    { $replaceRoot: { newRoot: "$doc" } },
+    {
+      $sort: {
+        assignDate: -1,
+        siteId: 1,
+        "assignedEmployees.employeeId": 1,
       },
     },
 
@@ -1338,6 +1395,10 @@ export async function fetchAssignedWithClocksNew({
         isLocked: "$assignedEmployees.isLocked",
         assignedAt: "$assignedEmployees.assignedAt",
 
+        // An ongoing assignment rather than a day's — the board offers
+        // "end" for these, not "move".
+        standing: { $ifNull: ["$standing", false] },
+        standingId: { $ifNull: ["$standingId", null] },
         clockRecordId: { $ifNull: ["$clockRecord._id", null] },
         date: { $ifNull: ["$clockRecord.date", null] },
         clockIn: { $ifNull: ["$clockRecord.clockIn", null] },
@@ -1580,17 +1641,16 @@ export const canEmployeeClockToday = async () => {
     if (!employeeId)
       return { success: false, message: "Please contact the admin" };
 
-    const assignDate = getWorkingDate();
-
-    const result = await SiteAssignmentModel.findOne({
-      assignDate,
-      "assignedEmployees.employeeId": createObjectId(employeeId),
-    }).populate({
-      path: "siteId",
-      select: "siteName",
+    // A day's assignment first, then an ongoing one (lib/roster.js).
+    const siteId = await rosteredSiteFor({
+      employeeId,
+      date: getWorkingDate(),
     });
+    const site = siteId
+      ? await ProjectSiteModel.findById(siteId).select("siteName").lean()
+      : null;
 
-    if (result) return { success: true, data: JSON.stringify(result.siteId) };
+    if (site) return { success: true, data: JSON.stringify(site) };
     return { success: false, message: "Admin didn't assign site today" };
   } catch (error) {
     console.log(error);

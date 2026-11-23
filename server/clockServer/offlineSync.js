@@ -7,7 +7,7 @@ import ClockLocationModel from "@/models/clockLocationModel";
 import ClockRecordModel from "@/models/clockInModel";
 import EmployeModel from "@/models/employeModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
-import SiteAssignmentModel from "@/models/siteAssignmentModel";
+import { isRostered } from "@/lib/roster";
 import { getServerSideProps } from "../session/session";
 import { performClockAction } from "./clockActions";
 import { recordSighting, resolveTag } from "./clockTagStore";
@@ -165,13 +165,12 @@ async function replayOne({ entry, employeeId, employeeType, officeEmployee, sync
   // --- rostered, on the day they say they worked ---------------------------
   const date = toWorkingDate(claimed) || getWorkingDate();
   if (location.projectSiteId) {
-    const rostered = await SiteAssignmentModel.findOne({
-      assignDate: date,
+    // A day's assignment or an ongoing one (lib/roster.js).
+    const rostered = await isRostered({
       siteId: location.projectSiteId,
-      "assignedEmployees.employeeId": createObjectId(employeeId),
-    })
-      .select("_id")
-      .lean();
+      employeeId,
+      date,
+    });
     if (!rostered) {
       return refuse("You were not assigned to this site that day.");
     }

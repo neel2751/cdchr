@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { connect } from "@/db/db";
-import { resolveTerms } from "@/data/terminology";
+import { industryTemplate, resolveTerms } from "@/data/terminology";
 import { resolveCompanyBlocks } from "@/data/fieldBlocks";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
@@ -295,6 +295,8 @@ export async function getBrandingForCurrentUser() {
       terms: resolveTerms(tenant),
       // Which parts of the site employee form and lists apply — useFieldBlocks().
       fieldBlocks: resolveCompanyBlocks(tenant),
+      // "day" or "ongoing": which the assign dialog starts on.
+      assignmentStyle: industryTemplate(tenant.industry).assignmentStyle,
     };
   } catch (error) {
     // Branding is cosmetic — never let it break the page it decorates.
