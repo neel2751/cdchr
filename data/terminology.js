@@ -78,7 +78,8 @@ export const TERM_KEYS = TERM_FIELDS.map((f) => f.key);
 export const TERM_MAX_LENGTH = 40;
 
 /**
- * Starting points. `terms` must give every key in TERM_FIELDS.
+ * Starting points. `terms` must give every key in TERM_FIELDS; `blocks` lists
+ * the FIELD_BLOCKS (data/fieldBlocks.js) its second group's form uses.
  *
  * Construction is exactly what the screens said before this file existed, so
  * an existing company sees no change. `featurePreset` names the FEATURE_PRESETS
@@ -89,6 +90,8 @@ export const INDUSTRY_TEMPLATES = [
     key: "construction",
     label: "Construction",
     featurePreset: "construction",
+    // Parts of the site employee form it uses (data/fieldBlocks.js).
+    blocks: ["pay", "constructionTax", "employment", "rightToWork"],
     terms: {
       site: "Site",
       sites: "Sites",
@@ -105,6 +108,8 @@ export const INDUSTRY_TEMPLATES = [
     key: "restaurant",
     label: "Restaurant / hospitality",
     featurePreset: "restaurant",
+    // Parts of the site employee form it uses (data/fieldBlocks.js).
+    blocks: ["pay", "employment", "rightToWork"],
     terms: {
       site: "Branch",
       sites: "Branches",
@@ -121,6 +126,8 @@ export const INDUSTRY_TEMPLATES = [
     key: "tuition",
     label: "Tuition / classes",
     featurePreset: "tuition",
+    // Parts of the site employee form it uses (data/fieldBlocks.js).
+    blocks: ["guardian", "medical", "education"],
     terms: {
       site: "Class",
       sites: "Classes",

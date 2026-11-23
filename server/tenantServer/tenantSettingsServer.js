@@ -10,6 +10,7 @@ import {
   cleanTerms,
   resolveTerms,
 } from "@/data/terminology";
+import { resolveCompanyBlocks } from "@/data/fieldBlocks";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { storeTenantLogo, ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES } from "../aws/branding";
@@ -18,6 +19,7 @@ import {
   applyBranding,
   applySlug,
   applyTerms,
+  applyFieldBlocks,
   removeDomain,
   setPrimaryDomain,
   verifyDomain,
@@ -123,6 +125,8 @@ function serializeTenant(tenant) {
     industry: tenant.industry || DEFAULT_INDUSTRY,
     storedTerms: cleanTerms(tenant.terms),
     terms: resolveTerms(tenant),
+    // The Form tab: which parts of the site employee form are on.
+    fieldBlocks: resolveCompanyBlocks(tenant),
     domains: (tenant.domains || []).map((d) => ({
       host: d.host,
       isPrimary: !!d.isPrimary,
@@ -190,6 +194,17 @@ export const updateTenantTerms = withAudit(
   "Tenant.updateTerms",
   async (tenantId, data) =>
     asCompanyAdmin(tenantId, (id) => applyTerms(id, data), "Updated words"),
+  { module: "Tenant" }
+);
+
+export const updateTenantFieldBlocks = withAudit(
+  "Tenant.updateFieldBlocks",
+  async (tenantId, data) =>
+    asCompanyAdmin(
+      tenantId,
+      (id) => applyFieldBlocks(id, data),
+      "Updated the site employee form"
+    ),
   { module: "Tenant" }
 );
 

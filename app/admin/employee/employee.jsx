@@ -22,7 +22,8 @@ import {
   resetSiteEmployeePassword,
 } from "@/server/employeServer/employeServer";
 import { BANKFIELD, EMPLOYEFIELD } from "@/data/fields/fields";
-import { useTerms } from "@/app/admin/providers";
+import { useFieldBlocks, useTerms } from "@/app/admin/providers";
+import { filterFieldsByBlocks } from "@/data/fieldBlocks";
 import { canViewSensitiveDetails } from "@/server/officeServer/sensitiveDetailsServer";
 import Pagination from "@/lib/pagination";
 import { getSelectProjects } from "@/server/selectServer/selectServer";
@@ -57,6 +58,9 @@ const Employee = ({ searchParams, variant = "active" }) => {
   // The company's words: "Students" for a tuition centre. See
   // data/terminology.js.
   const { t, fill, fillDeep } = useTerms();
+  // Which parts of the form this company uses: no pay or CIS for students, no
+  // guardian for a builder's workers. See data/fieldBlocks.js.
+  const blocks = useFieldBlocks();
   const currentPage = parseInt(searchParams.page || "1");
   const pagePerData = parseInt(searchParams.pageSize || "10");
   const [initialValues, setInitialValues] = useState({});
@@ -120,20 +124,22 @@ const Employee = ({ searchParams, variant = "active" }) => {
   });
   const canSeeSensitiveDetails = sensitiveAccess?.newData === true;
 
-  const field = fillDeep(EMPLOYEFIELD).filter(
-    // Bank and NI fields are only editable by users allowed to see them; the
-    // server leaves the stored values alone when these fields are absent.
-    (item) =>
-      canSeeSensitiveDetails || !PROTECTED_FIELD_NAMES.includes(item.name),
-  ).map((item) => {
-    if (item.name === "projectSite") {
-      return {
-        ...item,
-        options: selectSiteProject,
-      };
-    }
-    return item;
-  });
+  const field = filterFieldsByBlocks(fillDeep(EMPLOYEFIELD), blocks)
+    .filter(
+      // Bank and NI fields are only editable by users allowed to see them; the
+      // server leaves the stored values alone when these fields are absent.
+      (item) =>
+        canSeeSensitiveDetails || !PROTECTED_FIELD_NAMES.includes(item.name),
+    )
+    .map((item) => {
+      if (item.name === "projectSite") {
+        return {
+          ...item,
+          options: selectSiteProject,
+        };
+      }
+      return item;
+    });
 
   const handleClose = () => {
     setInitialValues({});
@@ -177,7 +183,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
     if (isChecked) {
       if (data?.payRate === initialValues?.payRate) {
         return toast.error(
-          " Pay Rate should be different than previous one,  if you want to update"
+          " Pay Rate should be different than previous one,  if you want to update",
         );
       }
       const confir = confirm(" Are you sure you want to submit this form?");
@@ -204,7 +210,9 @@ const Employee = ({ searchParams, variant = "active" }) => {
       invalidateKey: queryKey,
       onSuccessMessage: (response) =>
         `${
-          alert.type === "Delete" ? `${t("siteEmployee")} deleted` : "Status updated"
+          alert.type === "Delete"
+            ? `${t("siteEmployee")} deleted`
+            : "Status updated"
         } successfully`,
       onClose: alertClose,
     });
@@ -349,6 +357,7 @@ const Employee = ({ searchParams, variant = "active" }) => {
           totalCount,
           onSendVisaReminder,
           onRecordRightToWork,
+          blocks,
           isSendingReminder,
           onResetPassword,
         }}
@@ -364,56 +373,62 @@ const Employee = ({ searchParams, variant = "active" }) => {
               <div className="flex items-center justify-between">
                 <SearchDebounce />
                 <div className="flex gap-2">
-                  <div>
-                    <SelectFilter
-                      label="Pay Type"
-                      value={filter.employeType}
-                      frameworks={[
-                        { label: "All", value: "" },
-                        {
-                          label: "Monthly",
-                          value: "Monthly",
-                        },
-                        {
-                          label: "Weekly",
-                          value: "Weekly",
-                        },
-                      ]}
-                      placeholder="All"
-                      onChange={(e) => updateFilter({ employeType: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    <SelectFilter
-                      label="Immigration"
-                      value={filter.type}
-                      frameworks={[
-                        { label: "All", value: "" },
-                        {
-                          label: "British",
-                          value: "British",
-                        },
-                        {
-                          label: "Immigrant",
-                          value: "Immigrant",
-                        },
-                      ]}
-                      placeholder="All"
-                      onChange={(e) => updateFilter({ type: e })}
-                      noData="No Data found"
-                    />
-                  </div>
-                  <div>
-                    <SelectFilter
-                      label="Visa"
-                      value={filter.visaStatus}
-                      frameworks={VISA_STATUS_OPTIONS}
-                      placeholder="All Visa"
-                      onChange={(e) => updateFilter({ visaStatus: e })}
-                      noData="No Data found"
-                    />
-                  </div>
+                  {blocks.pay && (
+                    <div>
+                      <SelectFilter
+                        label="Pay Type"
+                        value={filter.employeType}
+                        frameworks={[
+                          { label: "All", value: "" },
+                          {
+                            label: "Monthly",
+                            value: "Monthly",
+                          },
+                          {
+                            label: "Weekly",
+                            value: "Weekly",
+                          },
+                        ]}
+                        placeholder="All"
+                        onChange={(e) => updateFilter({ employeType: e })}
+                        noData="No Data found"
+                      />
+                    </div>
+                  )}
+                  {blocks.rightToWork && (
+                    <>
+                      <div>
+                        <SelectFilter
+                          label="Immigration"
+                          value={filter.type}
+                          frameworks={[
+                            { label: "All", value: "" },
+                            {
+                              label: "British",
+                              value: "British",
+                            },
+                            {
+                              label: "Immigrant",
+                              value: "Immigrant",
+                            },
+                          ]}
+                          placeholder="All"
+                          onChange={(e) => updateFilter({ type: e })}
+                          noData="No Data found"
+                        />
+                      </div>
+                      <div>
+                        <SelectFilter
+                          label="Visa"
+                          value={filter.visaStatus}
+                          frameworks={VISA_STATUS_OPTIONS}
+                          placeholder="All Visa"
+                          onChange={(e) => updateFilter({ visaStatus: e })}
+                          noData="No Data found"
+                        />
+                      </div>
+                    </>
+                  )}
                   {!isPrevious && (
                     <Button onClick={handleOpen}>
                       <Plus />
@@ -423,7 +438,9 @@ const Employee = ({ searchParams, variant = "active" }) => {
                   <Dialog open={open} onOpenChange={handleClose}>
                     <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
                       <DialogHeader>
-                        <DialogTitle>{fill("Add New {SiteEmployee}")}</DialogTitle>
+                        <DialogTitle>
+                          {fill("Add New {SiteEmployee}")}
+                        </DialogTitle>
                         <DialogDescription>
                           Fill in the form to add them.
                         </DialogDescription>

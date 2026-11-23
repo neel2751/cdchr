@@ -729,6 +729,57 @@ export const EMPLOYEFIELD = [
       required: " Visa Expiry Date is required",
     },
   },
+  // Parent or guardian, medical and school — the "guardian", "medical" and
+  // "education" blocks in data/fieldBlocks.js. Only companies using those
+  // blocks see them (a tuition centre does, a builder does not); the site
+  // employee screen filters the rest out before the form sees them.
+  {
+    name: "guardianName",
+    labelText: "Parent / Guardian Name",
+    type: "text",
+    placeholder: "Who to contact about them",
+    validationOptions: { required: "Parent or guardian name is required" },
+  },
+  {
+    name: "guardianRelation",
+    labelText: "Relationship",
+    type: "text",
+    placeholder: "Mother, father, carer…",
+  },
+  {
+    name: "guardianPhone",
+    labelText: "Parent / Guardian Phone",
+    type: "tel",
+    placeholder: "07…",
+    validationOptions: { required: "Parent or guardian phone is required" },
+  },
+  {
+    name: "guardianEmail",
+    labelText: "Parent / Guardian Email",
+    type: "email",
+    placeholder: "parent@example.com",
+  },
+  {
+    name: "schoolName",
+    labelText: "School",
+    type: "text",
+    placeholder: "The school they attend",
+  },
+  {
+    name: "yearGroup",
+    labelText: "Year / Grade",
+    type: "text",
+    placeholder: "Year 9",
+  },
+  {
+    name: "medicalNotes",
+    labelText: "Medical Notes and Allergies",
+    type: "textarea",
+    size: true,
+    helperText:
+      "*Shown to the people looking after them. Leave empty if there is nothing to know.",
+    placeholder: "Asthma — inhaler in bag. Nut allergy.",
+  },
   ...EMERGENCYFIELD,
 ];
 

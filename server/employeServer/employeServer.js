@@ -22,6 +22,11 @@ import {
 } from "../authServer/duplicateAccounts";
 import { getSensitiveAccess, stripSensitiveDetails } from "@/lib/sensitiveAccess";
 import { permissionRefusal } from "@/lib/actionAccess";
+import { getTenantFieldBlocks } from "@/lib/tenantTerms";
+import {
+  fieldsOfDisabledBlocks,
+  requiredFieldsFor,
+} from "@/data/fieldBlocks";
 
 /** The site staff list, read only by /admin/employee and its leavers screen. */
 const STAFF_LIST = ["/admin/employee", "/admin/previousEmployee"];
@@ -231,15 +236,42 @@ export const getAllEmployees = async (filterData) => {
 
 export const handleEmploye = withAudit(
   "Employee.upsert",
-  async (data, isChecked, id) => {
-    if (!data) return { status: false, message: "Please Provide Informations" };
+  async (input, isChecked, id) => {
+    if (!input) return { status: false, message: "Please Provide Informations" };
     // if (!images) return { status: true, message: "success" };
-    const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
-    const Payrate = payRateValidation.test(String(Number(data?.payRate)));
-    if (Payrate === false)
-      return { status: false, message: "Invalid Pay Rate" };
+
+    // What this company's form asks for (data/fieldBlocks.js). A tuition
+    // centre's students have no pay rate, CIS or visa, and a builder's workers
+    // have no guardian, so neither is required of the other — and a field from
+    // a block the company does not use is not stored, whatever was sent.
+    const { props } = await getServerSideProps();
+    const blocks = await getTenantFieldBlocks(props?.session?.user?.tenantId);
+    const data = { ...input };
+    for (const name of fieldsOfDisabledBlocks(blocks)) delete data[name];
+    const missing = requiredFieldsFor(blocks).filter(
+      (name) => data[name] === undefined || String(data[name]).trim() === ""
+    );
+    if (missing.length) {
+      return {
+        success: false,
+        message: `Missing required details: ${missing.join(", ")}`,
+      };
+    }
+
+    if (blocks.pay) {
+      const payRateValidation = /^([1-9][\d]{0,7})(\.\d{0,2})?$/; // 1.5 or 15.68 or .34 only
+      const Payrate = payRateValidation.test(String(Number(data?.payRate)));
+      if (Payrate === false)
+        return { status: false, message: "Invalid Pay Rate" };
+    }
     try {
-      const employeType = data?.paymentType === "Monthly" ? "Payroll" : "CIS";
+      // Payroll or CIS is a pay label. Without the pay block there is no pay
+      // to label, and calling a student "CIS" would be simply wrong.
+      const employeType = blocks.pay
+        ? data?.paymentType === "Monthly"
+          ? "Payroll"
+          : "CIS"
+        : undefined;
       await connect(); //connect to the database
       const {
         address,
@@ -294,7 +326,7 @@ export const handleEmploye = withAudit(
               ...stripRightToWorkFields(data),
               eAddress: eAddress,
               ...(bankDetail ? { bankDetail } : {}),
-              employeType,
+              ...(employeType ? { employeType } : {}),
             },
           },
           { new: true },
@@ -347,7 +379,7 @@ export const handleEmploye = withAudit(
           ...stripRightToWorkFields(data),
           eAddress: eAddress,
           ...(bankDetail ? { bankDetail } : {}),
-          employeType,
+          ...(employeType ? { employeType } : {}),
           password,
         }); // create new employee
         if (!addEmploye)

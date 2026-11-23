@@ -97,7 +97,7 @@ const employeSchema = new mongoose.Schema(
     },
     employeType: {
       type: String,
-      required: true,
+      required: false,
     },
     paymentType: {
       // MONTHLY or WEEKLY
@@ -114,7 +114,7 @@ const employeSchema = new mongoose.Schema(
     },
     cisDeduction: {
       type: Number,
-      required: true,
+      required: false,
     },
     bankDetail: {
       type: bankDetailSchema,
@@ -127,11 +127,11 @@ const employeSchema = new mongoose.Schema(
     payType: {
       type: String,
       enum: ["Hourly", "Daily", "Weekly", "Fortnightly", "Monthly", "Yearly"],
-      required: true,
+      required: false,
     },
     payRate: {
       type: Number,
-      required: true,
+      required: false,
     },
     startDate: {
       type: Date,
@@ -143,16 +143,27 @@ const employeSchema = new mongoose.Schema(
     },
     employeRole: {
       type: String,
-      required: true,
+      required: false,
     },
     immigrationType: {
       type: String,
-      required: true,
+      required: false,
     },
     immigrationCategory: {
       type: String,
       required: false,
     },
+    // Parent or guardian, medical notes and school: the blocks a tuition
+    // centre uses (data/fieldBlocks.js). Optional here like the worker-only
+    // fields above — which block a company uses decides what is required, and
+    // the server enforces it (handleEmploye), not the schema.
+    guardianName: { type: String, required: false },
+    guardianRelation: { type: String, required: false },
+    guardianPhone: { type: String, required: false },
+    guardianEmail: { type: String, required: false },
+    medicalNotes: { type: String, required: false },
+    schoolName: { type: String, required: false },
+    yearGroup: { type: String, required: false },
     utr: {
       type: String,
       required: false,

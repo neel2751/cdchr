@@ -45,7 +45,7 @@ import SearchDebounce from "@/components/search/searchDebounce";
 import { moveEmployeeToNewSite } from "@/server/timeOffServer/updateClockServer";
 import { SelectFilter } from "@/components/selectFilter/selectFilter";
 import { useCommonContext } from "@/context/commonContext";
-import { useTerms } from "@/app/admin/providers";
+import { useFieldBlocks, useTerms } from "@/app/admin/providers";
 import { useSession } from "next-auth/react";
 import AddSiteAssignment from "./addSiteAssignment";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
@@ -65,6 +65,9 @@ const EmployeeSiteManagement = () => {
   // The company's words: "Students" and "class" for a tuition centre. See
   // data/terminology.js.
   const { fill } = useTerms();
+  // No pay column where the company does not pay these people — students,
+  // members. See data/fieldBlocks.js.
+  const { pay: showsPay } = useFieldBlocks();
   const queryClient = useQueryClient();
   const [showEditForm, setShowEditForm] = useState({});
   const [moveSiteByEmployee, setMoveSiteByEmployee] = useState({});
@@ -289,7 +292,7 @@ const EmployeeSiteManagement = () => {
 
   const hasPermission = data?.newData;
 
-  if (role === "superAdmin" || role === "admin") {
+  if ((role === "superAdmin" || role === "admin") && showsPay) {
     commonHeaders.push("Pay");
     commonHeaders.push("Actions");
   } else {
@@ -535,7 +538,8 @@ const EmployeeSiteManagement = () => {
                         <TableCell>{breakHours || "-"}</TableCell>
 
                         {/* PAY */}
-                        {(role === "superAdmin" || role === "admin") && (
+                        {(role === "superAdmin" || role === "admin") &&
+                          showsPay && (
                           <TableCell>
                             {formatCurrency(
                               calculateTotalPay(

@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { connect } from "@/db/db";
 import { resolveTerms } from "@/data/terminology";
+import { resolveCompanyBlocks } from "@/data/fieldBlocks";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
@@ -277,7 +278,7 @@ export async function getBrandingForCurrentUser() {
 
     await connect();
     const tenant = await CompanyModel.findById(tenantId)
-      .select("name branding locale industry terms")
+      .select("name branding locale industry terms fieldBlocks")
       .lean()
       .exec();
     if (!tenant) return null;
@@ -292,6 +293,8 @@ export async function getBrandingForCurrentUser() {
       ...resolveBranding(tenant),
       locale: resolveLocale(tenant),
       terms: resolveTerms(tenant),
+      // Which parts of the site employee form and lists apply — useFieldBlocks().
+      fieldBlocks: resolveCompanyBlocks(tenant),
     };
   } catch (error) {
     // Branding is cosmetic — never let it break the page it decorates.

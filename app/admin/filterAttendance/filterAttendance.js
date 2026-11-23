@@ -25,7 +25,7 @@ import {
   getSelectSiteEmployee,
 } from "@/server/selectServer/selectServer";
 import { logCsvExport } from "@/server/auditServer/exportAudit";
-import { useTerms } from "@/app/admin/providers";
+import { useFieldBlocks, useTerms } from "@/app/admin/providers";
 
 // Labels hold data/terminology.js tokens; the component fills them with the
 // company's words ("Student" for a tuition centre).
@@ -76,6 +76,9 @@ function StatCard({ label, value, hint, className }) {
 
 const FilterAttendance = ({ searchParams }) => {
   const { t, fill, fillDeep } = useTerms();
+  // Pay type only means something where the company pays these people. See
+  // data/fieldBlocks.js.
+  const { pay: showsPay } = useFieldBlocks();
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page || "1");
   const pagePerData = parseInt(searchParams?.pageSize || "10");
@@ -192,7 +195,7 @@ const FilterAttendance = ({ searchParams }) => {
         [t("site")]: item?.siteName || (isLeave ? "-" : "Office"),
         Date: format(new Date(item?.date), "PPP"),
         Status: STATUS_LABEL[item?.kind] || item?.kind,
-        PaymentType: item?.paymentType || "-",
+        ...(showsPay ? { PaymentType: item?.paymentType || "-" } : {}),
         ClockIn: isLeave ? "-" : item?.clockIn || "-",
         ClockOut: isLeave ? "-" : item?.clockOut || "-",
         Breaks: isLeave
@@ -227,7 +230,7 @@ const FilterAttendance = ({ searchParams }) => {
           : "-",
       };
     });
-  }, [newData, t]);
+  }, [newData, t, showsPay]);
 
   const exportedCSV = () => {
     if (!newData || totalCount === 0) return [];
@@ -347,14 +350,16 @@ const FilterAttendance = ({ searchParams }) => {
                 noData="No employees found"
               />
 
-              <SelectFilter
-                label="Payment"
-                value={filter?.paymentType}
-                frameworks={PAYMENT_OPTIONS}
-                placeholder="Payment Type"
-                onChange={(e) => setFilter({ ...filter, paymentType: e })}
-                noData="No Data found"
-              />
+              {showsPay && (
+                <SelectFilter
+                  label="Payment"
+                  value={filter?.paymentType}
+                  frameworks={PAYMENT_OPTIONS}
+                  placeholder="Payment Type"
+                  onChange={(e) => setFilter({ ...filter, paymentType: e })}
+                  noData="No Data found"
+                />
+              )}
               <DatePickerWithRange date={date} setDate={setDate} />
             </div>
           </div>

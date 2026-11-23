@@ -15,6 +15,7 @@ import {
   fillTermsDeep,
   resolveTerms,
 } from "@/data/terminology";
+import { resolveCompanyBlocks } from "@/data/fieldBlocks";
 
 /**
  * The company's branding, resolved on the server and handed to the shell.
@@ -47,6 +48,18 @@ export const useTerms = () => {
       fillDeep: (value) => fillTermsDeep(value, words),
     };
   }, [terms]);
+};
+
+/**
+ * Which parts of the site employee form and lists this company uses
+ * (data/fieldBlocks.js): `blocks.pay`, `blocks.rightToWork`, `blocks.guardian`.
+ *
+ * Outside the admin shell, the construction set — what those screens showed
+ * before.
+ */
+export const useFieldBlocks = () => {
+  const blocks = useBranding()?.fieldBlocks;
+  return useMemo(() => blocks || resolveCompanyBlocks(null), [blocks]);
 };
 
 const AdminProviders = ({ children, branding }) => {

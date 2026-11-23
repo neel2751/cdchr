@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   Building2,
   Check,
+  ClipboardList,
   Globe,
   Palette,
   SlidersHorizontal,
@@ -18,6 +19,7 @@ import BrandingForm from "./brandingForm";
 import DomainsPanel from "./domainsPanel";
 import PlanPanel from "./planPanel";
 import TermsPanel from "./termsPanel";
+import FormPanel from "./formPanel";
 
 /**
  * Settings for every company this account owns.
@@ -135,6 +137,10 @@ const SettingsClient = ({
                 <Type className="size-4" />
                 Words
               </TabsTrigger>
+              <TabsTrigger value="form" className="gap-2">
+                <ClipboardList className="size-4" />
+                Form
+              </TabsTrigger>
               <TabsTrigger value="domains" className="gap-2">
                 <Globe className="size-4" />
                 Domains
@@ -157,6 +163,10 @@ const SettingsClient = ({
 
             <TabsContent value="words">
               <TermsPanel tenant={selected} run={run} isPending={isPending} />
+            </TabsContent>
+
+            <TabsContent value="form">
+              <FormPanel tenant={selected} run={run} isPending={isPending} />
             </TabsContent>
 
             <TabsContent value="domains">

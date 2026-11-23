@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import React from "react";
 import { useSession } from "next-auth/react";
+import { useFieldBlocks } from "@/app/admin/providers";
 import EmployeeForm from "../officeEmployee/employeeForm";
 import { CheckBoxNormal } from "@/components/form/formFields";
 import { useCommonContext } from "@/context/commonContext";
@@ -44,10 +45,7 @@ import {
   getVisaUrgencyLevel,
   VISA_URGENCY_TEXT,
 } from "@/lib/visaMilestones";
-import {
-  getRightToWorkStatus,
-  RTW_STATUS_TEXT,
-} from "@/lib/rightToWork";
+import { getRightToWorkStatus, RTW_STATUS_TEXT } from "@/lib/rightToWork";
 
 const EmployeTabel = () => {
   const {
@@ -66,6 +64,11 @@ const EmployeTabel = () => {
 
   const { data: session } = useSession();
   const isSuperAdmin = session?.user?.role === "superAdmin";
+  // Pay and right to work columns only where the company uses those parts of
+  // the form — a tuition centre's students have neither. See
+  // data/fieldBlocks.js.
+  const blocks = useFieldBlocks();
+  const { pay, rightToWork } = blocks;
 
   return (
     <>
@@ -77,16 +80,13 @@ const EmployeTabel = () => {
               "name",
               "contact",
               // "country",
-              "Payrate",
-              "E.type",
-              "P.type",
+              ...(pay ? ["Payrate", "E.type", "P.type"] : []),
               "status",
               "joindate",
               "Enddate",
-              "VisaStart",
-              "VisaEnd",
-              "visa",
-              "Right to work",
+              ...(rightToWork
+                ? ["VisaStart", "VisaEnd", "visa", "Right to work"]
+                : []),
               "Actions",
             ].map((item, index) => (
               <TableHead className="uppercase text-xs" key={index}>
@@ -118,185 +118,200 @@ const EmployeTabel = () => {
             const sentMilestones = (item?.visaReminders || [])
               .filter((r) => r.visaEndDate === visaIso)
               .map((r) => r.milestone);
-            const alreadySent =
-              milestone && sentMilestones.includes(milestone);
+            const alreadySent = milestone && sentMilestones.includes(milestone);
             const rtw = getRightToWorkStatus({
               immigrationType: item?.immigrationType,
               visaEndDate: item?.eVisaExp,
               checks: item?.rightToWorkChecks,
             });
             return (
-            <TableRow key={index}>
-              <TableCell>{index + 1}</TableCell>
-              <TableCell>
-                <EmployeeSheet item={item} />
-              </TableCell>
-              <TableCell>{item?.phone}</TableCell>
-              <TableCell>
-                {Number.isFinite(Number(item?.payRate))
-                  ? `£${Number(item.payRate).toFixed(2)}`
-                  : "-"}
-              </TableCell>
-              <TableCell>{item?.employeType}</TableCell>
-              <TableCell>{item?.paymentType}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <div
-                    onClick={() =>
-                      handleAlert(item?._id, "Update", item?.isActive)
-                    }
-                  >
-                    <TableStatus isActive={item?.isActive} />
-                  </div>
-                  {item?.isLocked && (
-                    <Badge
-                      variant="destructive"
-                      className="gap-1"
-                      title={
-                        item?.lockedUntil
-                          ? `Locked until ${format(
-                              new Date(item.lockedUntil),
-                              "PPp",
-                            )}`
-                          : "Account locked by failed logins"
+              <TableRow key={index}>
+                <TableCell>{index + 1}</TableCell>
+                <TableCell>
+                  <EmployeeSheet item={item} />
+                </TableCell>
+                <TableCell>{item?.phone}</TableCell>
+                {pay && (
+                  <>
+                    <TableCell>
+                      {Number.isFinite(Number(item?.payRate))
+                        ? `£${Number(item.payRate).toFixed(2)}`
+                        : "-"}
+                    </TableCell>
+                    <TableCell>{item?.employeType}</TableCell>
+                    <TableCell>{item?.paymentType}</TableCell>
+                  </>
+                )}
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div
+                      onClick={() =>
+                        handleAlert(item?._id, "Update", item?.isActive)
                       }
                     >
-                      <Lock className="h-3 w-3" /> Locked
-                    </Badge>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                {item?.startDate && format(new Date(item?.startDate), "PPP")}
-              </TableCell>
-              <TableCell>
-                {(item?.endDate && format(new Date(item?.endDate), "PPP")) ||
-                  "-"}
-              </TableCell>
-              <TableCell>
-                {item?.immigrationType === "British"
-                  ? "-"
-                  : item?.visaStartDate &&
-                    format(new Date(item?.visaStartDate), "PPP")}
-              </TableCell>
-
-              <TableCell className={visaText}>
-                {item?.immigrationType === "British"
-                  ? "-"
-                  : item?.eVisaExp && format(new Date(item?.eVisaExp), "PPP")}
-              </TableCell>
-              <TableCell className={visaText}>
-                {item?.immigrationType === "British" || !visaRemaining
-                  ? "-"
-                  : visaRemaining === "Expired"
-                  ? "Visa expired"
-                  : visaRemaining}
-              </TableCell>
-
-              <TableCell>
-                <div className="leading-tight">
-                  <div>
-                    {rtw.lastCheckedAt
-                      ? format(new Date(rtw.lastCheckedAt), "PPP")
-                      : "—"}
+                      <TableStatus isActive={item?.isActive} />
+                    </div>
+                    {item?.isLocked && (
+                      <Badge
+                        variant="destructive"
+                        className="gap-1"
+                        title={
+                          item?.lockedUntil
+                            ? `Locked until ${format(
+                                new Date(item.lockedUntil),
+                                "PPp",
+                              )}`
+                            : "Account locked by failed logins"
+                        }
+                      >
+                        <Lock className="h-3 w-3" /> Locked
+                      </Badge>
+                    )}
                   </div>
-                  <div className={`text-xs ${RTW_STATUS_TEXT[rtw.level]}`}>
-                    {rtw.label}
-                  </div>
-                </div>
-              </TableCell>
+                </TableCell>
+                <TableCell>
+                  {item?.startDate && format(new Date(item?.startDate), "PPP")}
+                </TableCell>
+                <TableCell>
+                  {(item?.endDate && format(new Date(item?.endDate), "PPP")) ||
+                    "-"}
+                </TableCell>
+                {rightToWork && (
+                  <>
+                    <TableCell>
+                      {item?.immigrationType === "British"
+                        ? "-"
+                        : item?.visaStartDate &&
+                          format(new Date(item?.visaStartDate), "PPP")}
+                    </TableCell>
 
-              <TableCell>
-                <div className="flex gap-2">
-                  <Button
-                    onClick={() => onRecordRightToWork?.(item)}
-                    variant="outline"
-                    size="icon"
-                    title={`Record right to work check — ${rtw.detail}`}
-                    className={rtw.needsCheck ? "border-rose-300" : ""}
-                  >
-                    <BadgeCheck
-                      className={
-                        rtw.needsCheck ? "text-rose-600" : "text-emerald-600"
-                      }
-                    />
-                  </Button>
-                  {milestone && (
-                    <Button
-                      onClick={() => onSendVisaReminder?.(item)}
-                      disabled={isSendingReminder}
-                      variant="outline"
-                      size="icon"
-                      title={
-                        alreadySent
-                          ? `Reminder already sent (${milestoneLabel(
-                              milestone,
-                            )}) — click to resend`
-                          : `Send visa reminder (${milestoneLabel(milestone)})`
-                      }
-                    >
-                      {alreadySent ? (
-                        <MailCheck className="text-green-600" />
-                      ) : (
-                        <Mail className="text-amber-600" />
-                      )}
-                    </Button>
-                  )}
-                  <Button variant="outline" size="icon" asChild>
-                    <Link
-                      href={`/admin/employee/${encrypt(item?._id)}/overview`}
-                    >
-                      <Eye className="text-blue-600" />
-                    </Link>
-                  </Button>
+                    <TableCell className={visaText}>
+                      {item?.immigrationType === "British"
+                        ? "-"
+                        : item?.eVisaExp &&
+                          format(new Date(item?.eVisaExp), "PPP")}
+                    </TableCell>
+                    <TableCell className={visaText}>
+                      {item?.immigrationType === "British" || !visaRemaining
+                        ? "-"
+                        : visaRemaining === "Expired"
+                          ? "Visa expired"
+                          : visaRemaining}
+                    </TableCell>
 
-                  <Dialog open={isEdit} onOpenChange={setIsEdit}>
-                    <DialogTrigger asChild>
+                    <TableCell>
+                      <div className="leading-tight">
+                        <div>
+                          {rtw.lastCheckedAt
+                            ? format(new Date(rtw.lastCheckedAt), "PPP")
+                            : "—"}
+                        </div>
+                        <div
+                          className={`text-xs ${RTW_STATUS_TEXT[rtw.level]}`}
+                        >
+                          {rtw.label}
+                        </div>
+                      </div>
+                    </TableCell>
+                  </>
+                )}
+
+                <TableCell>
+                  <div className="flex gap-2">
+                    {rightToWork && (
                       <Button
-                        onClick={() => handleEdit(item)}
+                        onClick={() => onRecordRightToWork?.(item)}
                         variant="outline"
                         size="icon"
+                        title={`Record right to work check — ${rtw.detail}`}
+                        className={rtw.needsCheck ? "border-rose-300" : ""}
                       >
-                        <Edit className="text-indigo-600" />
+                        <BadgeCheck
+                          className={
+                            rtw.needsCheck
+                              ? "text-rose-600"
+                              : "text-emerald-600"
+                          }
+                        />
                       </Button>
-                    </DialogTrigger>
-                    <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Edit Employee Details</DialogTitle>
-                        <DialogDescription>
-                          Make changes to here. Click update when you&apos;re done.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <EmployeeForm />
-                      <CheckBoxNormal
-                        isChecked={isChecked}
-                        setIsChecked={setIsChecked}
-                      />
-                    </DialogContent>
-                  </Dialog>
-                  {isSuperAdmin && (
+                    )}
+                    {rightToWork && milestone && (
+                      <Button
+                        onClick={() => onSendVisaReminder?.(item)}
+                        disabled={isSendingReminder}
+                        variant="outline"
+                        size="icon"
+                        title={
+                          alreadySent
+                            ? `Reminder already sent (${milestoneLabel(
+                                milestone,
+                              )}) — click to resend`
+                            : `Send visa reminder (${milestoneLabel(milestone)})`
+                        }
+                      >
+                        {alreadySent ? (
+                          <MailCheck className="text-green-600" />
+                        ) : (
+                          <Mail className="text-amber-600" />
+                        )}
+                      </Button>
+                    )}
+                    <Button variant="outline" size="icon" asChild>
+                      <Link
+                        href={`/admin/employee/${encrypt(item?._id)}/overview`}
+                      >
+                        <Eye className="text-blue-600" />
+                      </Link>
+                    </Button>
+
+                    <Dialog open={isEdit} onOpenChange={setIsEdit}>
+                      <DialogTrigger asChild>
+                        <Button
+                          onClick={() => handleEdit(item)}
+                          variant="outline"
+                          size="icon"
+                        >
+                          <Edit className="text-indigo-600" />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="w-full max-w-2xl max-h-screen overflow-y-auto bg-white rounded-lg shadow-lg p-6 sm:max-w-md md:max-w-lg lg:max-w-2xl">
+                        <DialogHeader>
+                          <DialogTitle>Edit Employee Details</DialogTitle>
+                          <DialogDescription>
+                            Make changes to here. Click update when you&apos;re
+                            done.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <EmployeeForm />
+                        <CheckBoxNormal
+                          isChecked={isChecked}
+                          setIsChecked={setIsChecked}
+                        />
+                      </DialogContent>
+                    </Dialog>
+                    {isSuperAdmin && (
+                      <Button
+                        onClick={() => onResetPassword?.(item)}
+                        variant="outline"
+                        size="icon"
+                        title="Reset password"
+                        className={item?.isLocked ? "border-rose-300" : ""}
+                      >
+                        <KeyRound className="text-amber-600" />
+                      </Button>
+                    )}
                     <Button
-                      onClick={() => onResetPassword?.(item)}
+                      onClick={() =>
+                        handleAlert(item?._id, "Delete", item?.isActive)
+                      }
                       variant="outline"
                       size="icon"
-                      title="Reset password"
-                      className={item?.isLocked ? "border-rose-300" : ""}
                     >
-                      <KeyRound className="text-amber-600" />
+                      <Trash2 className="text-rose-600" />
                     </Button>
-                  )}
-                  <Button
-                    onClick={() =>
-                      handleAlert(item?._id, "Delete", item?.isActive)
-                    }
-                    variant="outline"
-                    size="icon"
-                  >
-                    <Trash2 className="text-rose-600" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
+                  </div>
+                </TableCell>
+              </TableRow>
             );
           })}
         </TableBody>

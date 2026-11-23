@@ -13,6 +13,7 @@ import {
   cleanTerms,
   industryTemplate,
 } from "@/data/terminology";
+import { FIELD_BLOCK_KEYS } from "@/data/fieldBlocks";
 
 /**
  * Core tenant operations, shared by the two front doors that reach them:
@@ -105,6 +106,41 @@ export async function applyTerms(tenantId, { industry, terms } = {}) {
     message: "Words saved",
     before: { industry: before.industry, terms: before.terms || {} },
     after: { industry, terms: overrides },
+  };
+}
+
+/**
+ * Set which parts of the site employee form a company uses. See
+ * data/fieldBlocks.js.
+ *
+ * Like the words, only switches that differ from the company's industry are
+ * stored, so a company that has changed nothing keeps following its template.
+ * Unknown keys and non-boolean values are ignored.
+ */
+export async function applyFieldBlocks(tenantId, { fieldBlocks } = {}) {
+  await connect();
+  const before = await CompanyModel.findById(tenantId).lean().exec();
+  if (!before) return { success: false, message: "Company not found" };
+
+  const templateOn = industryTemplate(before.industry).blocks;
+  const stored = {};
+  for (const key of FIELD_BLOCK_KEYS) {
+    const value = fieldBlocks?.[key];
+    if (typeof value !== "boolean") continue;
+    if (value !== templateOn.includes(key)) stored[key] = value;
+  }
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { fieldBlocks: stored } }
+  );
+  cacheInvalidate();
+
+  return {
+    success: true,
+    message: "Form saved",
+    before: before.fieldBlocks || {},
+    after: stored,
   };
 }
 

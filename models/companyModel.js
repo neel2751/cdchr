@@ -5,6 +5,7 @@ import {
   INDUSTRY_TEMPLATES,
   TERM_KEYS,
 } from "@/data/terminology";
+import { FIELD_BLOCK_KEYS } from "@/data/fieldBlocks";
 
 /**
  * A company is the tenant boundary for the platform.
@@ -111,6 +112,14 @@ const termsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Which parts of the site employee form the company uses — see
+// data/fieldBlocks.js. An absent key means "as the industry template says",
+// like `terms`.
+const fieldBlocksSchema = new mongoose.Schema(
+  Object.fromEntries(FIELD_BLOCK_KEYS.map((key) => [key, { type: Boolean }])),
+  { _id: false }
+);
+
 const billingSchema = new mongoose.Schema(
   {
     plan: { type: String, default: "standard" },
@@ -158,6 +167,7 @@ const companySchema = new mongoose.Schema(
       default: DEFAULT_INDUSTRY,
     },
     terms: { type: termsSchema, default: () => ({}) },
+    fieldBlocks: { type: fieldBlocksSchema, default: () => ({}) },
     billing: { type: billingSchema, default: () => ({}) },
 
     // Legacy admin toggles. Still authoritative — see isTenantUsable().
