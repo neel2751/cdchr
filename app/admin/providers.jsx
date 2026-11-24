@@ -83,14 +83,26 @@ const AdminProviders = ({ children, branding, accessNotice, contactEmail }) => {
             <CompanyChoicePrompt />
             {/* Renders only during a support visit, above everything else. */}
             <SupportBanner />
-            {/* The trial countdown, or the account being read-only — see
-                lib/tenantAccess.js. Below the support banner for the same
-                reason as announcements. */}
-            <AccessBanner notice={accessNotice} contactEmail={contactEmail} />
-            {/* Urgent announcements, on every admin page. Below the support
-                banner: which company you are looking at outranks its news. */}
-            <AnnouncementBanner />
-            <SidebarWrapper>{children}</SidebarWrapper>
+            {/* Inside the content area, not above the shell: up here the
+                fixed sidebar covered their text. */}
+            <SidebarWrapper
+              banners={
+                <>
+                  {/* The trial countdown, or the account being read-only —
+                      see lib/tenantAccess.js. */}
+                  <AccessBanner
+                    notice={accessNotice}
+                    contactEmail={contactEmail}
+                  />
+                  {/* Urgent announcements, on every admin page. Below the
+                      support banner: which company you are looking at
+                      outranks its news. */}
+                  <AnnouncementBanner />
+                </>
+              }
+            >
+              {children}
+            </SidebarWrapper>
           </NuqsAdapter>
         </BrandingContext.Provider>
         <ReactQueryDevtools initialIsOpen={false} />
