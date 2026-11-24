@@ -3,6 +3,7 @@ import { FEATURE_KEYS } from "@/data/features";
 import {
   DEFAULT_INDUSTRY,
   INDUSTRY_TEMPLATES,
+  MANAGER_RULE_KEYS,
   TERM_KEYS,
 } from "@/data/terminology";
 import { FIELD_BLOCK_KEYS } from "@/data/fieldBlocks";
@@ -120,6 +121,13 @@ const fieldBlocksSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// What a place manager may do — see resolveManagerRules in
+// data/terminology.js. Absent means "as the industry template says".
+const managerRulesSchema = new mongoose.Schema(
+  Object.fromEntries(MANAGER_RULE_KEYS.map((key) => [key, { type: Boolean }])),
+  { _id: false }
+);
+
 const billingSchema = new mongoose.Schema(
   {
     plan: { type: String, default: "standard" },
@@ -168,6 +176,7 @@ const companySchema = new mongoose.Schema(
     },
     terms: { type: termsSchema, default: () => ({}) },
     fieldBlocks: { type: fieldBlocksSchema, default: () => ({}) },
+    managerRules: { type: managerRulesSchema, default: () => ({}) },
     billing: { type: billingSchema, default: () => ({}) },
 
     // Legacy admin toggles. Still authoritative — see isTenantUsable().

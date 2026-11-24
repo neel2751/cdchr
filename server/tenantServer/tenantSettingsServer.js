@@ -8,6 +8,7 @@ import { isTenantUsable, resolveBranding } from "@/lib/tenant";
 import {
   DEFAULT_INDUSTRY,
   cleanTerms,
+  resolveManagerRules,
   resolveTerms,
 } from "@/data/terminology";
 import { resolveCompanyBlocks } from "@/data/fieldBlocks";
@@ -20,6 +21,7 @@ import {
   applySlug,
   applyTerms,
   applyFieldBlocks,
+  applyManagerRules,
   removeDomain,
   setPrimaryDomain,
   verifyDomain,
@@ -127,6 +129,7 @@ function serializeTenant(tenant) {
     terms: resolveTerms(tenant),
     // The Form tab: which parts of the site employee form are on.
     fieldBlocks: resolveCompanyBlocks(tenant),
+    managerRules: resolveManagerRules(tenant),
     domains: (tenant.domains || []).map((d) => ({
       host: d.host,
       isPrimary: !!d.isPrimary,
@@ -204,6 +207,17 @@ export const updateTenantFieldBlocks = withAudit(
       tenantId,
       (id) => applyFieldBlocks(id, data),
       "Updated the site employee form"
+    ),
+  { module: "Tenant" }
+);
+
+export const updateTenantManagerRules = withAudit(
+  "Tenant.updateManagerRules",
+  async (tenantId, data) =>
+    asCompanyAdmin(
+      tenantId,
+      (id) => applyManagerRules(id, data),
+      "Updated what place managers may do"
     ),
   { module: "Tenant" }
 );

@@ -10,6 +10,7 @@ import { normalizeHost, stripWww } from "@/lib/tenantHost";
 import { cacheInvalidate } from "@/lib/tenantCache";
 import {
   INDUSTRY_TEMPLATES,
+  MANAGER_RULE_KEYS,
   cleanTerms,
   industryTemplate,
 } from "@/data/terminology";
@@ -140,6 +141,38 @@ export async function applyFieldBlocks(tenantId, { fieldBlocks } = {}) {
     success: true,
     message: "Form saved",
     before: before.fieldBlocks || {},
+    after: stored,
+  };
+}
+
+/**
+ * Set what a place manager may do: assign people to their own places, and see
+ * contact details on their own page. See resolveManagerRules in
+ * data/terminology.js. Only switches differing from the industry's are stored.
+ */
+export async function applyManagerRules(tenantId, { managerRules } = {}) {
+  await connect();
+  const before = await CompanyModel.findById(tenantId).lean().exec();
+  if (!before) return { success: false, message: "Company not found" };
+
+  const template = industryTemplate(before.industry).managerRules;
+  const stored = {};
+  for (const key of MANAGER_RULE_KEYS) {
+    const value = managerRules?.[key];
+    if (typeof value !== "boolean") continue;
+    if (value !== template[key]) stored[key] = value;
+  }
+
+  await CompanyModel.updateOne(
+    { _id: createObjectId(tenantId) },
+    { $set: { managerRules: stored } }
+  );
+  cacheInvalidate();
+
+  return {
+    success: true,
+    message: "Saved",
+    before: before.managerRules || {},
     after: stored,
   };
 }

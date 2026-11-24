@@ -70,6 +70,11 @@ export const TERM_FIELDS = [
     label: "Assignments",
     help: "Putting people onto a place: the menu entry and board.",
   },
+  {
+    key: "mySites",
+    label: "A manager's own places",
+    help: "The page where a manager sees the places they run.",
+  },
 ];
 
 export const TERM_KEYS = TERM_FIELDS.map((f) => f.key);
@@ -95,6 +100,10 @@ export const INDUSTRY_TEMPLATES = [
     // How people are put on a place by default: "day" (each day) or
     // "ongoing" (from a date until further notice). See lib/roster.js.
     assignmentStyle: "day",
+    // The form field a manager's page counts people by (data/fieldBlocks.js
+    // names its block), and what a place manager may do — see managerRules.
+    breakdownField: "employeRole",
+    managerRules: { canAssign: true, seeContacts: false },
     terms: {
       site: "Site",
       sites: "Sites",
@@ -105,6 +114,7 @@ export const INDUSTRY_TEMPLATES = [
       siteManager: "Site Manager",
       siteManagers: "Site Managers",
       siteAssignments: "Site Assignments",
+      mySites: "My Sites",
     },
   },
   {
@@ -116,6 +126,10 @@ export const INDUSTRY_TEMPLATES = [
     // How people are put on a place by default: "day" (each day) or
     // "ongoing" (from a date until further notice). See lib/roster.js.
     assignmentStyle: "day",
+    // The form field a manager's page counts people by (data/fieldBlocks.js
+    // names its block), and what a place manager may do — see managerRules.
+    breakdownField: "employeRole",
+    managerRules: { canAssign: true, seeContacts: false },
     terms: {
       site: "Branch",
       sites: "Branches",
@@ -126,6 +140,7 @@ export const INDUSTRY_TEMPLATES = [
       siteManager: "Branch Manager",
       siteManagers: "Branch Managers",
       siteAssignments: "Branch Assignments",
+      mySites: "My Branches",
     },
   },
   {
@@ -137,6 +152,10 @@ export const INDUSTRY_TEMPLATES = [
     // How people are put on a place by default: "day" (each day) or
     // "ongoing" (from a date until further notice). See lib/roster.js.
     assignmentStyle: "ongoing",
+    // The form field a manager's page counts people by (data/fieldBlocks.js
+    // names its block), and what a place manager may do — see managerRules.
+    breakdownField: "yearGroup",
+    managerRules: { canAssign: false, seeContacts: false },
     terms: {
       site: "Class",
       sites: "Classes",
@@ -147,6 +166,7 @@ export const INDUSTRY_TEMPLATES = [
       siteManager: "Class Teacher",
       siteManagers: "Class Teachers",
       siteAssignments: "Enrolments",
+      mySites: "My Classes",
     },
   },
 ];
@@ -232,4 +252,26 @@ export function fillTermsDeep(value, terms = DEFAULT_TERMS) {
 export function menuLabel(item, terms = DEFAULT_TERMS) {
   if (!item?.termKey) return item?.name;
   return (terms || DEFAULT_TERMS)[item.termKey] ?? DEFAULT_TERMS[item.termKey] ?? item.name;
+}
+
+/**
+ * What a place manager may do in a company — their industry's defaults, with
+ * the company's own choices on top (Settings → Form).
+ *
+ *   canAssign    put people on, move them between and end them on the places
+ *                they manage. Off means only people with a company-wide site
+ *                screen assign; managers still see and record attendance.
+ *   seeContacts  see phone numbers, emails and guardian contacts on their
+ *                own page. Off by default: a manager needs to know who is in
+ *                and who has a nut allergy, not every parent's mobile.
+ */
+export const MANAGER_RULE_KEYS = ["canAssign", "seeContacts"];
+
+export function resolveManagerRules(company) {
+  const rules = { ...industryTemplate(company?.industry).managerRules };
+  for (const key of MANAGER_RULE_KEYS) {
+    const stored = company?.managerRules?.[key];
+    if (typeof stored === "boolean") rules[key] = stored;
+  }
+  return rules;
 }

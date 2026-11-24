@@ -18,6 +18,7 @@ import { deriveClockStatus } from "@/lib/clockStatus";
 import { getClockRules } from "@/server/settingsServer/workSettings";
 import { canManageAttendance } from "@/server/clockServer/clockAuth";
 import {
+  assignRefusal,
   getSiteScope,
   scopedSiteMatch,
   siteRefusal,
@@ -343,7 +344,7 @@ export const moveEmployeeToNewSite = withAudit(
     // And only between sites the caller manages — both ends, checked below
     // once the current site is known. See lib/siteAccess.js.
     const scope = await getSiteScope();
-    const toDenied = siteRefusal(scope, toSiteId, { write: true });
+    const toDenied = assignRefusal(scope, toSiteId);
     if (toDenied) return toDenied;
 
     let movedFromSiteId = null;

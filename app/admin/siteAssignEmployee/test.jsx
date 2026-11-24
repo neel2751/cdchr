@@ -49,6 +49,7 @@ import { useFieldBlocks, useTerms } from "@/app/admin/providers";
 import { useSession } from "next-auth/react";
 import AddSiteAssignment from "./addSiteAssignment";
 import OngoingAssignments from "./ongoingAssignments";
+import { getMySiteRights } from "@/server/siteAssignmentServer/mySitesServer";
 import { DateFilter } from "@/components/filters/filterDate/filterDateRange";
 import OfficeQRCode from "@/app/hr/code/code";
 import { checkPermission } from "@/server/permissionServer/permissionServer";
@@ -292,6 +293,14 @@ const EmployeeSiteManagement = () => {
   });
 
   const hasPermission = data?.newData;
+  // Whether this person may put people on places — some companies keep that
+  // from place managers (Settings → Form). The actions check again; this only
+  // hides buttons they would refuse.
+  const { data: rights } = useFetchQuery({
+    fetchFn: getMySiteRights,
+    queryKey: ["mySiteRights", session?.user?._id],
+  });
+  const canAssign = rights?.newData?.canAssign === true;
 
   if ((role === "superAdmin" || role === "admin") && showsPay) {
     commonHeaders.push("Pay");
@@ -310,7 +319,7 @@ const EmployeeSiteManagement = () => {
             <CardTitle>Time Tracking Dashboard</CardTitle>
             <CardDescription>Current Time</CardDescription>
           </div>
-          {hasPermission && (
+          {hasPermission && canAssign && (
             <div className="flex items-center gap-2">
               <OngoingAssignments queryKey={queryKey} />
               <AddSiteAssignment queryKey={queryKey} />
@@ -706,6 +715,7 @@ const EmployeeSiteManagement = () => {
                                     so its history stays readable. */}
                                 {(role === "superAdmin" ||
                                   role === "admin") &&
+                                  canAssign &&
                                   !assignment.standing && (
                                   <div className="flex items-center gap-2 min-w-[240px]">
                                     <Select

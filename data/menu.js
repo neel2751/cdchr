@@ -160,6 +160,16 @@ export const MENU = [
   // makes the screen grantable and discoverable, and grants stay the control.
   // The server actions behind it are authorised separately — see
   // server/clockServer/clockAuth.js.
+  // A place manager's own page: the places they run, who is there today, and
+  // the notes that keep people safe. Granted with the site board below (see
+  // DERIVED_ACCESS), since anybody who runs the roll-call runs a place.
+  {
+    name: "My Sites",
+    termKey: "mySites",
+    path: "/admin/my-sites",
+    role: ["superAdmin", "admin", "user"],
+    icon: "MapPinned",
+  },
   {
     name: "Site Assignments",
     termKey: "siteAssignments",
@@ -305,6 +315,7 @@ export const MENU = [
 export const DERIVED_ACCESS = {
   "/admin/previousOfficeEmployee": "/admin/officeEmployee",
   "/admin/previousEmployee": "/admin/employee",
+  "/admin/my-sites": "/admin/siteAssignEmployee",
 };
 
 // Permission to read an employee's bank account details and National Insurance

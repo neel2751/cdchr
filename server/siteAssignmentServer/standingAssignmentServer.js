@@ -5,7 +5,12 @@ import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { getWorkingDate, toWorkingDate } from "@/lib/clockTime";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { featureRefusal } from "@/lib/requireFeature";
-import { getSiteScope, scopedSiteMatch, siteRefusal } from "@/lib/siteAccess";
+import {
+  assignRefusal,
+  getSiteScope,
+  scopedSiteMatch,
+  siteRefusal,
+} from "@/lib/siteAccess";
 import { getTenantTerms } from "@/lib/tenantTerms";
 import { fillTerms } from "@/data/terminology";
 import StandingAssignmentModel from "@/models/standingAssignmentModel";
@@ -57,7 +62,7 @@ export const assignOngoing = withAudit(
       if (refusal) return refusal;
 
       const scope = await getSiteScope();
-      const siteDenied = siteRefusal(scope, siteId, { write: true });
+      const siteDenied = assignRefusal(scope, siteId);
       if (siteDenied) return siteDenied;
       if (!isValidObjectId(siteId)) {
         return { success: false, message: "Choose a site" };
@@ -169,7 +174,7 @@ export const endOngoing = withAudit(
       if (!row || row.isDeleted) return { success: false, message: "Not found" };
 
       const scope = await getSiteScope();
-      const siteDenied = siteRefusal(scope, row.siteId, { write: true });
+      const siteDenied = assignRefusal(scope, row.siteId);
       if (siteDenied) return siteDenied;
 
       const last = endDate ? toWorkingDate(endDate) : getWorkingDate();

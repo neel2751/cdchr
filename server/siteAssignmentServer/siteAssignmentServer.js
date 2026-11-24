@@ -28,6 +28,7 @@ import { getWorkSettings } from "../settingsServer/workSettings";
 import { getBankHolidays } from "../holidayServer/holidayServer";
 import { permissionRefusal } from "@/lib/actionAccess";
 import {
+  assignRefusal,
   getSiteScope,
   scopedSiteMatch,
   siteRefusal,
@@ -75,9 +76,10 @@ export const assignEmployeesToSite = withAudit(
       return { success: false, message: "Select at least one employee" };
     }
 
-    // Only onto a site the caller manages. See lib/siteAccess.js.
+    // Only onto a site the caller manages, and only if their company lets
+    // managers assign. See lib/siteAccess.js.
     const scope = await getSiteScope();
-    const siteDenied = siteRefusal(scope, siteId, { write: true });
+    const siteDenied = assignRefusal(scope, siteId);
     if (siteDenied) return siteDenied;
 
     const today = new Date(assignDate).toISOString().split("T")[0];

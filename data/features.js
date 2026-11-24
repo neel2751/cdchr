@@ -75,7 +75,12 @@ export const FEATURES = [
     description:
       "Project sites, the managers who run them and the day-to-day " +
       "assignments onto them.",
-    paths: ["/admin/siteProject", "/admin/siteAssign", "/admin/siteAssignEmployee"],
+    paths: [
+      "/admin/siteProject",
+      "/admin/siteAssign",
+      "/admin/siteAssignEmployee",
+      "/admin/my-sites",
+    ],
     // Site assignments put site employees onto sites, so this module cannot do
     // its job without them. Enforced, not just advertised: switching site
     // employees off switches this off too, on save as well as in the console.
