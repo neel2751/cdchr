@@ -25,6 +25,8 @@ import { hashPassword } from "@/utils/bcrypt";
 import { getServerSideProps } from "../session/session";
 import { sendTenantMail } from "../email/tenantMail";
 import { invalidateTenantCache } from "../tenantServer/tenantServer";
+import { INDUSTRY_TEMPLATES, industryTemplate } from "@/data/terminology";
+import { featuresForPreset } from "@/data/features";
 
 /**
  * Self-serve signup: someone with no account creates a company and becomes its
@@ -191,6 +193,7 @@ export async function startSignup(form = {}) {
     const slug = String(form.slug || "").trim().toLowerCase();
     const phoneDigits = String(form.phoneNumber || "").replace(/\D/g, "");
     const password = String(form.password || "");
+    const industry = String(form.industry || "").trim();
 
     if (!companyName) return { success: false, message: "Company name is required" };
     if (!name) return { success: false, message: "Your name is required" };
@@ -200,6 +203,12 @@ export async function startSignup(form = {}) {
     if (!phoneDigits) return { success: false, message: "Phone number is required" };
     if (phoneDigits.length > 15) {
       return { success: false, message: "That phone number is too long" };
+    }
+    // Chosen up front so the workspace speaks the business's language from the
+    // first screen — classes and students for a tuition centre, not sites and
+    // site employees. See data/terminology.js.
+    if (!INDUSTRY_TEMPLATES.some((t) => t.key === industry)) {
+      return { success: false, message: "Choose your type of business" };
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
       return {
@@ -274,6 +283,7 @@ export async function startSignup(form = {}) {
       name,
       email,
       phoneNumber: Number(phoneDigits),
+      industry,
       passwordHash,
       tokenHash: hashToken(rawToken),
       expiresAt: new Date(Date.now() + TOKEN_TTL_HOURS * 60 * 60 * 1000),
@@ -494,6 +504,8 @@ export async function completeSignup(rawToken) {
       };
     }
 
+    const template = industryTemplate(pending.industry);
+
     const session = await startSession();
     let created = null;
 
@@ -508,6 +520,11 @@ export async function completeSignup(rawToken) {
               // Every self-serve workspace starts on trial; the platform
               // console is what promotes one to "active".
               status: "trial",
+              // The business type they chose: its words and form from the
+              // first sign-in, and the modules that suit it switched on. The
+              // platform console can change either later.
+              industry: template.key,
+              features: featuresForPreset(template.featurePreset) || {},
               domains: [],
               isActive: true,
               delete: false,

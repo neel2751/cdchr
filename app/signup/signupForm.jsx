@@ -8,8 +8,12 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   BadgeCheck,
+  Building2,
   CalendarClock,
   Check,
+  GraduationCap,
+  HardHat,
+  UtensilsCrossed,
   Eye,
   EyeOff,
   Loader2,
@@ -29,6 +33,7 @@ import {
   startSignup,
 } from "@/server/authServer/signupServer";
 import { PLATFORM_APP_NAME } from "@/lib/tenant";
+import { INDUSTRY_TEMPLATES } from "@/data/terminology";
 
 const MIN_PASSWORD_LENGTH = 8;
 const AVAILABILITY_DEBOUNCE_MS = 450;
@@ -51,6 +56,14 @@ function slugify(value) {
 }
 
 
+// A picture for each kind of business on the register page. Presentation only
+// — what an industry changes lives in its template (data/terminology.js).
+const INDUSTRY_ICONS = {
+  construction: HardHat,
+  restaurant: UtensilsCrossed,
+  tuition: GraduationCap,
+};
+
 const HIGHLIGHTS = [
   {
     icon: Users,
@@ -72,6 +85,7 @@ const HIGHLIGHTS = [
 export default function SignupForm({ rootDomain = "" }) {
   const [form, setForm] = useState({
     companyName: "",
+    industry: "",
     slug: "",
     name: "",
     email: "",
@@ -133,6 +147,7 @@ export default function SignupForm({ rootDomain = "" }) {
 
   const canSubmit =
     form.companyName.trim() &&
+    form.industry &&
     form.name.trim() &&
     form.email.trim() &&
     form.phoneNumber.trim() &&
@@ -150,6 +165,9 @@ export default function SignupForm({ rootDomain = "" }) {
     }
     if (form.password !== form.confirmPassword) {
       return toast.warning("Passwords do not match");
+    }
+    if (!form.industry) {
+      return toast.warning("Choose your type of business");
     }
     if (!checked?.available) {
       return toast.warning(checked?.message || "Choose a workspace address");
@@ -270,6 +288,49 @@ export default function SignupForm({ rootDomain = "" }) {
                   autoFocus
                   required
                 />
+
+                {/* Decides the words, the forms and the modules the workspace
+                    starts with, so a tuition centre sees classes and students
+                    on its first screen rather than sites and site employees. */}
+                <fieldset className="space-y-1.5">
+                  <legend className="text-sm leading-none font-medium">
+                    Type of business
+                  </legend>
+                  <div className="grid gap-2 pt-1.5 sm:grid-cols-3">
+                    {INDUSTRY_TEMPLATES.map((t) => {
+                      const Icon = INDUSTRY_ICONS[t.key] || Building2;
+                      const selected = form.industry === t.key;
+                      return (
+                        <button
+                          key={t.key}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() =>
+                            setForm((prev) => ({ ...prev, industry: t.key }))
+                          }
+                          className={cn(
+                            "flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left text-sm transition",
+                            selected
+                              ? "border-primary bg-primary/5 ring-primary/30 ring-2"
+                              : "hover:bg-muted/60"
+                          )}
+                        >
+                          <Icon className="size-4.5 text-muted-foreground" />
+                          <span className="font-medium">{t.label}</span>
+                          <span className="text-muted-foreground text-xs">
+                            {t.terms.sites}, {t.terms.siteEmployees.toLowerCase()}{" "}
+                            and {t.terms.siteManagers.toLowerCase()}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Sets the words and forms you start with. You can change
+                    any of it later in Settings.
+                  </p>
+                </fieldset>
 
                 <div className="space-y-1.5">
                   <Label htmlFor="slug">Workspace address</Label>

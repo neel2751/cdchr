@@ -30,6 +30,10 @@ const pendingSignupSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, lowercase: true, trim: true },
     phoneNumber: { type: Number, required: true },
+    // Chosen on the register page; the company is created with it, so its
+    // words, form and modules suit it from the first sign-in. See
+    // INDUSTRY_TEMPLATES in data/terminology.js.
+    industry: { type: String, default: "construction" },
 
     // Hashed at the point of signup, exactly as it would be on the employee
     // record, so a plaintext password never rests in this collection either.

@@ -128,6 +128,19 @@ const managerRulesSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// The setup checklist (server/tenantServer/setupProgressServer.js). Most steps
+// are worked out from the company's data — a step is done when there are
+// sites, staff, an email account. `marks` records what only a person can say:
+// "done" for a step that is a review rather than a record, "skipped" for an
+// optional one they do not need. `hidden` is the owner putting it away.
+const setupProgressSchema = new mongoose.Schema(
+  {
+    marks: { type: Map, of: { type: String, enum: ["done", "skipped"] } },
+    hidden: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
 const billingSchema = new mongoose.Schema(
   {
     plan: { type: String, default: "standard" },
@@ -177,6 +190,7 @@ const companySchema = new mongoose.Schema(
     terms: { type: termsSchema, default: () => ({}) },
     fieldBlocks: { type: fieldBlocksSchema, default: () => ({}) },
     managerRules: { type: managerRulesSchema, default: () => ({}) },
+    setupProgress: { type: setupProgressSchema, default: () => ({}) },
     billing: { type: billingSchema, default: () => ({}) },
 
     // Legacy admin toggles. Still authoritative — see isTenantUsable().

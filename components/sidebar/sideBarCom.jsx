@@ -40,6 +40,7 @@ import SideBarMenuCom from "./sideBarMenu";
 import { mergeAndFilterMenus } from "@/lib/object";
 import { useBranding } from "@/app/admin/providers";
 import CompanySwitcher from "./companySwitcher";
+import SetupProgress from "@/components/setup/setupProgress";
 import { useMemo } from "react";
 import { PLATFORM_APP_NAME } from "@/lib/tenant";
 
@@ -210,6 +211,8 @@ const SideBarFooterCom = () => {
 
   return (
     <SidebarFooter className="border-t">
+      {/* A new company's setup progress, for its super admin only. */}
+      <SetupProgress />
       <SidebarMenu>
         <SidebarMenuItem>
           <DropdownMenu>

@@ -7,13 +7,21 @@ import {
   Building2,
   Check,
   ClipboardList,
+  ListChecks,
   Globe,
   Palette,
   SlidersHorizontal,
   Type,
 } from "lucide-react";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  SETUP_PROGRESS_KEY,
+  useSetupProgress,
+} from "@/components/setup/setupProgress";
+import { setSetupChecklistHidden } from "@/server/tenantServer/setupProgressServer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BrandingForm from "./brandingForm";
 import DomainsPanel from "./domainsPanel";
@@ -36,7 +44,9 @@ const SettingsClient = ({
   supportEmail,
 }) => {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [isPending, startTransition] = useTransition();
+  const { data: setup } = useSetupProgress();
   const [selectedId, setSelectedId] = useState(
     // Start on the company they are currently working in, if it is one of them.
     companies.find((c) => c._id === activeTenantId)?._id || companies[0]?._id
@@ -52,6 +62,8 @@ const SettingsClient = ({
         toast.success(res.message || "Saved");
         onSuccess?.(res);
         router.refresh();
+        // Branding, words and the form are setup steps; tick them now.
+        queryClient.invalidateQueries({ queryKey: SETUP_PROGRESS_KEY });
       } else {
         toast.error(res?.message || "Something went wrong");
       }
@@ -64,9 +76,33 @@ const SettingsClient = ({
   return (
     <div className="p-4 md:p-6">
       <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Company settings
-        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Company settings
+          </h1>
+          {/* The way back to a checklist the owner put away. */}
+          {setup?.hidden && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                startTransition(async () => {
+                  const res = await setSetupChecklistHidden(false);
+                  if (res?.success) {
+                    await queryClient.invalidateQueries({
+                      queryKey: SETUP_PROGRESS_KEY,
+                    });
+                  } else {
+                    toast.error(res?.message || "Something went wrong");
+                  }
+                })
+              }
+            >
+              <ListChecks className="size-4" />
+              Show setup checklist
+            </Button>
+          )}
+        </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {multi
             ? `Branding, web address and plan for each of your ${companies.length} companies. Each one has its own domain.`
