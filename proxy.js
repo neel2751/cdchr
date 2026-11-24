@@ -11,6 +11,7 @@ import {
   platformApexHost,
   platformRootDomain,
   tenantSubdomainsLive,
+  isLocalDevHost,
 } from "./lib/tenantHost";
 
 // Host -> resolution cache. Middleware module scope survives between requests
@@ -189,7 +190,9 @@ async function checkRoleMiddleware(req) {
     if (userRole !== "platformAdmin") {
       return NextResponse.redirect(new URL("/unauthorized", req.url));
     }
-    if (apexHost && !onPlatformHost) {
+    // Not on the developer's own machine, where the apex host can never
+    // match (see isLocalDevHost) — production never takes that exception.
+    if (apexHost && !onPlatformHost && !isLocalDevHost(hostname)) {
       return NextResponse.redirect(new URL("/unauthorized", req.url));
     }
     // Platform admins are privileged, so the same 2FA gates apply. Repeated
