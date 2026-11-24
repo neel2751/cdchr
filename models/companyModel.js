@@ -87,7 +87,11 @@ const featuresSchema = new mongoose.Schema(
 // null means "no limit"; the platform dashboard sets these per plan.
 const limitsSchema = new mongoose.Schema(
   {
+    // Office staff. Current people only — leavers do not count.
     maxEmployees: { type: Number, default: null },
+    // Students / site employees — the people at a company's sites or
+    // classes. A separate cap because they are priced separately.
+    maxWorkers: { type: Number, default: null },
     maxStorageBytes: { type: Number, default: null },
   },
   { _id: false }
@@ -186,6 +190,10 @@ const billingSchema = new mongoose.Schema(
     quotedPeriodPence: { type: Number },
     planAppliedAt: { type: Date },
     planAppliedBy: { type: String },
+    // Over the package's allowance: "charge" for extras (the default, also
+    // when absent) or "block" — stop there. Chosen by the company's super
+    // admin on Plan & billing. See OVERAGE_MODES in lib/pricing.js.
+    overageMode: { type: String, enum: ["charge", "block"] },
   },
   { _id: false }
 );

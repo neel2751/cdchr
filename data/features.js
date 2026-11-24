@@ -315,6 +315,7 @@ export const CORE_PATHS = {
   "/admin/permissions": "Granting access cannot itself require a module.",
   "/admin/company": "The company's own record.",
   "/admin/settings": "Branding and domains.",
+  "/admin/plan": "The company's package and bill. Never optional.",
   "/admin/email": "Outgoing mail identity; password resets depend on it.",
   "/admin/auditLogs": "The record of who did what. Never optional.",
   // Matched by prefix, longest first — so this covers /admin/me/profile,

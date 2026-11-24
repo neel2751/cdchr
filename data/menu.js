@@ -265,6 +265,15 @@ export const MENU = [
     role: ["superAdmin"],
     icon: "Settings",
   },
+  // The company's package, what it costs, how much of each allowance is used,
+  // and its invoices. Super admin only: it is about the company's bill, and
+  // the one choice on it (pay for extras or stop at the package) is theirs.
+  {
+    name: "Plan & Billing",
+    path: "/admin/plan",
+    role: ["superAdmin"],
+    icon: "CreditCard",
+  },
   // Bringing an existing staff list in from whatever the company used before
   // this one. Sits next to Company Settings because it belongs to setting the
   // company up rather than to running it — most companies use it once.

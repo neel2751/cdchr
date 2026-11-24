@@ -30,7 +30,15 @@ export default function AccessBanner({ notice, contactEmail }) {
     >
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className="min-w-0 flex-1">{notice.text}</span>
-      {notice.owner && notice.tone !== "info" && contactEmail && (
+      {notice.action?.href && (
+        <a
+          href={notice.action.href}
+          className="font-medium underline underline-offset-2"
+        >
+          {notice.action.label}
+        </a>
+      )}
+      {!notice.action && notice.owner && notice.tone !== "info" && contactEmail && (
         <a
           href={`mailto:${contactEmail}?subject=${encodeURIComponent("Choosing a plan")}`}
           className="font-medium underline underline-offset-2"

@@ -63,7 +63,13 @@ export const useFieldBlocks = () => {
   return useMemo(() => blocks || resolveCompanyBlocks(null), [blocks]);
 };
 
-const AdminProviders = ({ children, branding, accessNotice, contactEmail }) => {
+const AdminProviders = ({
+  children,
+  branding,
+  accessNotice,
+  usageNotice,
+  contactEmail,
+}) => {
   // Created in state rather than at module scope so the cache is never shared
   // between requests during server rendering.
   const [queryClient] = useState(() => new QueryClient());
@@ -94,6 +100,8 @@ const AdminProviders = ({ children, branding, accessNotice, contactEmail }) => {
                     notice={accessNotice}
                     contactEmail={contactEmail}
                   />
+                  {/* Close to a limit that will stop them adding people. */}
+                  <AccessBanner notice={usageNotice} />
                   {/* Urgent announcements, on every admin page. Below the
                       support banner: which company you are looking at
                       outranks its news. */}

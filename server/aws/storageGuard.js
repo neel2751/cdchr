@@ -1,4 +1,5 @@
 import CompanyModel from "@/models/companyModel";
+import PricingPlanModel from "@/models/pricingPlanModel";
 import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { escapeTenant } from "@/lib/tenantContext";
@@ -81,16 +82,42 @@ export async function assertStorageAllows(tenantId, addingBytes = 0, measure) {
   try {
     await connect();
     const tenant = await escapeTenant("storage: company allowance", () =>
-      CompanyModel.findById(createObjectId(tenantId)).select("limits").lean()
+      CompanyModel.findById(createObjectId(tenantId))
+        .select("limits billing.plan billing.overageMode")
+        .lean()
     );
 
-    const limit = tenant?.limits?.maxStorageBytes ?? null;
+    const cap = tenant?.limits?.maxStorageBytes ?? null;
+    // The package's storage, when the company chose to stop at its package
+    // rather than pay for extra GB (lib/pricing.js OVERAGE_MODES).
+    let packageLimit = null;
+    let planName = "";
+    if (tenant?.billing?.overageMode === "block" && tenant.billing.plan) {
+      const plan = await PricingPlanModel.findOne({ key: tenant.billing.plan })
+        .select("name included.storageGb")
+        .lean();
+      if (plan?.included?.storageGb != null) {
+        packageLimit = plan.included.storageGb * 1024 ** 3;
+        planName = plan.name;
+      }
+    }
     // No allowance set means unlimited, which is how every existing company is
     // configured — so this can be switched on without capping anyone.
-    if (!limit) return { allowed: true };
+    if (!cap && packageLimit == null) return { allowed: true };
 
     const used = await readUsage(tenantId, measure);
-    const verdict = checkStorage({ limit, used, addingBytes });
+    const byPackage = packageLimit != null && (!cap || packageLimit < cap);
+    const verdict = checkStorage({
+      limit: byPackage ? packageLimit : cap,
+      used,
+      addingBytes,
+    });
+    if (!verdict.allowed && byPackage) {
+      return {
+        allowed: false,
+        message: `The ${planName} package includes ${packageLimit / 1024 ** 3} GB of storage, and this company is set to stop there rather than pay for extra. A super admin can change that in Plan & billing, or remove some files.`,
+      };
+    }
     return { allowed: verdict.allowed, message: verdict.message };
   } catch (error) {
     console.log("Storage check failed:", error?.message);

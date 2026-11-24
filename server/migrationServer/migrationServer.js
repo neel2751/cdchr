@@ -40,7 +40,7 @@ import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { logAuditDirect } from "@/lib/audit";
 import { escapeTenant } from "@/lib/tenantContext";
-import { checkSeats } from "@/lib/tenantPlan";
+import { checkHeadroom } from "@/server/billingServer/headroom";
 import { parseCsv, toCsv } from "@/lib/csv";
 import { coerceRow, matchHeaders, rowLabel } from "@/lib/migration/columns";
 import { cleanText, emailKey, phoneKey } from "@/lib/migration/normalize";
@@ -509,28 +509,15 @@ async function checkLeaveReadiness(kind) {
 }
 
 /**
- * Whether the company's licence has room for the new records.
- *
- * Fails open, like the seat check on the single-employee form: a company must
- * never be blocked from taking on staff because a limit could not be read. Only
- * office staff count against it, because that is what checkTenantSeats counts.
+ * Whether the company has room for the new records: office staff and site
+ * employees each against their own cap, and the package allowance if the
+ * company chose to stop there (server/billingServer/headroom.js). Fails open,
+ * like the single-employee forms.
  */
-async function checkImportSeats({ kind, tenantId, adding }) {
-  if (kind !== "office" || adding <= 0) return { allowed: true };
-  try {
-    const tenant = await escapeTenant("migration: the company's seat limit", () =>
-      CompanyModel.findById(tenantId).select("limits").lean()
-    );
-    const limit = tenant?.limits?.maxEmployees ?? null;
-    if (!limit) return { allowed: true };
-    const used = await OfficeEmployeeModel.countDocuments({
-      delete: { $ne: true },
-    });
-    return checkSeats({ limit, used, adding });
-  } catch (error) {
-    console.log("Migration seat check failed:", error?.message);
-    return { allowed: true };
-  }
+function checkImportSeats({ kind, tenantId, adding }) {
+  const which = kind === "office" ? "officeStaff" : kind === "site" ? "workers" : null;
+  if (!which || adding <= 0) return { allowed: true };
+  return checkHeadroom(tenantId, which, adding);
 }
 
 /* -------------------------------------------------------------------------- */

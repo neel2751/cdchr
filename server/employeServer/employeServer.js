@@ -14,6 +14,7 @@ import { decrypt } from "@/lib/algo";
 import ClockRecordModel from "@/models/clockInModel";
 import { normalizeDateToUTC } from "@/lib/formatDate";
 import { withAudit, recordAudit } from "@/lib/audit";
+import { checkHeadroom } from "../billingServer/headroom";
 import { logVisaExpiryChange } from "../visaServer/visaAudit";
 import { getLockedEmails, clearLockByEmail } from "@/lib/rateLimit";
 import {
@@ -375,6 +376,15 @@ export const handleEmploye = withAudit(
         // the link emailed below.
         const password = await GenerateHashPassword(unknowablePassword());
         if (!isExists.status) return isExists;
+        // The company's cap on site employees / students, and its package
+        // allowance if it chose to stop there (billing/headroom.js).
+        const { props: seatProps } = await getServerSideProps();
+        const room = await checkHeadroom(
+          seatProps?.session?.user?.tenantId,
+          "workers",
+          1,
+        );
+        if (!room.allowed) return { success: false, message: room.message };
         const addEmploye = await EmployeModel.create({
           ...stripRightToWorkFields(data),
           eAddress: eAddress,
@@ -511,6 +521,11 @@ export const employeeStatus = withAudit(
       const isActive = !data?.status;
       const statusDate = data.status ? new Date() : null;
       const before = await EmployeModel.findById(id).lean();
+      // Switching someone back on takes a place, like adding them did.
+      if (isActive && before?.isActive === false) {
+        const room = await checkHeadroom(before.tenantId, "workers", 1);
+        if (!room.allowed) return { success: false, message: room.message };
+      }
       await EmployeModel.updateOne(
         { _id: id },
         { $set: { isActive, statusDate } },

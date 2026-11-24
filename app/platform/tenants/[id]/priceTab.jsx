@@ -121,7 +121,10 @@ function PriceForm({ tenant, data, run, isPending }) {
           <CardHeader>
             <CardTitle className="text-base">What they use today</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Current people only, in this company. Leavers are not counted.
+              Current people only, in this company. Leavers are not counted.{" "}
+              {billing.overageMode === "block"
+                ? "They chose to stop at the package's allowance."
+                : "Over the allowance, extras are charged (their choice, on Plan & billing)."}
             </p>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3">

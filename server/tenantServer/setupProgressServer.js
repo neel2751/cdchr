@@ -56,6 +56,13 @@ const STEPS = [
     href: "/admin/settings",
   },
   {
+    key: "plan",
+    group: "Your company",
+    title: "Choose your plan",
+    body: "Compare the packages and see what yours would cost.",
+    href: "/admin/plan",
+  },
+  {
     key: "form",
     group: "Your company",
     title: "Check the {siteEmployee} form",
@@ -150,7 +157,9 @@ async function requireOwner() {
 async function readCompany(tenantId) {
   return escapeTenant("setup: company settings", () =>
     CompanyModel.findById(tenantId)
-      .select("industry terms branding fieldBlocks managerRules features setupProgress")
+      .select(
+        "industry terms branding fieldBlocks managerRules features setupProgress status billing.planAppliedAt"
+      )
       .lean()
   );
 }
@@ -186,6 +195,10 @@ async function doneFromData(company) {
     // Stored rather than defaulted: a company that never chose has none.
     industry: Boolean(company?.industry),
     branding: Boolean(company?.branding?.appName || company?.branding?.logoUrl),
+    // On a package, or a paying customer from before packages existed.
+    plan:
+      Boolean(company?.billing?.planAppliedAt) ||
+      (company?.status || "active") === "active",
     form: has(company?.fieldBlocks) || has(company?.managerRules),
     email: emailAccounts > 0,
     // The owner is the first; staff means somebody else.

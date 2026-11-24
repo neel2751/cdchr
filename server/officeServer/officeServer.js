@@ -4,32 +4,16 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import bcrypt from "bcryptjs";
 import { createObjectId } from "@/lib/mongodb";
 import CompanyModel from "@/models/companyModel";
-import { checkSeats } from "@/lib/tenantPlan";
+import { checkHeadroom } from "@/server/billingServer/headroom";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 
 /**
- * Whether this company has room for one more employee.
- *
- * Fails open: a company must never be blocked from hiring because the limit
- * could not be read.
+ * Whether this company has room for one more office employee — the platform's
+ * cap, and the package allowance if the company chose to stop there. See
+ * server/billingServer/headroom.js. Fails open.
  */
-async function checkTenantSeats(tenantId) {
-  if (!tenantId) return { allowed: true };
-  try {
-    const tenant = await escapeTenant("seats: company limit", () =>
-      CompanyModel.findById(tenantId).select("limits").lean()
-    );
-    const limit = tenant?.limits?.maxEmployees ?? null;
-    if (!limit) return { allowed: true };
-
-    const used = await runWithTenant(String(tenantId), () =>
-      OfficeEmployeeModel.countDocuments({ delete: { $ne: true } })
-    );
-    return checkSeats({ limit, used, adding: 1 });
-  } catch (error) {
-    console.log("Seat check failed:", error?.message);
-    return { allowed: true };
-  }
+function checkTenantSeats(tenantId) {
+  return checkHeadroom(tenantId, "officeStaff", 1);
 }
 import {
   sendPasswordInvite,
@@ -905,6 +889,11 @@ export const OfficeEmployeeStatus = withAudit(
       const statusDate = data.status ? new Date() : null;
 
       const before = await OfficeEmployeeModel.findById(id).lean();
+      // Switching someone back on takes a place, like adding them did.
+      if (data?.name === "isActive" && isActive && before?.isActive === false) {
+        const room = await checkHeadroom(before.tenantId, "officeStaff", 1);
+        if (!room.allowed) return { success: false, message: room.message };
+      }
       await OfficeEmployeeModel.updateOne(
         { _id: id },
         { $set: { [data?.name]: isActive, statusDate } },

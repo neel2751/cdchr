@@ -5,6 +5,8 @@ import {
   accessNotice,
   getMyCompanyAccess,
 } from "@/server/tenantServer/myCompanyAccess";
+import { planNotice } from "@/server/billingServer/planNotice";
+import { auth } from "@/auth";
 import AdminProviders from "./providers";
 
 /**
@@ -45,6 +47,16 @@ export default async function AdminLayout({ children }) {
 
   const branding = await getBrandingForCurrentUser();
 
+  // Close to a limit that will stop them (lib/pricing.js) — the super admin
+  // only, since only they can do anything about it.
+  let usageNotice = null;
+  if (role === "superAdmin") {
+    const session = await auth();
+    if (!session?.user?.impersonation) {
+      usageNotice = await planNotice(session?.user?.tenantId);
+    }
+  }
+
   // Tailwind v4 maps --color-primary to --primary, so overriding the variable
   // here re-themes every component that uses it. Only emitted when the company
   // has actually set a colour, otherwise globals.css keeps its defaults.
@@ -72,6 +84,7 @@ export default async function AdminLayout({ children }) {
       <AdminProviders
         branding={branding}
         accessNotice={accessNotice(access, role)}
+        usageNotice={usageNotice}
         contactEmail={process.env.PLATFORM_SUPPORT_EMAIL || ""}
       >
         {children}

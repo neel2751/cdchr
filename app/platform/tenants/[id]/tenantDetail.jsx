@@ -451,7 +451,12 @@ const PlanTab = ({ tenant, run, isPending }) => {
   const [industry, setIndustry] = useState(
     tenant.industry || DEFAULT_INDUSTRY
   );
-  const [seats, setSeats] = useState(tenant.billing?.seats ?? "");
+  // Hard caps (limits.*): stop the company at this number whatever its
+  // package says. Empty means no cap — the package allowance and its extras
+  // then apply (lib/pricing.js). The old "Seats" box wrote billing.seats,
+  // which nothing read.
+  const [officeCap, setOfficeCap] = useState(tenant.limits?.maxEmployees ?? "");
+  const [workerCap, setWorkerCap] = useState(tenant.limits?.maxWorkers ?? "");
   const [storageMb, setStorageMb] = useState(
     tenant.limits?.maxStorageBytes
       ? Math.round(tenant.limits.maxStorageBytes / (1024 * 1024))
@@ -515,15 +520,29 @@ const PlanTab = ({ tenant, run, isPending }) => {
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="seats">Seats</Label>
+            <Label htmlFor="officeCap">Office staff cap</Label>
             <Input
-              id="seats"
+              id="officeCap"
               type="number"
               min="1"
-              value={seats}
-              placeholder="unlimited"
-              onChange={(e) => setSeats(e.target.value)}
+              value={officeCap}
+              placeholder="no cap"
+              onChange={(e) => setOfficeCap(e.target.value)}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="workerCap">Students / workers cap</Label>
+            <Input
+              id="workerCap"
+              type="number"
+              min="1"
+              value={workerCap}
+              placeholder="no cap"
+              onChange={(e) => setWorkerCap(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              A hard stop. Empty: the package&apos;s extras are charged instead.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="storage">Storage allowance (MB)</Label>
@@ -694,9 +713,10 @@ const PlanTab = ({ tenant, run, isPending }) => {
             run(() =>
               updateTenantPlan(tenant._id, {
                 industry,
-                seats: seats === "" ? null : seats,
                 features,
                 limits: {
+                  maxEmployees: officeCap === "" ? null : officeCap,
+                  maxWorkers: workerCap === "" ? null : workerCap,
                   maxStorageBytes:
                     storageMb === "" ? null : Number(storageMb) * 1024 * 1024,
                 },
