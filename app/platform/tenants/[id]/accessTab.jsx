@@ -104,6 +104,9 @@ export default function AccessTab({ tenant, run, isPending }) {
           </CardTitle>
           <p className="text-sm text-muted-foreground">
             {whereItIs(access, tenant.status)}
+            {tenant.billing?.trialOffer && onTrial
+              ? ` Trial from offer code ${tenant.billing.trialOffer}.`
+              : ""}
           </p>
         </CardHeader>
       </Card>
@@ -167,7 +170,7 @@ export default function AccessTab({ tenant, run, isPending }) {
                 disabled={isPending}
                 onClick={() => run(() => setTenantStatus(tenant._id, "trial"))}
               >
-                Put on a {ACCESS_RULES.trialDays}-day trial
+                Put on a {tenant.trialDays || ACCESS_RULES.trialDays}-day trial
               </Button>
             )}
           </div>

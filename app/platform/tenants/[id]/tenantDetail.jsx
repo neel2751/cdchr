@@ -31,8 +31,10 @@ import {
   AlertTriangle,
   Eye,
   KeyRound,
+  PoundSterling,
 } from "lucide-react";
 import AccessTab, { ACCESS_LABEL, ACCESS_VARIANT } from "./accessTab";
+import PriceTab from "./priceTab";
 
 import {
   FEATURES,
@@ -196,9 +198,13 @@ const TenantDetail = ({ tenant }) => {
             <AlertTriangle className="size-4" />
             Data
           </TabsTrigger>
+          <TabsTrigger value="price" className="gap-2">
+            <PoundSterling className="size-4" />
+            Price
+          </TabsTrigger>
           <TabsTrigger value="plan" className="gap-2">
             <SlidersHorizontal className="size-4" />
-            Plan
+            Modules
           </TabsTrigger>
         </TabsList>
 
@@ -216,6 +222,9 @@ const TenantDetail = ({ tenant }) => {
         </TabsContent>
         <TabsContent value="danger">
           <DataTab tenant={tenant} run={run} isPending={isPending} />
+        </TabsContent>
+        <TabsContent value="price">
+          <PriceTab tenant={tenant} run={run} isPending={isPending} />
         </TabsContent>
         <TabsContent value="plan">
           <PlanTab tenant={tenant} run={run} isPending={isPending} />
@@ -436,7 +445,7 @@ const DomainsTab = ({ tenant, run, isPending }) => {
 };
 
 const PlanTab = ({ tenant, run, isPending }) => {
-  const [plan, setPlan] = useState(tenant.billing?.plan || "standard");
+  const plan = tenant.billing?.plan || "none";
   // Decides the words on the company's screens — "Classes", "Students" for
   // tuition. See data/terminology.js.
   const [industry, setIndustry] = useState(
@@ -492,17 +501,18 @@ const PlanTab = ({ tenant, run, isPending }) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Plan and features</CardTitle>
+        <CardTitle className="text-base">Modules and limits</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="plan">Plan</Label>
-            <Input
-              id="plan"
-              value={plan}
-              onChange={(e) => setPlan(e.target.value)}
-            />
+            <Label htmlFor="plan">Package</Label>
+            {/* Set on the Price tab, with its price — a name typed here
+                would be a package with no price behind it. */}
+            <Input id="plan" value={plan} readOnly disabled />
+            <p className="text-xs text-muted-foreground">
+              Change it on the Price tab.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="seats">Seats</Label>
@@ -683,7 +693,6 @@ const PlanTab = ({ tenant, run, isPending }) => {
           onClick={() =>
             run(() =>
               updateTenantPlan(tenant._id, {
-                plan,
                 industry,
                 seats: seats === "" ? null : seats,
                 features,
@@ -696,7 +705,7 @@ const PlanTab = ({ tenant, run, isPending }) => {
           }
         >
           {isPending && <Loader2 className="size-4 animate-spin" />}
-          Save plan
+          Save modules
         </Button>
       </CardContent>
     </Card>

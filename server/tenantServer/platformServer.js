@@ -11,6 +11,7 @@ import { logAuditDirect } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { invalidateTenantCache } from "./tenantServer";
 import { invalidateCompanyAccess } from "./tenantAccessState";
+import { defaultTrialDays } from "../billingServer/pricingStore";
 import {
   MANUAL_LOCK_LEVELS,
   companyAccess,
@@ -150,6 +151,8 @@ export async function getTenantDetail(tenantId) {
         // What the company may do today, and what happens next — see
         // lib/tenantAccess.js.
         access: companyAccess(tenant),
+        // The standard trial length, set on the pricing page.
+        trialDays: await defaultTrialDays(),
         employeeCount,
         storage,
         createdAt: tenant.createdAt,
@@ -247,7 +250,7 @@ export async function setTenantStatus(tenantId, status) {
       // ends — the hole lib/tenantAccess.js closes. Give it a fresh one.
       const end = before.billing?.trialEndsAt;
       if (status === "trial" && (!end || new Date(end) <= new Date())) {
-        set["billing.trialEndsAt"] = trialEndFrom();
+        set["billing.trialEndsAt"] = trialEndFrom(new Date(), await defaultTrialDays());
       }
       await CompanyModel.updateOne(
         { _id: createObjectId(id) },

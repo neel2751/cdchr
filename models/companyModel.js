@@ -166,6 +166,26 @@ const billingSchema = new mongoose.Schema(
     // Trial reminder emails already sent, one per stage, so a daily job never
     // sends the same one twice. See server/tenantServer/trialReminderJob.js.
     trialReminders: { type: [String], default: undefined },
+    // The offer code the trial came from (models/trialOfferModel.js), if any.
+    trialOffer: { type: String },
+
+    // The agreed price — set when the platform admin applies a package
+    // (server/billingServer/pricingServer.js). `plan` above holds the
+    // package key. Arithmetic: lib/pricing.js.
+    cycle: { type: String, enum: ["monthly", "yearly"] },
+    // A deal discount agreed with this customer, off the monthly total.
+    discountPercent: { type: Number, min: 0, max: 100 },
+    // Modules bought on top of the package.
+    addOns: { type: [String], default: undefined },
+    // A customer's second or later company: its package fee is discounted.
+    // Until billing accounts (Step 4) group companies, the console says so.
+    extraCompany: { type: Boolean },
+    // The quote when the plan was applied, for the record and for the
+    // console to show. The invoice (Step 5) works from live usage.
+    quotedMonthlyPence: { type: Number },
+    quotedPeriodPence: { type: Number },
+    planAppliedAt: { type: Date },
+    planAppliedBy: { type: String },
   },
   { _id: false }
 );

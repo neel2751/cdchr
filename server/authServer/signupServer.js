@@ -11,6 +11,7 @@ import PendingSignupModel from "@/models/pendingSignupModel";
 import PlatformUserModel from "@/models/platformUserModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
+import TrialOfferModel from "@/models/trialOfferModel";
 import { logAuditDirect } from "@/lib/audit";
 import { emailButton } from "@/lib/emailTemplate";
 import { isValidObjectId, startSession } from "@/lib/mongodb";
@@ -28,6 +29,12 @@ import { invalidateTenantCache } from "../tenantServer/tenantServer";
 import { INDUSTRY_TEMPLATES, industryTemplate } from "@/data/terminology";
 import { featuresForPreset } from "@/data/features";
 import { trialEndFrom } from "@/lib/tenantAccess";
+import { normaliseOfferCode } from "@/lib/pricing";
+import {
+  defaultTrialDays,
+  findUsableOffer,
+  redeemTrialOffer,
+} from "../billingServer/pricingStore";
 
 /**
  * Self-serve signup: someone with no account creates a company and becomes its
@@ -211,6 +218,13 @@ export async function startSignup(form = {}) {
     if (!INDUSTRY_TEMPLATES.some((t) => t.key === industry)) {
       return { success: false, message: "Choose your type of business" };
     }
+    // An event or promotion code for a longer trial. Optional, but a code
+    // that was typed and does not work is said so now — not discovered as a
+    // shorter trial than promised.
+    const offerCode = form.offerCode ? normaliseOfferCode(form.offerCode) : null;
+    if (form.offerCode && !(offerCode && (await findUsableOffer(offerCode)))) {
+      return { success: false, message: "That offer code is not valid, or has ended" };
+    }
     if (password.length < MIN_PASSWORD_LENGTH) {
       return {
         success: false,
@@ -285,6 +299,7 @@ export async function startSignup(form = {}) {
       email,
       phoneNumber: Number(phoneDigits),
       industry,
+      offerCode: offerCode || undefined,
       passwordHash,
       tokenHash: hashToken(rawToken),
       expiresAt: new Date(Date.now() + TOKEN_TTL_HOURS * 60 * 60 * 1000),
@@ -507,6 +522,12 @@ export async function completeSignup(rawToken) {
 
     const template = industryTemplate(pending.industry);
 
+    // How long the trial is: the offer code's length, if it still has a place
+    // (taken now, given back below if the company is not created), or the
+    // standard length set in the platform console.
+    const offer = pending.offerCode ? await redeemTrialOffer(pending.offerCode) : null;
+    const trialDays = offer?.trialDays || (await defaultTrialDays());
+
     const session = await startSession();
     let created = null;
 
@@ -529,7 +550,10 @@ export async function completeSignup(rawToken) {
               // When the trial stops being free — lib/tenantAccess.js says
               // what follows. Without it a self-serve company was free for
               // ever.
-              billing: { trialEndsAt: trialEndFrom() },
+              billing: {
+                trialEndsAt: trialEndFrom(new Date(), trialDays),
+                ...(offer ? { trialOffer: offer.code } : {}),
+              },
               domains: [],
               isActive: true,
               delete: false,
@@ -606,6 +630,14 @@ export async function completeSignup(rawToken) {
       });
     } finally {
       await session.endSession();
+      // The offer's place was taken for a company that was not created —
+      // whether the transaction returned or threw. Give it back.
+      if (!created && offer) {
+        await TrialOfferModel.updateOne(
+          { code: offer.code, uses: { $gt: 0 } },
+          { $inc: { uses: -1 } }
+        ).catch(() => {});
+      }
     }
 
     if (!created) return { success: false, message: "Could not create your workspace" };

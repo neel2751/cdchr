@@ -34,6 +34,9 @@ const pendingSignupSchema = new mongoose.Schema(
     // words, form and modules suit it from the first sign-in. See
     // INDUSTRY_TEMPLATES in data/terminology.js.
     industry: { type: String, default: "construction" },
+  // A trial offer code (models/trialOfferModel.js), checked when typed and
+  // used when the company is created.
+  offerCode: { type: String },
 
     // Hashed at the point of signup, exactly as it would be on the employee
     // record, so a plaintext password never rests in this collection either.

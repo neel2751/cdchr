@@ -3,7 +3,15 @@
 import { signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Building2, LogOut, Nfc, Receipt, Tags, UserPlus } from "lucide-react";
+import {
+  Building2,
+  LogOut,
+  Nfc,
+  PoundSterling,
+  Receipt,
+  Tags,
+  UserPlus,
+} from "lucide-react";
 
 const PlatformNav = ({ userName }) => {
   return (
@@ -24,6 +32,12 @@ const PlatformNav = ({ userName }) => {
             <Link href="/platform/signups">
               <UserPlus className="size-4" />
               <span className="hidden sm:inline">Signups</span>
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/platform/pricing">
+              <PoundSterling className="size-4" />
+              <span className="hidden sm:inline">Pricing</span>
             </Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>

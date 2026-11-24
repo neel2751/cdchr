@@ -34,6 +34,7 @@ import {
 } from "@/server/authServer/signupServer";
 import { PLATFORM_APP_NAME } from "@/lib/tenant";
 import { INDUSTRY_TEMPLATES } from "@/data/terminology";
+import { getSignupTrial } from "@/server/billingServer/trialOfferServer";
 
 const MIN_PASSWORD_LENGTH = 8;
 const AVAILABILITY_DEBOUNCE_MS = 450;
@@ -82,10 +83,17 @@ const HIGHLIGHTS = [
   },
 ];
 
-export default function SignupForm({ rootDomain = "" }) {
+export default function SignupForm({
+  rootDomain = "",
+  standardTrialDays = 14,
+  initialOffer = null,
+}) {
   const [form, setForm] = useState({
     companyName: "",
     industry: "",
+    // An event or promotion code for a longer trial. Filled from the link
+    // (/signup?offer=EXPO30) when there is one.
+    offerCode: initialOffer?.code || "",
     slug: "",
     name: "",
     email: "",
@@ -134,6 +142,27 @@ export default function SignupForm({ rootDomain = "" }) {
     return () => clearTimeout(timer);
   }, [form.slug]);
 
+  // Check an offer code once typing settles, the same way as the address.
+  // The answer is tagged with the code it was about, so a slow reply for a
+  // code since edited is ignored.
+  const [offerCheck, setOfferCheck] = useState(
+    initialOffer ? { code: initialOffer.code, success: true, ...initialOffer } : null
+  );
+  useEffect(() => {
+    const code = form.offerCode.trim();
+    if (!code) return;
+    const timer = setTimeout(async () => {
+      const result = await getSignupTrial(code);
+      setOfferCheck({ code, ...result });
+    }, AVAILABILITY_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [form.offerCode]);
+  const typedCode = form.offerCode.trim();
+  const offer = typedCode && offerCheck?.code === typedCode ? offerCheck : null;
+  const offerChecking = Boolean(typedCode) && !offer;
+  const offerInvalid = Boolean(offer) && !offer.success;
+  const trialDays = offer?.success ? offer.trialDays : standardTrialDays;
+
   // Only an answer about the address currently in the box counts. Comparing
   // rather than tracking a "checking" flag means a slow reply for an address
   // the person has since edited is ignored on its own, and the effect never has
@@ -154,6 +183,8 @@ export default function SignupForm({ rootDomain = "" }) {
     form.password.length >= MIN_PASSWORD_LENGTH &&
     form.password === form.confirmPassword &&
     checked?.available &&
+    !offerChecking &&
+    !offerInvalid &&
     !isPending;
 
   const handleSubmit = (event) => {
@@ -171,6 +202,9 @@ export default function SignupForm({ rootDomain = "" }) {
     }
     if (!checked?.available) {
       return toast.warning(checked?.message || "Choose a workspace address");
+    }
+    if (offerInvalid) {
+      return toast.warning(offer.message || "Check the offer code, or leave it empty");
     }
 
     startTransition(async () => {
@@ -273,7 +307,8 @@ export default function SignupForm({ rootDomain = "" }) {
                   Create your workspace
                 </h2>
                 <p className="text-muted-foreground mt-2 text-sm">
-                  You&apos;ll be the super admin. Takes about a minute.
+                  Free for {trialDays} days, no card needed. You&apos;ll be
+                  the super admin. Takes about a minute.
                 </p>
               </header>
 
@@ -488,6 +523,43 @@ export default function SignupForm({ rootDomain = "" }) {
                     <p className="text-destructive text-xs">
                       Passwords do not match
                     </p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="offerCode">
+                    Event or offer code{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </Label>
+                  <Input
+                    id="offerCode"
+                    name="offerCode"
+                    value={form.offerCode}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        offerCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. EXPO30"
+                    autoComplete="off"
+                    aria-invalid={offerInvalid}
+                  />
+                  {offerChecking && (
+                    <p className="text-muted-foreground text-xs">Checking…</p>
+                  )}
+                  {offer?.success && (
+                    <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                      {offer.offer?.label || offer.label
+                        ? `${offer.offer?.label || offer.label}: `
+                        : ""}
+                      {offer.trialDays}-day free trial.
+                    </p>
+                  )}
+                  {offerInvalid && (
+                    <p className="text-destructive text-xs">{offer.message}</p>
                   )}
                 </div>
 
