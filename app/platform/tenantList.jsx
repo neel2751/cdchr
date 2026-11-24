@@ -207,11 +207,14 @@ const TenantList = ({ searchParams, stats }) => {
                       </TableCell>
 
                       <TableCell>
-                        <Badge
-                          variant={STATUS_VARIANT[tenant.status] || "outline"}
-                        >
-                          {tenant.status}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge
+                            variant={STATUS_VARIANT[tenant.status] || "outline"}
+                          >
+                            {tenant.status}
+                          </Badge>
+                          <AccessHint access={tenant.access} />
+                        </div>
                       </TableCell>
 
                       <TableCell className="text-sm">{tenant.plan}</TableCell>
@@ -335,3 +338,27 @@ const NewTenantDialog = () => {
 };
 
 export default TenantList;
+
+/**
+ * What the status badge does not say: how long a trial has left, or that the
+ * company is read-only or locked (lib/tenantAccess.js).
+ */
+function AccessHint({ access }) {
+  if (!access) return null;
+  if (access.level === "readOnly" || access.level === "locked") {
+    return (
+      <Badge variant="destructive">
+        {access.level === "locked" ? "locked" : "read-only"}
+      </Badge>
+    );
+  }
+  if (access.level === "grace") return <Badge variant="outline">trial over</Badge>;
+  if (access.reason === "trial" && access.daysLeft != null) {
+    return (
+      <span className="text-xs text-muted-foreground tabular-nums">
+        {access.daysLeft}d left
+      </span>
+    );
+  }
+  return null;
+}

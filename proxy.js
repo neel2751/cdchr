@@ -311,23 +311,38 @@ async function checkRoleMiddleware(req) {
   // Terminate live sessions for deactivated / locked-down office accounts.
   // Runs before the super-admin bypass so even a compromised super admin can
   // be cut off. Fails open so a transient error never locks everyone out.
-  if (
-    userRole === "admin" ||
-    userRole === "user" ||
-    userRole === "superAdmin"
-  ) {
+  //
+  // Site staff and the reception desk ask too, but only about their company:
+  // a locked company (lib/tenantAccess.js) is locked for everyone in it. Their
+  // own account flags are left to the checks they have always had.
+  const officeRole =
+    userRole === "admin" || userRole === "user" || userRole === "superAdmin";
+  const companyRole =
+    officeRole || userRole === "siteEmployee" || userRole === "reception";
+  if (companyRole) {
     try {
       const baseUrl =
         process.env.NEXTAUTH_URL || `http://${req.headers.get("host")}`;
       const statusRes = await fetch(`${baseUrl}/api/account/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId }),
+        body: JSON.stringify({ employeeId, tenantId: user?.tenantId || null }),
       });
       if (statusRes.ok) {
-        const { isActive, sessionsValidFrom, mustChangePassword: mustChange } =
-          await statusRes.json();
-        if (isActive === false) {
+        const {
+          isActive,
+          sessionsValidFrom,
+          mustChangePassword: mustChange,
+          tenantAccess,
+        } = await statusRes.json();
+
+        // Locked: the trial is long over, or the platform admin locked it.
+        // Everyone is sent to the page that says so — the super admin to be
+        // told what to do, everybody else who to ask. Nothing is deleted.
+        if (tenantAccess === "locked") {
+          return NextResponse.redirect(new URL("/account-paused", req.url));
+        }
+        if (officeRole && isActive === false) {
           return NextResponse.redirect(
             new URL("/unauthorized?action=logout", req.url)
           );
@@ -341,6 +356,7 @@ async function checkRoleMiddleware(req) {
         // before the reset would otherwise keep working indefinitely.
         const issuedAt = user?.issuedAt;
         if (
+          officeRole &&
           sessionsValidFrom &&
           issuedAt &&
           issuedAt * 1000 < sessionsValidFrom
@@ -358,7 +374,7 @@ async function checkRoleMiddleware(req) {
         // forced password from the account page; /change-password is that
         // screen now, and it is deliberately not a hop into the account area —
         // see the note at the top of app/change-password/page.jsx.
-        if (mustChange) {
+        if (officeRole && mustChange) {
           return NextResponse.redirect(new URL("/change-password", req.url));
         }
       }

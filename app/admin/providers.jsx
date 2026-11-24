@@ -7,6 +7,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import SidebarWrapper from "@/components/sidebar/sidebarWrapper";
 import SupportBanner from "@/components/supportBanner";
+import AccessBanner from "@/components/accessBanner";
 import AnnouncementBanner from "@/components/announcementBanner";
 import ScreenViewLogger from "@/components/screenViewLogger";
 import CompanyChoicePrompt from "@/components/companyChoicePrompt";
@@ -62,7 +63,7 @@ export const useFieldBlocks = () => {
   return useMemo(() => blocks || resolveCompanyBlocks(null), [blocks]);
 };
 
-const AdminProviders = ({ children, branding }) => {
+const AdminProviders = ({ children, branding, accessNotice, contactEmail }) => {
   // Created in state rather than at module scope so the cache is never shared
   // between requests during server rendering.
   const [queryClient] = useState(() => new QueryClient());
@@ -82,6 +83,10 @@ const AdminProviders = ({ children, branding }) => {
             <CompanyChoicePrompt />
             {/* Renders only during a support visit, above everything else. */}
             <SupportBanner />
+            {/* The trial countdown, or the account being read-only — see
+                lib/tenantAccess.js. Below the support banner for the same
+                reason as announcements. */}
+            <AccessBanner notice={accessNotice} contactEmail={contactEmail} />
             {/* Urgent announcements, on every admin page. Below the support
                 banner: which company you are looking at outranks its news. */}
             <AnnouncementBanner />

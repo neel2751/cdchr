@@ -141,11 +141,31 @@ const setupProgressSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// A lock the platform admin put on by hand — for an unpaid bill, say. Wins
+// over the trial dates. See lib/tenantAccess.js.
+const accessLockSchema = new mongoose.Schema(
+  {
+    level: { type: String, enum: ["readOnly", "locked"] },
+    // Shown to the company, so it knows what to do.
+    message: { type: String, trim: true, maxlength: 500 },
+    at: { type: Date },
+    by: { type: String },
+  },
+  { _id: false }
+);
+
 const billingSchema = new mongoose.Schema(
   {
     plan: { type: String, default: "standard" },
     seats: { type: Number, default: null },
     renewsAt: { type: Date },
+    // When a self-serve trial stops being free. Only read while status is
+    // "trial"; see lib/tenantAccess.js for what follows it.
+    trialEndsAt: { type: Date },
+    lock: { type: accessLockSchema, default: undefined },
+    // Trial reminder emails already sent, one per stage, so a daily job never
+    // sends the same one twice. See server/tenantServer/trialReminderJob.js.
+    trialReminders: { type: [String], default: undefined },
   },
   { _id: false }
 );

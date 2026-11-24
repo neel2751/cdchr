@@ -10,6 +10,9 @@ import OfficeUserModel from "@/models/officeModel";
 import PlatformUserModel from "@/models/platformUserModel";
 import { escapeTenant } from "@/lib/tenantContext";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
+import { canEnter } from "@/lib/tenantAccess";
+import { COMPANY_PAUSED_MESSAGE } from "@/lib/authErrors";
+import { getCompanyAccess } from "@/server/tenantServer/tenantAccessState";
 import CompanyModel from "@/models/companyModel";
 import { NO_MATCH_MESSAGE } from "@/lib/authErrors";
 import {
@@ -473,6 +476,17 @@ const verifyCredentials = async (email, password, deviceId) => {
       if (company?.slug) user.tenantSlug = company.slug;
     } catch (error) {
       console.log("Workspace address lookup failed:", error?.message);
+    }
+  }
+
+  // A locked company (lib/tenantAccess.js) — its trial long over, or locked by
+  // the platform admin — lets nobody in but its super admin, who lands on the
+  // page that says why. Asked only after the password matched, so it tells a
+  // stranger nothing about whose company is paid up.
+  if (user.tenantId) {
+    const access = await getCompanyAccess(user.tenantId, { fresh: true });
+    if (!canEnter(access, user.role)) {
+      return { status: false, message: COMPANY_PAUSED_MESSAGE };
     }
   }
 

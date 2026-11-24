@@ -13,6 +13,7 @@ import {
   sendTenantMail,
 } from "@/server/email/tenantMail";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
+import { companyAccess } from "@/lib/tenantAccess";
 import { sendMail } from "@/server/nodeMailerServer/nodemailerServer";
 import { visaReminderTemplate } from "@/server/email/templates/visaReminderTemplate";
 import { logAuditDirect } from "@/lib/audit";
@@ -213,11 +214,14 @@ export async function runVisaReminderJob() {
 
   const tenants = await escapeTenant("visa cron: iterate companies", () =>
     CompanyModel.find({ delete: { $ne: true }, isActive: { $ne: false } })
-      .select("_id")
+      .select("_id status delete billing")
       .lean()
   );
 
   for (const tenant of tenants) {
+    // A locked company (lib/tenantAccess.js) gets nothing sent on its behalf
+    // until it is reopened.
+    if (companyAccess(tenant).level === "locked") continue;
     results.tenants++;
     const one = await runWithTenant(String(tenant._id), () =>
       runVisaRemindersForCurrentTenant()

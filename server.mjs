@@ -102,6 +102,7 @@ app.prepare().then(() => {
     scheduleAnnouncements(port);
     scheduleShiftClose(port);
     scheduleDunning(port);
+    scheduleTrialReminders(port);
     scheduleCarryForwardExpiry(port);
     schedulePolicyReviews(port);
   });
@@ -364,6 +365,50 @@ function scheduleDunning(serverPort) {
 
   console.log(
     `[dunning] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// Tells companies on a free trial that it is ending, has ended, and what that
+// means — see server/tenantServer/trialReminderJob.js. Once a day: each stage
+// is a day or more apart, and each is sent only once whatever the timing.
+function scheduleTrialReminders(serverPort) {
+  const RUN_HOUR = 10;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[trial-reminders] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `http://127.0.0.1:${serverPort}/api/cron/trial-reminders`,
+        {
+          method: "POST",
+          headers: { "x-cron-secret": process.env.CRON_SECRET },
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (json?.results?.sent || json?.results?.failed?.length) {
+        console.log("[trial-reminders] run complete:", JSON.stringify(json));
+      }
+    } catch (err) {
+      console.error("[trial-reminders] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[trial-reminders] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
 }
 

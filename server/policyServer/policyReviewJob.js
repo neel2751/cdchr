@@ -8,6 +8,7 @@ import { createObjectId } from "@/lib/mongodb";
 import { REVIEW_WARNING_DAYS, daysBetween, reviewMilestone } from "@/lib/policies";
 import { isFeatureEnabled } from "@/lib/tenantPlan";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
+import { companyAccess } from "@/lib/tenantAccess";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import PolicyCategoryModel from "@/models/policyCategoryModel";
@@ -45,11 +46,14 @@ export async function runPolicyReviewJob({ now = new Date(), send = sendTenantMa
 
   const tenants = await escapeTenant("policy review cron: iterate companies", () =>
     CompanyModel.find({ delete: { $ne: true }, isActive: { $ne: false } })
-      .select("_id features")
+      .select("_id features status delete billing")
       .lean(),
   );
 
   for (const tenant of tenants) {
+    // A locked company (lib/tenantAccess.js) gets nothing sent on its behalf
+    // until it is reopened.
+    if (companyAccess(tenant).level === "locked") continue;
     if (!isFeatureEnabled(tenant.features, "policies")) continue;
     results.tenants++;
     const one = await runWithTenant(String(tenant._id), () =>

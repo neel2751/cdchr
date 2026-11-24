@@ -27,6 +27,7 @@ import { sendTenantMail } from "../email/tenantMail";
 import { invalidateTenantCache } from "../tenantServer/tenantServer";
 import { INDUSTRY_TEMPLATES, industryTemplate } from "@/data/terminology";
 import { featuresForPreset } from "@/data/features";
+import { trialEndFrom } from "@/lib/tenantAccess";
 
 /**
  * Self-serve signup: someone with no account creates a company and becomes its
@@ -525,6 +526,10 @@ export async function completeSignup(rawToken) {
               // platform console can change either later.
               industry: template.key,
               features: featuresForPreset(template.featurePreset) || {},
+              // When the trial stops being free — lib/tenantAccess.js says
+              // what follows. Without it a self-serve company was free for
+              // ever.
+              billing: { trialEndsAt: trialEndFrom() },
               domains: [],
               isActive: true,
               delete: false,

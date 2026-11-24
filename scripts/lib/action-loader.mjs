@@ -23,8 +23,15 @@ const SESSION_STUB = new URL("./session-stub.mjs", import.meta.url).href;
 // the expense and upload servers actually use ("../session/session").
 const SESSION_MODULE = /(^|\/)session\/session(\.js)?$/;
 
+// lib/tenantContext.js asks `@/auth` directly for the session (it decides the
+// tenant and whether the caller may write). The same stub answers, so actAs()
+// covers both doors.
+const AUTH_STUB = new URL("./auth-stub.mjs", import.meta.url).href;
+const AUTH_MODULE = /^@\/auth(\.js)?$/;
+
 export function resolve(specifier, context, next) {
   if (SESSION_MODULE.test(specifier)) return next(SESSION_STUB, context);
+  if (AUTH_MODULE.test(specifier)) return next(AUTH_STUB, context);
   return aliasResolve(specifier, context, next);
 }
 

@@ -14,6 +14,8 @@ import { headers } from "next/headers";
 
 import { connect } from "@/db/db";
 import { createObjectId } from "@/lib/mongodb";
+import { currentTenantId, essentialWrite } from "@/lib/tenantContext";
+import { getCompanyAccess } from "@/server/tenantServer/tenantAccessState";
 import { checkClockAction } from "@/lib/clockRules";
 import { getClientIp } from "@/lib/clientIp";
 import { evaluateLocation } from "@/lib/locationPolicy";
@@ -139,7 +141,27 @@ export async function findActionRecord({ employeeId, date, locationId }) {
  *                      this is where a QR code is spent, so a refused action
  *                      does not cost the employee their code.
  */
-export async function performClockAction({
+export async function performClockAction(args) {
+  // Every clock-in passes through here — QR code, NFC tag, offline sync — so
+  // this is where the company's own access is judged (lib/tenantAccess.js).
+  // Asked of the tenant in scope, not the session: an NFC tap arrives with no
+  // session at all.
+  const access = await getCompanyAccess(await currentTenantId());
+  if (access.level === "locked") {
+    return {
+      success: false,
+      message:
+        "This company's account is locked, so clocking in is paused. Please speak to your manager.",
+    };
+  }
+  // Read-only stops people changing records, not turning up to work: a
+  // missing clock-in is a wrong timesheet later. So clocking carries on.
+  return essentialWrite("clocking in while the company is read-only", () =>
+    clockAction(args)
+  );
+}
+
+async function clockAction({
   employeeId,
   employeeType,
   location,

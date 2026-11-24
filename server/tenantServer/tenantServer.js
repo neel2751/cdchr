@@ -7,6 +7,7 @@ import { resolveCompanyBlocks } from "@/data/fieldBlocks";
 import CompanyModel from "@/models/companyModel";
 import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import { isValidObjectId } from "@/lib/mongodb";
+import { companyAccess } from "@/lib/tenantAccess";
 import {
   isTenantUsable,
   resolveBranding,
@@ -228,6 +229,8 @@ export async function getTenants(filterData) {
         sslStatus: d.sslStatus || "pending",
       })),
       plan: tenant.billing?.plan || "standard",
+      // Trial days left, or read-only / locked — lib/tenantAccess.js.
+      access: companyAccess(tenant),
       employeeCount: countByTenant.get(String(tenant._id)) || 0,
       createdAt: tenant.createdAt,
       updatedAt: tenant.updatedAt,

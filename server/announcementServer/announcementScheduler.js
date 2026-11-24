@@ -15,6 +15,7 @@
 
 import { connect } from "@/db/db";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
+import { companyAccess } from "@/lib/tenantAccess";
 import { logAuditDirect } from "@/lib/audit";
 import AnnouncementModel from "@/models/announcementModel";
 import CompanyModel from "@/models/companyModel";
@@ -35,11 +36,14 @@ export async function runAnnouncementPublishJob() {
     "announcement cron: iterate companies",
     () =>
       CompanyModel.find({ delete: { $ne: true }, isActive: { $ne: false } })
-        .select("_id features")
+        .select("_id features status delete billing")
         .lean()
   );
 
   for (const tenant of tenants) {
+    // A locked company (lib/tenantAccess.js) gets nothing sent on its behalf
+    // until it is reopened.
+    if (companyAccess(tenant).level === "locked") continue;
     // A company whose plan excludes the module should not have anything go out
     // for it, even if a draft was written while it was still switched on.
     //

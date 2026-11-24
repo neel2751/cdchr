@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 
 import EmployeeShell from "./employeeShell";
 import { hasPlanFeature } from "@/server/tenantServer/featureServer";
+import AccessBanner from "@/components/accessBanner";
+import {
+  accessNotice,
+  getMyCompanyAccess,
+} from "@/server/tenantServer/myCompanyAccess";
 
 /**
  * The site-employee portal, closed when the company's plan excludes it.
@@ -20,7 +25,17 @@ import { hasPlanFeature } from "@/server/tenantServer/featureServer";
 export const dynamic = "force-dynamic";
 
 export default async function Layout({ children }) {
+  // A locked company (lib/tenantAccess.js): the same backstop as the admin
+  // shell, behind proxy.js.
+  const { access, role } = await getMyCompanyAccess();
+  if (access.level === "locked") redirect("/account-paused");
+
   if (!(await hasPlanFeature("siteEmployees"))) redirect("/unauthorized");
 
-  return <EmployeeShell>{children}</EmployeeShell>;
+  return (
+    <>
+      <AccessBanner notice={accessNotice(access, role)} />
+      <EmployeeShell>{children}</EmployeeShell>
+    </>
+  );
 }

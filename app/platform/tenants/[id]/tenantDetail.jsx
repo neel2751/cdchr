@@ -30,7 +30,9 @@ import {
   Download,
   AlertTriangle,
   Eye,
+  KeyRound,
 } from "lucide-react";
+import AccessTab, { ACCESS_LABEL, ACCESS_VARIANT } from "./accessTab";
 
 import {
   FEATURES,
@@ -126,6 +128,17 @@ const TenantDetail = ({ tenant }) => {
             <Badge variant={STATUS_VARIANT[tenant.status] || "outline"}>
               {tenant.status}
             </Badge>
+            {tenant.access && tenant.access.level !== "full" && (
+              <Badge variant={ACCESS_VARIANT[tenant.access.level] || "outline"}>
+                {ACCESS_LABEL[tenant.access.level]}
+              </Badge>
+            )}
+            {tenant.access?.reason === "trial" && tenant.access.daysLeft != null && (
+              <span>
+                trial: {tenant.access.daysLeft} day
+                {tenant.access.daysLeft === 1 ? "" : "s"} left
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <Users className="size-3.5" />
               {tenant.employeeCount} employees
@@ -156,13 +169,17 @@ const TenantDetail = ({ tenant }) => {
 
       {tenant.status === "suspended" && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          Suspended — this company&apos;s domains no longer resolve and its users
-          cannot sign in.
+          Suspended — this company&apos;s domains no longer resolve, and nobody
+          but its super admin can sign in. See the Access tab.
         </div>
       )}
 
-      <Tabs defaultValue="branding">
+      <Tabs defaultValue="access">
         <TabsList className="mb-4">
+          <TabsTrigger value="access" className="gap-2">
+            <KeyRound className="size-4" />
+            Access
+          </TabsTrigger>
           <TabsTrigger value="branding" className="gap-2">
             <Palette className="size-4" />
             Branding
@@ -185,6 +202,9 @@ const TenantDetail = ({ tenant }) => {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="access">
+          <AccessTab tenant={tenant} run={run} isPending={isPending} />
+        </TabsContent>
         <TabsContent value="branding">
           <BrandingTab tenant={tenant} run={run} isPending={isPending} />
         </TabsContent>

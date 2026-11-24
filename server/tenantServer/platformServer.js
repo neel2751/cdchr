@@ -10,6 +10,12 @@ import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { getServerSideProps } from "../session/session";
 import { invalidateTenantCache } from "./tenantServer";
+import { invalidateCompanyAccess } from "./tenantAccessState";
+import {
+  MANUAL_LOCK_LEVELS,
+  companyAccess,
+  trialEndFrom,
+} from "@/lib/tenantAccess";
 import { tenantStorageUsage } from "../aws/branding";
 // Imported for the module-usage counts below. Explicit imports rather than
 // walking mongoose.models, which only lists models something has already
@@ -141,6 +147,9 @@ export async function getTenantDetail(tenantId) {
         features: tenant.features || {},
         limits: tenant.limits || {},
         billing: tenant.billing || {},
+        // What the company may do today, and what happens next — see
+        // lib/tenantAccess.js.
+        access: companyAccess(tenant),
         employeeCount,
         storage,
         createdAt: tenant.createdAt,
@@ -233,11 +242,25 @@ export async function setTenantStatus(tenantId, status) {
       if (!before) return { success: false, message: "Company not found" };
 
       const usable = status === "active" || status === "trial";
+      const set = { status, isActive: usable };
+      // Put on trial without a date still to come would be a trial that never
+      // ends — the hole lib/tenantAccess.js closes. Give it a fresh one.
+      const end = before.billing?.trialEndsAt;
+      if (status === "trial" && (!end || new Date(end) <= new Date())) {
+        set["billing.trialEndsAt"] = trialEndFrom();
+      }
       await CompanyModel.updateOne(
         { _id: createObjectId(id) },
-        { $set: { status, isActive: usable } }
+        {
+          $set: set,
+          // A new trial hears its reminders again.
+          ...(set["billing.trialEndsAt"]
+            ? { $unset: { "billing.trialReminders": "" } }
+            : {}),
+        }
       );
       await invalidateTenantCache();
+      invalidateCompanyAccess(id);
 
       return {
         success: true,
@@ -248,6 +271,117 @@ export async function setTenantStatus(tenantId, status) {
     },
     "Platform.setTenantStatus",
     `Set status to ${status}`
+  );
+}
+
+/**
+ * Move the end of a company's free trial — to give them longer, or to end it.
+ *
+ * Only for a company on trial: a paying company has no trial to move, and
+ * setting a date on one would do nothing, silently. The reminder emails start
+ * again from the new date, so a company given another fortnight hears about
+ * it again before that one ends too.
+ */
+export async function setTenantTrialEnd(tenantId, trialEndsAt) {
+  const end = new Date(trialEndsAt);
+  if (!trialEndsAt || Number.isNaN(end.getTime())) {
+    return { success: false, message: "Choose a date" };
+  }
+  return asPlatformAdmin(
+    tenantId,
+    async (id) => {
+      await connect();
+      const before = await CompanyModel.findById(id).lean().exec();
+      if (!before) return { success: false, message: "Company not found" };
+      if ((before.status || "active") !== "trial") {
+        return {
+          success: false,
+          message: "This company is not on a trial. Put it on trial first.",
+        };
+      }
+      await CompanyModel.updateOne(
+        { _id: createObjectId(id) },
+        {
+          $set: { "billing.trialEndsAt": end },
+          $unset: { "billing.trialReminders": "" },
+        }
+      );
+      invalidateCompanyAccess(id);
+      return {
+        success: true,
+        message: `Trial now ends on ${end.toLocaleDateString("en-GB")}`,
+        before: { trialEndsAt: before.billing?.trialEndsAt || null },
+        after: { trialEndsAt: end },
+      };
+    },
+    "Platform.setTrialEnd",
+    `Set trial end to ${end.toISOString?.() || trialEndsAt}`
+  );
+}
+
+/**
+ * Lock a company by hand, make it read-only, or lift that (`level: null`).
+ *
+ * For a bill that has not been paid, or anything else that needs the brakes
+ * on. Wins over the trial dates (lib/tenantAccess.js). Lifting it also lifts a
+ * suspension, so "unlock" means unlocked — but it cannot shorten a trial that
+ * has run out; extend it, or mark the company as paying.
+ *
+ * `message` is shown to the company on its banner and paused page.
+ */
+export async function setTenantAccessLock(tenantId, { level = null, message = "" } = {}) {
+  if (level !== null && !MANUAL_LOCK_LEVELS.includes(level)) {
+    return { success: false, message: "Unknown lock" };
+  }
+  const note = String(message || "").trim().slice(0, 500);
+  return asPlatformAdmin(
+    tenantId,
+    async (id) => {
+      const auth = await requirePlatformAdmin();
+      await connect();
+      const before = await CompanyModel.findById(id).lean().exec();
+      if (!before) return { success: false, message: "Company not found" };
+
+      const update = level
+        ? {
+            $set: {
+              "billing.lock": {
+                level,
+                message: note,
+                at: new Date(),
+                by: auth.user?.email || auth.user?.name || "platform",
+              },
+            },
+          }
+        : {
+            $unset: { "billing.lock": "" },
+            // A suspended company is locked too; unlocking means unlocked.
+            ...(before.status === "suspended"
+              ? { $set: { status: "active", isActive: true } }
+              : {}),
+          };
+      await CompanyModel.updateOne({ _id: createObjectId(id) }, update);
+      await invalidateTenantCache();
+      invalidateCompanyAccess(id);
+
+      const after = companyAccess(
+        await CompanyModel.findById(id).select("status delete billing").lean()
+      );
+      return {
+        success: true,
+        message: level
+          ? level === "locked"
+            ? "Locked — nobody but the super admin can sign in"
+            : "Read-only — people can look but not change anything"
+          : after.level === "full" || after.level === "grace"
+            ? "Unlocked"
+            : "Lock lifted, but the trial has run out — extend it or mark the company as paying",
+        before: { lock: before.billing?.lock || null, status: before.status },
+        after: { lock: level ? { level, message: note } : null, level: after.level },
+      };
+    },
+    level ? "Platform.lockTenant" : "Platform.unlockTenant",
+    level ? `Set access to ${level}` : "Lifted access lock"
   );
 }
 

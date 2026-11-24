@@ -1,4 +1,10 @@
+import { redirect } from "next/navigation";
+
 import { getBrandingForCurrentUser } from "@/server/tenantServer/tenantServer";
+import {
+  accessNotice,
+  getMyCompanyAccess,
+} from "@/server/tenantServer/myCompanyAccess";
 import AdminProviders from "./providers";
 
 /**
@@ -31,6 +37,12 @@ export async function generateMetadata() {
 }
 
 export default async function AdminLayout({ children }) {
+  // A locked company (lib/tenantAccess.js) goes to the page that says why.
+  // proxy.js sends it there first; this is the backstop for when that check
+  // could not be made, since the proxy fails open.
+  const { access, role } = await getMyCompanyAccess();
+  if (access.level === "locked") redirect("/account-paused");
+
   const branding = await getBrandingForCurrentUser();
 
   // Tailwind v4 maps --color-primary to --primary, so overriding the variable
@@ -57,7 +69,13 @@ export default async function AdminLayout({ children }) {
           }}
         />
       )}
-      <AdminProviders branding={branding}>{children}</AdminProviders>
+      <AdminProviders
+        branding={branding}
+        accessNotice={accessNotice(access, role)}
+        contactEmail={process.env.PLATFORM_SUPPORT_EMAIL || ""}
+      >
+        {children}
+      </AdminProviders>
     </>
   );
 }
