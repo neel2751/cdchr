@@ -82,6 +82,18 @@ export default function PlanClient() {
                   Add-ons: {data.addOns.join(", ")}
                 </p>
               )}
+              {data.account && data.account.others.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Billed together with{" "}
+                  {data.account.others
+                    .map((c) => (c.main ? `${c.name} (main company)` : c.name))
+                    .join(", ")}{" "}
+                  on one bill.
+                  {data.account.extraCompany
+                    ? ` As an extra company, your package price is ${data.account.extraCompanyDiscountPercent}% off.`
+                    : ""}
+                </p>
+              )}
             </CardHeader>
           </Card>
 

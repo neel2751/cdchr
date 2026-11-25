@@ -12,6 +12,14 @@ import PlatformUserModel from "@/models/platformUserModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import TrialOfferModel from "@/models/trialOfferModel";
+import { getClientIp } from "@/lib/clientIp";
+import {
+  emailDomain,
+  nameKey,
+  phoneKey,
+  repeatTrialMatch,
+  signupFlags,
+} from "../billingServer/trialAbuse";
 import { logAuditDirect } from "@/lib/audit";
 import { emailButton } from "@/lib/emailTemplate";
 import { isValidObjectId, startSession } from "@/lib/mongodb";
@@ -112,6 +120,16 @@ async function signupOrigin() {
     // Outside a request (tests, scripts) — fall through to the configured URL.
   }
   return process.env.NEXT_PUBLIC_WEB_URL || "";
+}
+
+/** The caller's address, to spot repeat trials. Null outside a request. */
+async function signupIp() {
+  try {
+    const { headers } = await import("next/headers");
+    return getClientIp(await headers()) || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Does any account anywhere already use this email? Deliberately unscoped. */
@@ -269,6 +287,31 @@ export async function startSignup(form = {}) {
       return sent;
     }
 
+    // The same business taking a second free trial: a phone number that an
+    // existing company's owner, or an earlier sign-up, already used. Told by
+    // email, like an address already in use — saying so here would let
+    // anybody find out whose number is registered. See trialAbuse.js.
+    const repeat = await repeatTrialMatch({ phone: phoneDigits });
+    if (repeat) {
+      await sendTenantMail({
+        tenantId: null,
+        feature: "All",
+        to: email,
+        subject: "You already have a workspace",
+        heading: "A free trial has already been used",
+        html: `
+        <p>Hi ${name},</p>
+        <p>You tried to create a new workspace, but this phone number already
+        belongs to one, so we have not created another free trial.</p>
+        ${emailButton("Sign in", `${origin}/auth`)}
+        <p>If you want another company or branch on your account, reply to
+        this email and we will add it for you — your branches share one bill,
+        at a lower price.</p>
+        <p>If this was not you, you can safely ignore this email.</p>`,
+      }).catch((error) => console.log("repeat trial email failed:", error?.message));
+      return sent;
+    }
+
     // An unconfirmed signup that is still warm: do not send another link yet.
     const outstanding = await PendingSignupModel.findOne({
       email,
@@ -300,6 +343,7 @@ export async function startSignup(form = {}) {
       phoneNumber: Number(phoneDigits),
       industry,
       offerCode: offerCode || undefined,
+      ip: (await signupIp()) || undefined,
       passwordHash,
       tokenHash: hashToken(rawToken),
       expiresAt: new Date(Date.now() + TOKEN_TTL_HOURS * 60 * 60 * 1000),
@@ -528,6 +572,24 @@ export async function completeSignup(rawToken) {
     const offer = pending.offerCode ? await redeemTrialOffer(pending.offerCode) : null;
     const trialDays = offer?.trialDays || (await defaultTrialDays());
 
+    // Reasons for the platform admin to look twice — never a reason to stop.
+    // The phone is checked again: another company may have taken it since the
+    // link was sent. See trialAbuse.js.
+    const flags = await signupFlags({
+      email: pending.email,
+      ip: pending.ip,
+      companyName: pending.companyName,
+    }).catch(() => []);
+    const repeat = await repeatTrialMatch({ phone: pending.phoneNumber }).catch(() => null);
+    if (repeat) {
+      flags.unshift({
+        code: "samePhone",
+        detail: `Same phone number as ${repeat.companyName}`,
+        companyId: repeat.companyId || undefined,
+        companyName: repeat.companyName,
+      });
+    }
+
     const session = await startSession();
     let created = null;
 
@@ -553,6 +615,15 @@ export async function completeSignup(rawToken) {
               billing: {
                 trialEndsAt: trialEndFrom(new Date(), trialDays),
                 ...(offer ? { trialOffer: offer.code } : {}),
+              },
+              signup: {
+                email: pending.email,
+                emailDomain: emailDomain(pending.email),
+                phoneKey: phoneKey(pending.phoneNumber) || undefined,
+                ip: pending.ip || undefined,
+                nameKey: nameKey(pending.companyName),
+                at: new Date(),
+                ...(flags.length ? { flags } : {}),
               },
               domains: [],
               isActive: true,

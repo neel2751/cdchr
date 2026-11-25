@@ -19,6 +19,8 @@ import { getServerSideProps } from "../session/session";
 import { invalidateTenantCache } from "../tenantServer/tenantServer";
 import { invalidateCompanyAccess } from "../tenantServer/tenantAccessState";
 import { companyUsage, loadPricing } from "./pricingStore";
+import { accountOf, isExtraCompany } from "./accountStore";
+import BillingAccountModel from "@/models/billingAccountModel";
 
 /**
  * The platform console's price list: packages, discounts, add-ons, trial
@@ -206,9 +208,31 @@ export async function getCompanyPricing(tenantId) {
       .lean();
     if (!company) return { success: false, message: "Company not found" };
 
+    // The customer it is billed under, and its other companies — which
+    // decide whether it pays the full package price or the extra-company one.
+    const account = await accountOf(company);
+    const siblings = account
+      ? await CompanyModel.find({ "billing.accountId": account._id, delete: { $ne: true } })
+          .select("name")
+          .lean()
+      : [];
+    const accounts = await BillingAccountModel.find({}).select("name").sort({ name: 1 }).lean();
+
     return {
       success: true,
-      data: JSON.stringify({ ...pricing, usage, billing: company.billing || {} }),
+      data: JSON.stringify({
+        ...pricing,
+        usage,
+        billing: company.billing || {},
+        extraCompany: isExtraCompany(tenantId, account),
+        account: account && {
+          _id: account._id,
+          name: account.name,
+          primaryCompanyId: account.primaryCompanyId,
+          companies: siblings,
+        },
+        accounts,
+      }),
     };
   } catch (error) {
     console.log("getCompanyPricing error:", error?.message);
@@ -231,7 +255,6 @@ export async function applyPlanToCompany(
     cycle = "monthly",
     discountPercent = 0,
     addOns = [],
-    extraCompany = false,
     matchModules = false,
     markPaying = false,
   } = {}
@@ -248,6 +271,12 @@ export async function applyPlanToCompany(
     const before = await CompanyModel.findById(tenantId).lean();
     if (!before) return { success: false, message: "Company not found" };
 
+    // An extra company is one in a customer's billing account that is not its
+    // main company — decided by the account, not by a tick on this screen.
+    // A company billed on its own pays the full package price.
+    const account = await accountOf(before);
+    const isExtra = account ? isExtraCompany(tenantId, account) : false;
+
     const chosenAddOns = [...new Set(addOns)].filter(
       (k) => FEATURE_KEYS.includes(k) && !plan.features.includes(k)
     );
@@ -260,7 +289,7 @@ export async function applyPlanToCompany(
           workers: usage.workers,
           storageGb: usage.storageGb || 0,
           addOns: chosenAddOns,
-          extraCompany: Boolean(extraCompany),
+          extraCompany: isExtra,
         },
       ],
       cycle,
@@ -274,7 +303,7 @@ export async function applyPlanToCompany(
       "billing.cycle": priced.cycle,
       "billing.discountPercent": priced.discountPercent,
       "billing.addOns": chosenAddOns,
-      "billing.extraCompany": Boolean(extraCompany),
+      "billing.extraCompany": isExtra,
       "billing.quotedMonthlyPence": priced.monthlyNetPence,
       "billing.quotedPeriodPence": priced.periodNetPence,
       "billing.planAppliedAt": new Date(),

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
   Building2,
+  Landmark,
   LogOut,
   Nfc,
   PoundSterling,
@@ -32,6 +33,12 @@ const PlatformNav = ({ userName }) => {
             <Link href="/platform/signups">
               <UserPlus className="size-4" />
               <span className="hidden sm:inline">Signups</span>
+            </Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/platform/accounts">
+              <Landmark className="size-4" />
+              <span className="hidden sm:inline">Accounts</span>
             </Link>
           </Button>
           <Button variant="ghost" size="sm" asChild>

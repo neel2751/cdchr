@@ -12,10 +12,12 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { ACCESS_RULES } from "@/lib/tenantAccess";
 import {
+  dismissSignupFlags,
   setTenantAccessLock,
   setTenantStatus,
   setTenantTrialEnd,
 } from "@/server/tenantServer/platformServer";
+import Link from "next/link";
 
 /**
  * Whether a company can use the app, and the controls to change it — see
@@ -94,6 +96,7 @@ export default function AccessTab({ tenant, run, isPending }) {
 
   return (
     <div className="space-y-4">
+      <RepeatTrialCard tenant={tenant} onTrial={onTrial} run={run} isPending={isPending} />
       <Card>
         <CardHeader className="space-y-2">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -256,5 +259,88 @@ export default function AccessTab({ tenant, run, isPending }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Reasons to think this sign-up is a business that already had a free trial
+ * (server/billingServer/trialAbuse.js). Evidence, not a verdict: end the
+ * trial, or mark it checked.
+ */
+function RepeatTrialCard({ tenant, onTrial, run, isPending }) {
+  const flags = tenant.signup?.flags || [];
+  if (!flags.length) return null;
+  const reviewed = tenant.signup?.reviewedAt;
+  return (
+    <Card className={reviewed ? "" : "border-amber-300 dark:border-amber-900"}>
+      <CardHeader className="space-y-1">
+        <CardTitle className="flex items-center gap-2 text-base">
+          Possible repeat trial
+          {reviewed && <Badge variant="outline">checked</Badge>}
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Each of these has innocent explanations. Look at the other company
+          before deciding.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ul className="space-y-1 text-sm">
+          {flags.map((f, i) => (
+            <li key={i}>
+              • {f.detail}
+              {f.companyId && (
+                <>
+                  {" "}
+                  <Link
+                    href={`/platform/tenants/${f.companyId}`}
+                    className="underline underline-offset-2"
+                  >
+                    open
+                  </Link>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        {tenant.signup?.email && (
+          <p className="text-xs text-muted-foreground">
+            Signed up as {tenant.signup.email}
+            {tenant.signup.at ? ` on ${day(tenant.signup.at)}` : ""}.
+            {reviewed && tenant.signup.reviewedBy
+              ? ` Checked by ${tenant.signup.reviewedBy}.`
+              : ""}
+          </p>
+        )}
+        {!reviewed && (
+          <div className="flex flex-wrap gap-2">
+            {onTrial && (
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={isPending}
+                onClick={() =>
+                  run(async () => {
+                    // Ending it is the decision, so it counts as checked.
+                    const res = await setTenantTrialEnd(tenant._id, new Date().toISOString());
+                    if (res?.success) await dismissSignupFlags(tenant._id);
+                    return res;
+                  })
+                }
+              >
+                End the trial today
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPending}
+              onClick={() => run(() => dismissSignupFlags(tenant._id))}
+            >
+              Looks fine
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

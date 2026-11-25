@@ -26,6 +26,10 @@ import {
   applyPlanToCompany,
   getCompanyPricing,
 } from "@/server/billingServer/pricingServer";
+import {
+  addCompanyToAccount,
+  createAccount,
+} from "@/server/billingServer/accountServer";
 
 /**
  * Put one company on a package, at a price — worked out from what it really
@@ -37,6 +41,9 @@ import {
 export default function PriceTab({ tenant, run, isPending }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  // Reload when the company's billing changes — joining an account or
+  // applying a package refreshes the page's company, not this tab's data.
+  const billingStamp = `${tenant.billing?.accountId || ""}|${tenant.billing?.planAppliedAt || ""}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +55,7 @@ export default function PriceTab({ tenant, run, isPending }) {
     return () => {
       cancelled = true;
     };
-  }, [tenant._id]);
+  }, [tenant._id, billingStamp]);
 
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!data) {
@@ -69,7 +76,9 @@ function PriceForm({ tenant, data, run, isPending }) {
   const [planKey, setPlanKey] = useState(onPlan ? billing.plan : "");
   const [cycle, setCycle] = useState(billing.cycle || "monthly");
   const [discount, setDiscount] = useState(String(billing.discountPercent ?? 0));
-  const [extraCompany, setExtraCompany] = useState(Boolean(billing.extraCompany));
+  // Decided by the billing account, not here: an account's companies other
+  // than its main one get the extra-company price (accountStore.js).
+  const extraCompany = Boolean(data.extraCompany);
   const [addOns, setAddOns] = useState(billing.addOns || []);
   const [matchModules, setMatchModules] = useState(tenant.status === "trial");
   const [markPaying, setMarkPaying] = useState(tenant.status !== "active");
@@ -203,20 +212,15 @@ function PriceForm({ tenant, data, run, isPending }) {
               </div>
             </div>
 
-            <label className="flex cursor-pointer items-start gap-2 text-sm">
-              <Checkbox
-                checked={extraCompany}
-                onCheckedChange={(on) => setExtraCompany(on === true)}
-                className="mt-0.5"
-              />
-              <span>
-                An extra company or branch of an existing customer
-                <span className="block text-xs text-muted-foreground">
-                  Its package price is {settings.extraCompanyDiscountPercent}% off.
-                  People are still counted here.
-                </span>
-              </span>
-            </label>
+            <AccountLine
+              tenant={tenant}
+              account={data.account}
+              accounts={data.accounts}
+              extraCompany={extraCompany}
+              discountPercent={settings.extraCompanyDiscountPercent}
+              run={run}
+              isPending={isPending}
+            />
 
             {sellable.length > 0 && (
               <div className="space-y-1">
@@ -284,7 +288,6 @@ function PriceForm({ tenant, data, run, isPending }) {
                     cycle,
                     discountPercent: Number(discount),
                     addOns,
-                    extraCompany,
                     matchModules,
                     markPaying,
                   })
@@ -335,6 +338,81 @@ function Usage({ label, value, included, over }) {
           {included} included{isOver ? " — over" : ""}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Which customer this company is billed under — and so whether it pays the
+ * full package price or the extra-company one. Join an account, or start one
+ * with this company as its main company.
+ */
+function AccountLine({ tenant, account, accounts, extraCompany, discountPercent, run, isPending }) {
+  const [joinId, setJoinId] = useState("");
+  if (account) {
+    return (
+      <div className="rounded-lg border p-3 text-sm">
+        <p>
+          Billed under{" "}
+          <Link href={`/platform/accounts/${account._id}`} className="font-medium underline underline-offset-2">
+            {account.name}
+          </Link>{" "}
+          with {account.companies.length - 1} other compan
+          {account.companies.length - 1 === 1 ? "y" : "ies"}.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {extraCompany
+            ? `An extra company: its package price is ${discountPercent}% off. Its people are still counted here.`
+            : "The account's main company: full package price."}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border p-3 text-sm">
+      <p>
+        Billed on its own.{" "}
+        <span className="text-xs text-muted-foreground">
+          A branch of an existing customer? Put it on their account for the
+          extra-company price ({discountPercent}% off the package).
+        </span>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {accounts.length > 0 && (
+          <>
+            <Select value={joinId} onValueChange={setJoinId}>
+              <SelectTrigger className="h-8 w-56">
+                <SelectValue placeholder="Join an account" />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((a) => (
+                  <SelectItem key={a._id} value={a._id}>
+                    {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isPending || !joinId}
+              onClick={() => run(() => addCompanyToAccount(joinId, tenant._id))}
+            >
+              Join
+            </Button>
+          </>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={isPending}
+          onClick={() =>
+            run(() => createAccount({ name: tenant.name, companyIds: [tenant._id] }))
+          }
+        >
+          Start an account with this company
+        </Button>
+      </div>
     </div>
   );
 }

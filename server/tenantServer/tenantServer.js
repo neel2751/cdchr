@@ -231,6 +231,8 @@ export async function getTenants(filterData) {
       plan: tenant.billing?.plan || "standard",
       // Trial days left, or read-only / locked — lib/tenantAccess.js.
       access: companyAccess(tenant),
+      // A possible repeat trial nobody has looked at yet.
+      needsReview: Boolean(tenant.signup?.flags?.length && !tenant.signup?.reviewedAt),
       employeeCount: countByTenant.get(String(tenant._id)) || 0,
       createdAt: tenant.createdAt,
       updatedAt: tenant.updatedAt,

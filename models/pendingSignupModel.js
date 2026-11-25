@@ -37,6 +37,8 @@ const pendingSignupSchema = new mongoose.Schema(
   // A trial offer code (models/trialOfferModel.js), checked when typed and
   // used when the company is created.
   offerCode: { type: String },
+  // Where the sign-up came from, to spot repeat trials. See trialAbuse.js.
+  ip: { type: String },
 
     // Hashed at the point of signup, exactly as it would be on the employee
     // record, so a plaintext password never rests in this collection either.

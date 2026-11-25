@@ -12,6 +12,7 @@ import { getServerSideProps } from "../session/session";
 import { invalidateCompanyAccess } from "../tenantServer/tenantAccessState";
 import { companyUsage, loadPricing } from "./pricingStore";
 import { forgetPlanNotice } from "./planNotice";
+import { accountOf, isExtraCompany } from "./accountStore";
 
 /**
  * Plan & billing, for the company's own super admin: the package, what it
@@ -50,6 +51,17 @@ export async function getMyPlan() {
     const terms = resolveTerms(company);
     const overageMode = billing.overageMode || "charge";
     const access = companyAccess(company);
+    // Billed together with the customer's other companies, if it is.
+    const account = await accountOf(company);
+    const extraCompany = isExtraCompany(company._id, account);
+    const siblings = account
+      ? await CompanyModel.find({
+          "billing.accountId": account._id,
+          delete: { $ne: true },
+        })
+          .select("name")
+          .lean()
+      : [];
 
     const priced = plan
       ? quote({
@@ -61,7 +73,7 @@ export async function getMyPlan() {
               workers: usage.workers,
               storageGb: usage.storageGb || 0,
               addOns: billing.addOns || [],
-              extraCompany: Boolean(billing.extraCompany),
+              extraCompany,
             },
           ],
           cycle: billing.cycle || "monthly",
@@ -111,6 +123,17 @@ export async function getMyPlan() {
           workersLabel: terms.siteEmployees,
         }),
         workersLabel: terms.siteEmployees,
+        account: account && {
+          name: account.name,
+          extraCompany,
+          extraCompanyDiscountPercent: pricing.settings.extraCompanyDiscountPercent,
+          others: siblings
+            .filter((c) => String(c._id) !== String(company._id))
+            .map((c) => ({
+              name: c.name,
+              main: String(c._id) === String(account.primaryCompanyId),
+            })),
+        },
         packages,
         currency: pricing.settings.currency,
         contactEmail: process.env.PLATFORM_SUPPORT_EMAIL || "",

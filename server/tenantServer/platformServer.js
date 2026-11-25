@@ -153,6 +153,9 @@ export async function getTenantDetail(tenantId) {
         access: companyAccess(tenant),
         // The standard trial length, set on the pricing page.
         trialDays: await defaultTrialDays(),
+        // How it signed up, and any reasons to think it is a repeat trial
+        // (billingServer/trialAbuse.js).
+        signup: tenant.signup || null,
         employeeCount,
         storage,
         createdAt: tenant.createdAt,
@@ -319,6 +322,32 @@ export async function setTenantTrialEnd(tenantId, trialEndsAt) {
     },
     "Platform.setTrialEnd",
     `Set trial end to ${end.toISOString?.() || trialEndsAt}`
+  );
+}
+
+/**
+ * "Looked at it, it is fine": clears the repeat-trial warning from the
+ * console without removing what was found, which stays on the record.
+ */
+export async function dismissSignupFlags(tenantId) {
+  return asPlatformAdmin(
+    tenantId,
+    async (id) => {
+      const auth = await requirePlatformAdmin();
+      await connect();
+      await CompanyModel.updateOne(
+        { _id: createObjectId(id) },
+        {
+          $set: {
+            "signup.reviewedAt": new Date(),
+            "signup.reviewedBy": auth.user?.email || auth.user?.name || "platform",
+          },
+        }
+      );
+      return { success: true, message: "Marked as checked" };
+    },
+    "Platform.dismissSignupFlags",
+    "Checked a possible repeat trial and dismissed it"
   );
 }
 

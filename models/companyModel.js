@@ -194,6 +194,38 @@ const billingSchema = new mongoose.Schema(
     // when absent) or "block" — stop there. Chosen by the company's super
     // admin on Plan & billing. See OVERAGE_MODES in lib/pricing.js.
     overageMode: { type: String, enum: ["charge", "block"] },
+    // The customer this company is billed under (models/billingAccountModel.js).
+    // Absent: billed on its own.
+    accountId: { type: mongoose.Schema.Types.ObjectId, ref: "BillingAccount" },
+  },
+  { _id: false }
+);
+
+// How a self-serve company signed up, kept to spot the same business taking a
+// second free trial (server/billingServer/trialAbuse.js). `flags` are reasons
+// to look, not verdicts: the platform admin decides.
+const signupFlagSchema = new mongoose.Schema(
+  {
+    code: { type: String },
+    detail: { type: String },
+    companyId: { type: mongoose.Schema.Types.ObjectId },
+    companyName: { type: String },
+  },
+  { _id: false }
+);
+
+const signupSchema = new mongoose.Schema(
+  {
+    email: { type: String, lowercase: true, trim: true },
+    emailDomain: { type: String, lowercase: true, trim: true },
+    // The last ten digits, so 07700 900123 and +44 7700 900123 match.
+    phoneKey: { type: String },
+    ip: { type: String },
+    nameKey: { type: String },
+    at: { type: Date },
+    flags: { type: [signupFlagSchema], default: undefined },
+    reviewedAt: { type: Date },
+    reviewedBy: { type: String },
   },
   { _id: false }
 );
@@ -240,6 +272,7 @@ const companySchema = new mongoose.Schema(
     managerRules: { type: managerRulesSchema, default: () => ({}) },
     setupProgress: { type: setupProgressSchema, default: () => ({}) },
     billing: { type: billingSchema, default: () => ({}) },
+    signup: { type: signupSchema, default: undefined },
 
     // Legacy admin toggles. Still authoritative — see isTenantUsable().
     isActive: { type: Boolean, default: true },
@@ -266,6 +299,10 @@ companySchema.index(
 // document: a company with one verified and one pending domain would index both.
 // It is enforced in tenantOps.verifyDomain() inside a transaction instead.
 companySchema.index({ "domains.host": 1 });
+
+// Finding a customer's companies, and earlier sign-ups that look like this one.
+companySchema.index({ "billing.accountId": 1 }, { sparse: true });
+companySchema.index({ "signup.phoneKey": 1 }, { sparse: true });
 
 const CompanyModel =
   mongoose.models.Companie || mongoose.model("Companie", companySchema);

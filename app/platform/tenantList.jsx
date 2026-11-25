@@ -214,6 +214,11 @@ const TenantList = ({ searchParams, stats }) => {
                             {tenant.status}
                           </Badge>
                           <AccessHint access={tenant.access} />
+                          {tenant.needsReview && (
+                            <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-400">
+                              check sign-up
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
 
