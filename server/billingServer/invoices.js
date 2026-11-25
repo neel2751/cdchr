@@ -12,6 +12,8 @@ import InvoiceModel from "@/models/invoiceModel";
 import PlatformSettingModel from "@/models/platformSettingModel";
 import TagOrderModel from "@/models/tagOrderModel";
 import { getServerSideProps } from "../session/session";
+import { allocateNumber, sellerDetails } from "./invoiceCore";
+import { syncPaymentLocks } from "./paymentLocks";
 
 /**
  * Invoicing.
@@ -44,27 +46,6 @@ async function requirePlatformAdmin() {
   return { ok: true, user };
 }
 
-/**
- * The next invoice number, allocated atomically.
- *
- * One findOneAndUpdate with $inc and upsert. Reading the highest number and
- * adding one would be a race, and two invoices sharing a number is not
- * something that can be fixed afterwards — the copies are already out.
- *
- * Called only at issue. A draft that is abandoned must not consume a number,
- * or the sequence has a gap for something that never existed.
- */
-async function allocateNumber() {
-  const year = new Date().getUTCFullYear();
-  const counter = await escapeTenant("invoicing: allocate a number", () =>
-    InvoiceCounterModel.findOneAndUpdate(
-      { year },
-      { $inc: { lastNumber: 1 } },
-      { upsert: true, new: true },
-    ).lean(),
-  );
-  return `INV-${year}-${String(counter.lastNumber).padStart(4, "0")}`;
-}
 
 /**
  * Refuse to change anything inside a closed period.
@@ -99,21 +80,6 @@ async function periodLock(date) {
   return null;
 }
 
-/** Our billing identity as it stands right now, to be frozen onto an invoice. */
-async function sellerDetails() {
-  const settings = await escapeTenant("invoicing: our details", () =>
-    PlatformSettingModel.findOne({ singleton: "only" }).lean(),
-  );
-  return {
-    settings: settings || {},
-    seller: {
-      name: settings?.billingName || settings?.dispatchFromName || "",
-      address: settings?.billingAddress || settings?.dispatchFromAddress || "",
-      vatNumber: settings?.vatNumber || "",
-      companyNumber: settings?.companyNumber || "",
-    },
-  };
-}
 
 /** Everything a screen needs, with the money already formatted. */
 function present(invoice) {
@@ -520,6 +486,11 @@ export async function recordInvoicePayment({
       actor: auth.user,
     }).catch(() => {});
 
+    // A plan bill settled or cancelled: lift any lock it caused, now.
+    if (invoice.source === "subscription" && invoice.accountId) {
+      await syncPaymentLocks({ accountId: invoice.accountId }).catch(() => {});
+    }
+
     return {
       success: true,
       message: stillOwed
@@ -589,6 +560,11 @@ export async function voidInvoice({ id, reason } = {}) {
       description: `Voided ${invoice.number || "a draft"}: ${(reason || "").trim() || "no reason given"}`,
       actor: auth.user,
     }).catch(() => {});
+
+    // A plan bill settled or cancelled: lift any lock it caused, now.
+    if (invoice.source === "subscription" && invoice.accountId) {
+      await syncPaymentLocks({ accountId: invoice.accountId }).catch(() => {});
+    }
 
     return {
       success: true,

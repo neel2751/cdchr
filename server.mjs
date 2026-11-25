@@ -103,6 +103,7 @@ app.prepare().then(() => {
     scheduleShiftClose(port);
     scheduleDunning(port);
     scheduleTrialReminders(port);
+    scheduleBilling(port);
     scheduleCarryForwardExpiry(port);
     schedulePolicyReviews(port);
   });
@@ -365,6 +366,49 @@ function scheduleDunning(serverPort) {
 
   console.log(
     `[dunning] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
+  );
+}
+
+// The plan billing run — see server/billingServer/subscriptionBilling.js.
+// Daily: each company is billed on the day its paid period ends, and the run
+// also keeps unpaid-bill locks current. Charges nothing until billing is
+// switched on in the platform console.
+function scheduleBilling(serverPort) {
+  const RUN_HOUR = 8;
+
+  const runOnce = async () => {
+    if (!process.env.CRON_SECRET) {
+      console.log("[billing] CRON_SECRET not set; skipping run");
+      return;
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${serverPort}/api/cron/billing`, {
+        method: "POST",
+        headers: { "x-cron-secret": process.env.CRON_SECRET },
+      });
+      const json = await res.json().catch(() => ({}));
+      const r = json?.results || {};
+      if (r.billed?.length || r.failed?.length || r.locks?.locked || r.locks?.readOnly || r.locks?.reopened) {
+        console.log("[billing] run complete:", JSON.stringify(json));
+      }
+    } catch (err) {
+      console.error("[billing] run failed:", err?.message);
+    }
+  };
+
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(RUN_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  const msUntilNext = next - now;
+
+  setTimeout(() => {
+    runOnce();
+    setInterval(runOnce, 24 * 60 * 60 * 1000);
+  }, msUntilNext);
+
+  console.log(
+    `[billing] scheduled; first run in ~${Math.round(msUntilNext / 60000)} min`,
   );
 }
 

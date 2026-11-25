@@ -23,6 +23,28 @@ const billingAccountSchema = new mongoose.Schema(
     primaryCompanyId: { type: mongoose.Schema.Types.ObjectId, ref: "Companie" },
     notes: { type: String, default: "" },
     createdBy: { type: String, default: "" },
+
+    // How the customer pays (server/billingServer/subscriptionBilling.js):
+    //   "card"    — the saved card is charged when each bill is made. The
+    //               default once a card is on file.
+    //   "invoice" — the bill is emailed with a link to pay it, by card or
+    //               bank transfer, within the terms.
+    paymentMethod: { type: String, enum: ["card", "invoice"], default: "invoice" },
+    // Stripe's ids only. No card number ever reaches us — the card is typed
+    // on Stripe's page (server/billingServer/stripe.js).
+    stripeCustomerId: { type: String },
+    card: {
+      paymentMethodId: { type: String },
+      brand: { type: String },
+      last4: { type: String },
+      expMonth: { type: Number },
+      expYear: { type: Number },
+      addedAt: { type: Date },
+    },
+    // The last time charging the card failed, and Stripe's reason. Cleared
+    // by the next success or a new card.
+    cardFailedAt: { type: Date },
+    cardFailure: { type: String },
   },
   { timestamps: true }
 );

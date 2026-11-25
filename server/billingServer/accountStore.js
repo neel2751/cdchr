@@ -94,3 +94,33 @@ export async function repriceCompany(company, { pricing, account } = {}) {
   }
   await CompanyModel.updateOne({ _id: company._id }, { $set: set });
 }
+
+/**
+ * The account a company is billed under — made for it, as an account of one
+ * with it as the main company, if it has none. A bill and a saved card
+ * belong to an account, so a company billed on its own still needs one.
+ *
+ * Guarded so two callers at once make one account: the company is claimed
+ * only if it still has no account, and the loser's spare account is removed.
+ */
+export async function ensureAccount(company) {
+  await connect();
+  const existing = await accountOf(company);
+  if (existing) return existing;
+
+  const account = await BillingAccountModel.create({
+    name: company.name,
+    primaryCompanyId: company._id,
+    createdBy: "billing",
+  });
+  const claimed = await CompanyModel.updateOne(
+    { _id: company._id, "billing.accountId": { $exists: false } },
+    { $set: { "billing.accountId": account._id } }
+  );
+  if (!claimed.modifiedCount) {
+    await BillingAccountModel.deleteOne({ _id: account._id });
+    const fresh = await CompanyModel.findById(company._id).select("billing.accountId").lean();
+    return BillingAccountModel.findById(fresh.billing.accountId).lean();
+  }
+  return account.toObject();
+}

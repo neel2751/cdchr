@@ -17,6 +17,18 @@ const pricingSettingSchema = new mongoose.Schema(
     // { moduleKey: pence a month }
     addOnPence: { type: Map, of: Number, default: () => ({}) },
     trialDays: { type: Number, default: 14, min: 1, max: 365 },
+
+    // The monthly billing run (server/billingServer/subscriptionBilling.js).
+    // OFF until a person switches it on: it charges cards and emails
+    // customers with nobody in the loop. "Bill now" on an account is a person
+    // deciding, and works either way.
+    billingEnabled: { type: Boolean, default: false },
+    // Days to pay a bill sent as an invoice.
+    invoiceTermsDays: { type: Number, default: 14, min: 0, max: 90 },
+    // Days overdue before an unpaid bill makes the customer's companies
+    // read-only, then locked (lib/tenantAccess.js). 0 switches that step off.
+    unpaidReadOnlyDays: { type: Number, default: 7, min: 0, max: 365 },
+    unpaidLockDays: { type: Number, default: 14, min: 0, max: 365 },
     // Null until a person has looked at the suggested prices and saved them.
     // The console says "suggested prices" until then.
     reviewedAt: { type: Date, default: null },

@@ -23,7 +23,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatMoney } from "@/lib/money";
 import {
   addCompanyToAccount,
+  billAccountNow,
   getAccount,
+  previewAccountBilling,
   removeCompanyFromAccount,
   setAccountLock,
   setPrimaryCompany,
@@ -116,6 +118,11 @@ export default function AccountDetail({ accountId }) {
                     {" · "}
                     {c.usage.officeStaff} office staff · {c.usage.workers} students / workers
                     {c.status === "trial" ? " · on trial" : ""}
+                    {c.paidThrough
+                      ? ` · billed to ${new Date(c.paidThrough).toLocaleDateString("en-GB")}`
+                      : c.plan && c.status !== "trial"
+                        ? " · not billed yet"
+                        : ""}
                   </p>
                 </div>
                 <div className="text-right">
@@ -178,6 +185,13 @@ export default function AccountDetail({ accountId }) {
             </CardContent>
           </Card>
 
+          <Billing
+            account={account}
+            invoices={data.invoices}
+            money={money}
+            disabled={isPending}
+            run={run}
+          />
           <AccountDetails account={account} disabled={isPending} run={run} />
           <LockAll account={account} disabled={isPending} run={run} />
         </div>
@@ -316,6 +330,124 @@ function LockAll({ account, disabled, run }) {
         >
           {level === "none" ? "Unlock all" : level === "locked" ? "Lock all" : "Make all read-only"}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * How the customer pays, its plan bills, and "Bill now" — which bills every
+ * company whose paid period has run out, works with automatic billing off,
+ * and is previewed first.
+ */
+function Billing({ account, invoices, money, disabled, run }) {
+  const [preview, setPreview] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const card = account.card;
+
+  const look = async () => {
+    setChecking(true);
+    try {
+      const res = await previewAccountBilling(account._id);
+      if (!res?.success) return toast.error(res?.message || "Could not preview");
+      setPreview(JSON.parse(res.data));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const due = preview?.[0];
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Billing</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          {account.paymentMethod === "card" && card
+            ? `Pays by card: ${card.brand} ending ${card.last4}, expires ${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}.`
+            : card
+              ? `Pays by invoice (a ${card.brand} card ending ${card.last4} is saved).`
+              : "Pays by invoice. No card saved — the customer adds one on Plan & Billing."}
+        </p>
+        {account.cardFailedAt && (
+          <p className="text-sm text-red-700 dark:text-red-400">
+            Last card payment failed on{" "}
+            {new Date(account.cardFailedAt).toLocaleDateString("en-GB")}: {account.cardFailure}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={checking} onClick={look}>
+            {checking && <Loader2 className="size-4 animate-spin" />}
+            What is due?
+          </Button>
+          {due && (
+            <Button
+              size="sm"
+              disabled={disabled}
+              onClick={() => {
+                setPreview(null);
+                run(() => billAccountNow(account._id));
+              }}
+            >
+              Bill now — {money(due.netPence)} + VAT
+            </Button>
+          )}
+        </div>
+        {preview &&
+          (due ? (
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {due.companies.map((c) => (
+                <li key={c.name}>
+                  {c.name}: {new Date(c.from).toLocaleDateString("en-GB")} –{" "}
+                  {new Date(c.to).toLocaleDateString("en-GB")} ({c.cycle}),{" "}
+                  {money(c.netPence)}
+                </li>
+              ))}
+              <li>Paid by {due.paymentMethod}.</li>
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Nothing is due: every company is paid up, on trial, or without a package.
+            </p>
+          ))}
+
+        {invoices.length > 0 && (
+          <ul className="divide-y border-t pt-1">
+            {invoices.map((inv) => (
+              <li key={inv._id} className="flex items-center justify-between gap-2 py-1.5">
+                <span>
+                  <span className="font-medium">{inv.number}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {inv.periodFrom ? new Date(inv.periodFrom).toLocaleDateString("en-GB") : ""}
+                    {inv.periodTo ? ` – ${new Date(inv.periodTo).toLocaleDateString("en-GB")}` : ""}
+                  </span>
+                </span>
+                <span className="text-right">
+                  <span className="block tabular-nums">{money(inv.grossPence)}</span>
+                  <Badge
+                    variant={
+                      inv.status === "paid"
+                        ? "secondary"
+                        : inv.outstandingPence > 0 && inv.dueAt && new Date(inv.dueAt) < new Date()
+                          ? "destructive"
+                          : "outline"
+                    }
+                  >
+                    {inv.status === "paid"
+                      ? "paid"
+                      : inv.outstandingPence > 0 && inv.dueAt && new Date(inv.dueAt) < new Date()
+                        ? "overdue"
+                        : inv.status}
+                  </Badge>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Record a bank transfer, void or credit a bill on the Billing page.
+        </p>
       </CardContent>
     </Card>
   );

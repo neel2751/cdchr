@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { Suspense } from "react";
+
 import PlanClient from "./planClient";
 
 export const metadata = { title: "Plan & billing" };
@@ -15,5 +17,10 @@ export default async function PlanPage() {
   const session = await auth();
   if (!session?.user) redirect("/api/auth/signin");
   if (session.user.role !== "superAdmin") redirect("/unauthorized");
-  return <PlanClient />;
+  // Suspense: the payment section reads the URL (?card=done after Stripe).
+  return (
+    <Suspense>
+      <PlanClient />
+    </Suspense>
+  );
 }

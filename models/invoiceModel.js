@@ -102,6 +102,14 @@ const invoiceSchema = new mongoose.Schema(
     // the invoice still reads correctly if the order is ever archived.
     orderNumber: String,
 
+    // A plan's monthly or yearly bill (server/billingServer/subscriptionBilling.js)
+    // rather than a tag order. Only these can lock an account when unpaid.
+    source: { type: String, enum: ["tag-order", "subscription"] },
+    // The customer, and the period it pays for.
+    accountId: mongoose.Schema.Types.ObjectId,
+    periodFrom: Date,
+    periodTo: Date,
+
     lines: [lineSchema],
     currency: { type: String, default: "GBP" },
 
@@ -162,6 +170,7 @@ invoiceSchema.index(
 );
 invoiceSchema.index({ tenantId: 1, status: 1, issuedAt: -1 });
 invoiceSchema.index({ tenantId: 1, orderNumber: 1 });
+invoiceSchema.index({ accountId: 1, status: 1 }, { sparse: true });
 
 applyTenantScope(invoiceSchema, "Invoice");
 

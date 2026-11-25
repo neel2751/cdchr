@@ -9,6 +9,7 @@ import { getCompanyAccess } from "@/server/tenantServer/tenantAccessState";
 import CompanyModel from "@/models/companyModel";
 import { connect } from "@/db/db";
 import Logout from "../employee/logout";
+import PayNow from "./payNow";
 
 export const metadata = { title: "Account paused" };
 export const dynamic = "force-dynamic";
@@ -24,7 +25,8 @@ export const dynamic = "force-dynamic";
  * Outside the proxy's matcher on purpose, so it can never redirect to itself.
  * It checks the session itself instead.
  */
-export default async function AccountPausedPage() {
+export default async function AccountPausedPage({ searchParams }) {
+  const { paid } = (await searchParams) || {};
   const session = await auth();
   const user = session?.user;
   if (!user) redirect("/auth");
@@ -61,6 +63,8 @@ export default async function AccountPausedPage() {
             Nothing has been deleted. Everything is exactly where you left it
             and comes back as soon as the account is reopened.
           </p>
+          {/* An unpaid bill is the usual reason, and paying it the way out. */}
+          {owner && <PayNow justPaid={paid ? String(paid) : ""} />}
           {owner && contact && (
             <p>
               To reopen it, email{" "}

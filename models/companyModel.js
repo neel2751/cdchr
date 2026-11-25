@@ -154,6 +154,10 @@ const accessLockSchema = new mongoose.Schema(
     message: { type: String, trim: true, maxlength: 500 },
     at: { type: Date },
     by: { type: String },
+    // Put on by the billing run for an overdue bill, not by a person — and
+    // so lifted by it too, once the bill is paid. A lock without this is a
+    // person's decision and the run never touches it.
+    auto: { type: Boolean },
   },
   { _id: false }
 );
@@ -197,6 +201,10 @@ const billingSchema = new mongoose.Schema(
     // The customer this company is billed under (models/billingAccountModel.js).
     // Absent: billed on its own.
     accountId: { type: mongoose.Schema.Types.ObjectId, ref: "BillingAccount" },
+    // Billed up to here (subscriptionBilling.js). A paying company is billed
+    // in advance: the next bill is made on this date, for the next month —
+    // or year, on yearly billing.
+    paidThrough: { type: Date },
   },
   { _id: false }
 );

@@ -1,11 +1,11 @@
 "use server";
 
 import { connect } from "@/db/db";
-import { escapeTenant } from "@/lib/tenantContext";
+import { allowWrite, escapeTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import { formatMoney, outstanding } from "@/lib/money";
-import { openSecret, sealSecret, secretHint, secretsConfigured } from "@/lib/secretBox";
+import { sealSecret, secretHint, secretsConfigured } from "@/lib/secretBox";
 import CarrierAccountModel from "@/models/carrierAccountModel";
 import InvoiceModel from "@/models/invoiceModel";
 import { getServerSideProps } from "../session/session";
@@ -42,9 +42,11 @@ import { getServerSideProps } from "../session/session";
  * this is.
  */
 
-const STRIPE_PROVIDER = "stripe";
-const API = "https://api.stripe.com/v1";
-const TIMEOUT_MS = 15000;
+import {
+  STRIPE_PROVIDER,
+  callStripe,
+  secretKey,
+} from "./stripeCore";
 
 async function requirePlatformAdmin() {
   const { props } = await getServerSideProps();
@@ -54,55 +56,6 @@ async function requirePlatformAdmin() {
     return { ok: false, message: "Not authorized" };
   }
   return { ok: true, user };
-}
-
-async function secretKey() {
-  const account = await escapeTenant("stripe: account", () =>
-    CarrierAccountModel.findOne({ provider: STRIPE_PROVIDER }).lean(),
-  );
-  if (!account?.isEnabled) return null;
-
-  const raw =
-    account.credentials instanceof Map
-      ? Object.fromEntries(account.credentials)
-      : account.credentials || {};
-  return raw.secretKey ? openSecret(raw.secretKey) : null;
-}
-
-/** Stripe wants form encoding, including for nested fields. */
-function formBody(params) {
-  return new URLSearchParams(params).toString();
-}
-
-async function callStripe(path, params, key) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(`${API}${path}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: formBody(params),
-      signal: controller.signal,
-    });
-
-    const payload = await res.json().catch(() => null);
-    if (!res.ok) {
-      // Stripe's own message names the field that was wrong, which is more
-      // use than anything we could write.
-      throw new Error(payload?.error?.message || `Stripe answered ${res.status}`);
-    }
-    return payload;
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error("Stripe did not answer in time.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** Is card payment switched on? Readable by anyone who can see an invoice. */
@@ -329,10 +282,15 @@ export async function createInvoiceCheckout({ id, returnUrl } = {}) {
       return { success: false, message: "Stripe did not return a payment link" };
     }
 
-    await escapeTenant("stripe: record the session", () =>
-      InvoiceModel.updateOne(
-        { _id: invoice._id },
-        { $set: { stripeSessionId: session.id } },
+    // Allowed while the company is read-only or locked for an unpaid bill:
+    // paying it is how they get out (billingServer/paymentLocks.js). Only
+    // this one field, on their own invoice.
+    await allowWrite("paying an invoice while the company is locked", () =>
+      escapeTenant("stripe: record the session", () =>
+        InvoiceModel.updateOne(
+          { _id: invoice._id },
+          { $set: { stripeSessionId: session.id } },
+        ),
       ),
     );
 

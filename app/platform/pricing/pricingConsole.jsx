@@ -35,6 +35,7 @@ import { formatMoney, toDecimal, toPence } from "@/lib/money";
 import { addOnsFor, offerUsable, quote } from "@/lib/pricing";
 import {
   getPricing,
+  previewBillingRun,
   savePlan,
   savePricingSettings,
   saveTrialOffer,
@@ -391,6 +392,10 @@ function SettingsTab({ settings, onSaved }) {
     extraCompany: String(settings.extraCompanyDiscountPercent ?? 0),
     vat: String((settings.vatRateBasisPoints ?? 2000) / 100),
     trialDays: String(settings.trialDays ?? 14),
+    billingEnabled: settings.billingEnabled === true,
+    terms: String(settings.invoiceTermsDays ?? 14),
+    readOnlyDays: String(settings.unpaidReadOnlyDays ?? 7),
+    lockDays: String(settings.unpaidLockDays ?? 14),
     addOns: Object.fromEntries(
       FEATURES.map((f) => [f.key, pounds(settings.addOnPence?.[f.key])])
     ),
@@ -405,6 +410,10 @@ function SettingsTab({ settings, onSaved }) {
         extraCompanyDiscountPercent: Number(v.extraCompany),
         vatRateBasisPoints: Math.round(Number(v.vat) * 100),
         trialDays: Number(v.trialDays),
+        billingEnabled: v.billingEnabled,
+        invoiceTermsDays: Number(v.terms),
+        unpaidReadOnlyDays: Number(v.readOnlyDays),
+        unpaidLockDays: Number(v.lockDays),
         addOnPence: Object.fromEntries(
           Object.entries(v.addOns).map(([k, p]) => [k, toPence(p)])
         ),
@@ -475,6 +484,57 @@ function SettingsTab({ settings, onSaved }) {
               }
             />
           ))}
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
+            Monthly billing
+            <span className="flex items-center gap-2 text-sm font-normal">
+              <Label htmlFor="billing-on">Bill automatically every day</Label>
+              <Switch
+                id="billing-on"
+                checked={v.billingEnabled}
+                onCheckedChange={set("billingEnabled")}
+              />
+            </span>
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Each paying company is billed in advance on the day its period ends:
+            the saved card is charged, or the invoice emailed. Off: nothing is
+            billed except by &ldquo;Bill now&rdquo; on an account. Check the
+            preview before switching it on.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <NumberField
+              id="terms"
+              label="Invoices due after"
+              suffix="days"
+              value={v.terms}
+              onChange={set("terms")}
+              hint="For customers paying by invoice. A card is charged at once."
+            />
+            <NumberField
+              id="readOnlyDays"
+              label="Unpaid: read-only after"
+              suffix="days"
+              value={v.readOnlyDays}
+              onChange={set("readOnlyDays")}
+              hint="Days overdue. 0 skips this step."
+            />
+            <NumberField
+              id="lockDays"
+              label="Unpaid: locked after"
+              suffix="days"
+              value={v.lockDays}
+              onChange={set("lockDays")}
+              hint="Days overdue. 0 never locks."
+            />
+          </div>
+          <BillingPreview />
         </CardContent>
       </Card>
 
@@ -918,6 +978,51 @@ function QuoteCalculator({ plans, settings }) {
           <QuoteBreakdown result={result} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** Who today's run would bill, and how — before anyone is charged. */
+function BillingPreview() {
+  const [rows, setRows] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await previewBillingRun();
+      if (!res?.success) return toast.error(res?.message || "Could not preview");
+      setRows(JSON.parse(res.data));
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Today&apos;s run</p>
+        <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+          {loading && <Loader2 className="size-4 animate-spin" />}
+          Preview
+        </Button>
+      </div>
+      {rows &&
+        (rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nobody is due a bill today.</p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {rows.map((r, i) => (
+              <li key={r.accountId || i} className="flex flex-wrap justify-between gap-2 py-2">
+                <span>
+                  <span className="font-medium">{r.account}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {r.companies.map((c) => c.name).join(", ")} · by {r.paymentMethod}
+                  </span>
+                </span>
+                <span className="tabular-nums">{formatMoney(r.netPence)} + VAT</span>
+              </li>
+            ))}
+          </ul>
+        ))}
     </div>
   );
 }

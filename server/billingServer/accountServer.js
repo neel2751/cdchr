@@ -12,6 +12,13 @@ import { invalidateTenantCache } from "../tenantServer/tenantServer";
 import { invalidateCompanyAccess } from "../tenantServer/tenantAccessState";
 import { loadPricing } from "./pricingStore";
 import { quoteCompany, refreshAccount, repriceCompany } from "./accountStore";
+import {
+  previewSubscriptionBilling,
+  runSubscriptionBilling,
+} from "./subscriptionBilling";
+import InvoiceModel from "@/models/invoiceModel";
+import { escapeTenant } from "@/lib/tenantContext";
+import { outstanding } from "@/lib/money";
 
 /**
  * Billing accounts in the platform console: a customer's companies on one
@@ -144,6 +151,7 @@ export async function getAccount(accountId) {
       const { result, usage, extraCompany } = await quoteCompany(company, { pricing, account });
       priced.push({
         ...summary(company, account),
+        paidThrough: company.billing?.paidThrough || null,
         extraCompany,
         usage,
         cycle: result.cycle,
@@ -160,10 +168,41 @@ export async function getAccount(accountId) {
       .sort({ name: 1 })
       .lean();
 
+    // The account's plan bills, newest first.
+    const invoices = await escapeTenant("accounts: plan bills", () =>
+      InvoiceModel.find({ accountId: account._id, source: "subscription" })
+        .sort({ issuedAt: -1, createdAt: -1 })
+        .limit(24)
+        .select("number status grossPence currency issuedAt dueAt periodFrom periodTo payments")
+        .lean()
+    );
+
     return {
       success: true,
       data: JSON.stringify({
-        account,
+        account: {
+          ...account,
+          // Only what the console shows: never a Stripe id it has no use for.
+          card: account.card?.paymentMethodId
+            ? {
+                brand: account.card.brand,
+                last4: account.card.last4,
+                expMonth: account.card.expMonth,
+                expYear: account.card.expYear,
+              }
+            : null,
+        },
+        invoices: invoices.map((inv) => ({
+          _id: inv._id,
+          number: inv.number,
+          status: inv.status,
+          grossPence: inv.grossPence,
+          outstandingPence: outstanding(inv.grossPence, inv.payments),
+          issuedAt: inv.issuedAt,
+          dueAt: inv.dueAt,
+          periodFrom: inv.periodFrom,
+          periodTo: inv.periodTo,
+        })),
         companies: priced,
         total: {
           monthlyNetPence: priced.reduce((s, c) => s + c.quote.monthlyNetPence, 0),
@@ -439,5 +478,54 @@ export async function setAccountLock(accountId, { level = null, message = "" } =
   } catch (error) {
     console.log("setAccountLock error:", error?.message);
     return { success: false, message: "Could not change the lock" };
+  }
+}
+
+/** What billing this account today would charge — nothing is billed. */
+export async function previewAccountBilling(accountId) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (auth.error) return { success: false, message: auth.error };
+    if (!isValidObjectId(accountId)) return { success: false, message: "Invalid account" };
+    const preview = await previewSubscriptionBilling({ accountId: createObjectId(accountId) });
+    return { success: true, data: JSON.stringify(preview) };
+  } catch (error) {
+    console.log("previewAccountBilling error:", error?.message);
+    return { success: false, message: "Could not work out the bill" };
+  }
+}
+
+/**
+ * Bill this account now, for every company whose paid period has run out:
+ * make the invoice, then charge the saved card or email it. A person
+ * deciding, so it works with automatic billing off.
+ */
+export async function billAccountNow(accountId) {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (auth.error) return { success: false, message: auth.error };
+    if (!isValidObjectId(accountId)) return { success: false, message: "Invalid account" };
+    const result = await runSubscriptionBilling({
+      accountId: createObjectId(accountId),
+      force: true,
+      by: auth.user.name || auth.user.email || "Platform admin",
+    });
+    if (result.failed.length) {
+      return { success: false, message: result.failed[0].reason };
+    }
+    const bill = result.billed[0];
+    await audit(auth.user, "Platform.billNow", bill ? `Billed ${bill.account}: ${bill.invoice}` : "Bill now: nothing was due", {
+      entityId: accountId,
+    });
+    if (!bill) return { success: true, message: "Nothing is due — every company is paid up" };
+    return {
+      success: true,
+      message: bill.charged
+        ? `${bill.invoice} issued and paid by card`
+        : `${bill.invoice} issued — ${bill.reason}`,
+    };
+  } catch (error) {
+    console.log("billAccountNow error:", error?.message);
+    return { success: false, message: error?.message || "Could not bill the account" };
   }
 }

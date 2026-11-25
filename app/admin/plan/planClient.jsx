@@ -21,6 +21,7 @@ import QuoteBreakdown from "@/components/pricing/quoteBreakdown";
 import { formatMoney } from "@/lib/money";
 import { getMyPlan, setOverageMode } from "@/server/billingServer/myPlanServer";
 import InvoicesSettings from "../clockSettings/components/invoicesSettings";
+import PaymentCard from "./paymentCard";
 
 const KEY = ["myPlan"];
 
@@ -111,6 +112,8 @@ export default function PlanClient() {
               ))}
             </CardContent>
           </Card>
+
+          <PaymentCard />
 
           {data.plan && <OverageChoice mode={data.overageMode} plan={data.plan} money={money} workersLabel={data.workersLabel} />}
 

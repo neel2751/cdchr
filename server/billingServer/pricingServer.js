@@ -354,3 +354,16 @@ export async function applyPlanToCompany(
     return { success: false, message: "Could not apply the plan" };
   }
 }
+
+/** Who a billing run would bill today, and for how much. Bills nothing. */
+export async function previewBillingRun() {
+  try {
+    const auth = await requirePlatformAdmin();
+    if (auth.error) return { success: false, message: auth.error };
+    const { previewSubscriptionBilling } = await import("./subscriptionBilling");
+    return { success: true, data: JSON.stringify(await previewSubscriptionBilling()) };
+  } catch (error) {
+    console.log("previewBillingRun error:", error?.message);
+    return { success: false, message: "Could not work out the run" };
+  }
+}

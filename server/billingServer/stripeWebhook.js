@@ -6,6 +6,8 @@ import { openSecret } from "@/lib/secretBox";
 import CarrierAccountModel from "@/models/carrierAccountModel";
 import InvoiceModel from "@/models/invoiceModel";
 import WebhookEventModel from "@/models/webhookEventModel";
+import { syncPaymentLocks } from "./paymentLocks";
+import { saveCardFromSession } from "./cardStore";
 
 /**
  * What to do with a Stripe event once it is known to be genuine.
@@ -65,7 +67,7 @@ async function noteOutcome(eventId, outcome) {
  * the checkout was created — never by matching on the amount, which would
  * attach a payment to the wrong invoice the moment two are for the same sum.
  */
-async function creditInvoice({ invoiceId, amountPence, reference, eventId }) {
+export async function creditInvoice({ invoiceId, amountPence, reference, eventId }) {
   if (!invoiceId) return "no invoice id in the event metadata";
 
   const invoice = await escapeTenant("stripe: find the invoice", () =>
@@ -126,6 +128,13 @@ async function creditInvoice({ invoiceId, amountPence, reference, eventId }) {
     actor: { name: "Stripe webhook", role: "system" },
   }).catch(() => {});
 
+  // A plan bill paid: lift any lock it caused, now rather than tomorrow.
+  if (invoice.source === "subscription" && invoice.accountId) {
+    await syncPaymentLocks({ accountId: invoice.accountId }).catch((error) =>
+      console.log("Could not reopen after payment:", error?.message)
+    );
+  }
+
   return `recorded ${formatMoney(amount, invoice.currency)} against ${invoice.number}`;
 }
 
@@ -150,6 +159,11 @@ export async function handleStripeEvent(event) {
 
     switch (event.type) {
       case "checkout.session.completed": {
+        // Saving a card for future bills (cardStore.js), not a payment.
+        if (object.mode === "setup") {
+          outcome = await saveCardFromSession(object.id);
+          break;
+        }
         // A completed session is not necessarily a paid one — an asynchronous
         // method can complete the session and settle days later.
         if (object.payment_status !== "paid") {
