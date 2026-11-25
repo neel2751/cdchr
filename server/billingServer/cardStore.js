@@ -1,6 +1,7 @@
 import { connect } from "@/db/db";
 import BillingAccountModel from "@/models/billingAccountModel";
 import { callStripe, getStripe, secretKey } from "./stripeCore";
+import { chargeOutstanding } from "./cardCharges";
 
 /**
  * A customer's saved card, for charging each bill without them doing
@@ -132,7 +133,22 @@ export async function saveCardFromSession(sessionId, { expectAccountId } = {}) {
       $unset: { cardFailedAt: "", cardFailure: "" },
     }
   );
-  return `saved ${card.brand || "card"} ending ${card.last4 || "????"} for ${account.name}`;
+  const saved = `saved ${card.brand || "card"} ending ${card.last4 || "????"} for ${account.name}`;
+
+  // Whatever the account still owes is paid with the new card now — which
+  // also reopens it if an unpaid bill had locked it. A second call (the
+  // person coming back AND the webhook) finds nothing owed.
+  const paid = await chargeOutstanding(account._id).catch((error) => {
+    console.log("Charging the new card failed:", error?.message);
+    return [];
+  });
+  const ok = paid.filter((p) => p.charged).map((p) => p.invoice);
+  const failed = paid.find((p) => !p.charged);
+  return (
+    saved +
+    (ok.length ? `; paid ${ok.join(", ")}` : "") +
+    (failed ? `; could not pay ${failed.invoice}: ${failed.reason}` : "")
+  );
 }
 
 /** Forget the card — at Stripe too, so it can no longer be charged. */

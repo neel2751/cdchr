@@ -7,7 +7,6 @@ import CarrierAccountModel from "@/models/carrierAccountModel";
 import InvoiceModel from "@/models/invoiceModel";
 import WebhookEventModel from "@/models/webhookEventModel";
 import { syncPaymentLocks } from "./paymentLocks";
-import { saveCardFromSession } from "./cardStore";
 
 /**
  * What to do with a Stripe event once it is known to be genuine.
@@ -161,6 +160,9 @@ export async function handleStripeEvent(event) {
       case "checkout.session.completed": {
         // Saving a card for future bills (cardStore.js), not a payment.
         if (object.mode === "setup") {
+          // Imported here: cardStore charges cards through a module that
+          // imports this one.
+          const { saveCardFromSession } = await import("./cardStore");
           outcome = await saveCardFromSession(object.id);
           break;
         }

@@ -1,20 +1,22 @@
 import { connect } from "@/db/db";
 import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
 import { logAuditDirect } from "@/lib/audit";
-import { emailButton, escapeHtml, renderBrandedEmail } from "@/lib/emailTemplate";
-import { formatMoney, outstanding, totalLines } from "@/lib/money";
+import { escapeHtml } from "@/lib/emailTemplate";
+import { formatMoney, totalLines } from "@/lib/money";
 import { addPeriod, dayStart, invoiceLinesFor } from "@/lib/billing";
 import BillingAccountModel from "@/models/billingAccountModel";
 import CompanyModel from "@/models/companyModel";
 import InvoiceModel from "@/models/invoiceModel";
-import OfficeEmployeeModel from "@/models/officeEmployeeModel";
-import { sendMail } from "@/server/nodeMailerServer/nodemailerServer";
 import { ensureAccount, quoteCompany } from "./accountStore";
 import { allocateNumber, sellerDetails } from "./invoiceCore";
 import { syncPaymentLocks } from "./paymentLocks";
 import { loadPricing } from "./pricingStore";
-import { callStripe, secretKey } from "./stripeCore";
-import { creditInvoice } from "./stripeWebhook";
+import {
+  billRecipients,
+  chargeInvoice,
+  emailAccount,
+  retryDeclinedCharges,
+} from "./cardCharges";
 
 /**
  * The monthly bill.
@@ -38,7 +40,8 @@ import { creditInvoice } from "./stripeWebhook";
  *
  * Then, by how the customer pays (BillingAccount.paymentMethod):
  *   card    — the saved card is charged now. Declined: the customer is
- *             emailed a link to pay, and the invoice is due today.
+ *             emailed, the invoice is due today, and the card is tried
+ *             again 3 and 5 days later (cardCharges.js).
  *   invoice — emailed, due in PricingSetting.invoiceTermsDays.
  *
  * Unpaid, it locks the account after a while (paymentLocks.js).
@@ -51,20 +54,6 @@ import { creditInvoice } from "./stripeWebhook";
  */
 
 const DAY_MS = 86400000;
-
-function platformMailer() {
-  const host = process.env.EMAIL_HOST;
-  const userName = process.env.EMAIL_USERNAME;
-  const password = process.env.EMAIL_PASSWORD;
-  if (!host || !userName || !password) return null;
-  return { host, userName, password, port: Number(process.env.EMAIL_PORT) || 587 };
-}
-
-function appUrl(company) {
-  const root = process.env.PLATFORM_ROOT_DOMAIN;
-  if (root && company?.slug) return `https://${company.slug}.${root}`;
-  return process.env.NEXTAUTH_URL || "";
-}
 
 /**
  * Companies due a bill: paying, on a package, and billed up to today or
@@ -95,141 +84,6 @@ function periodFor(company, now) {
     ? dayStart(company.billing.paidThrough)
     : dayStart(now);
   return { from, to: addPeriod(from, company.billing?.cycle || "monthly") };
-}
-
-/** Who reads the bill: the account's billing email, else the main company's owners. */
-async function billRecipients(account) {
-  if (account.billingEmail) return [account.billingEmail];
-  if (!account.primaryCompanyId) return [];
-  const owners = await runWithTenant(String(account.primaryCompanyId), () =>
-    OfficeEmployeeModel.find({
-      isSuperAdmin: true,
-      delete: { $ne: true },
-      isActive: { $ne: false },
-      email: { $nin: [null, ""] },
-    })
-      .select("email")
-      .lean()
-  );
-  return owners.map((o) => o.email);
-}
-
-async function emailAccount(account, { subject, heading, html }) {
-  const mailer = platformMailer();
-  if (!mailer) return 0;
-  const to = await billRecipients(account);
-  const main = account.primaryCompanyId
-    ? await CompanyModel.findById(account.primaryCompanyId).select("slug").lean()
-    : null;
-  const url = appUrl(main);
-  let sent = 0;
-  for (const toEmail of to) {
-    const result = await sendMail({
-      ...mailer,
-      fromName: process.env.PLATFORM_APP_NAME || "Accounts",
-      toEmail,
-      subject,
-      html: renderBrandedEmail({
-        branding: { supportEmail: process.env.PLATFORM_SUPPORT_EMAIL || "" },
-        appUrl: url,
-        heading,
-        html: html + (url ? emailButton("Open Plan & Billing", `${url}/admin/plan`) : ""),
-      }),
-      text: subject,
-    }).catch(() => null);
-    if (result?.success) sent += 1;
-  }
-  return sent;
-}
-
-/**
- * Charge the account's saved card for an invoice. Records the payment on
- * success (which lifts any unpaid lock); on failure notes Stripe's reason on
- * the account and emails a link to pay instead.
- */
-async function chargeInvoice(account, invoice) {
-  const owed = outstanding(invoice.grossPence, invoice.payments);
-  if (owed <= 0) return { charged: false, reason: "nothing owed" };
-
-  const key = await secretKey();
-  const fail = async (reason) => {
-    await BillingAccountModel.updateOne(
-      { _id: account._id },
-      { $set: { cardFailedAt: new Date(), cardFailure: reason } }
-    );
-    await emailAccount(account, {
-      subject: `We could not take payment for ${invoice.number}`,
-      heading: "Your card payment did not go through",
-      html:
-        `<p>We tried to take ${escapeHtml(formatMoney(owed, invoice.currency))} for invoice ` +
-        `${escapeHtml(invoice.number)} from your saved card, and it did not go through: ` +
-        `${escapeHtml(reason)}.</p><p>Please pay it, or add a new card, on Plan &amp; Billing. ` +
-        `Everything keeps working while you do.</p>`,
-    });
-    return { charged: false, reason };
-  };
-  if (!key) return fail("card payment is not switched on");
-  if (!account.card?.paymentMethodId || !account.stripeCustomerId) {
-    return fail("there is no saved card");
-  }
-
-  try {
-    const intent = await callStripe(
-      "/payment_intents",
-      {
-        amount: String(owed),
-        currency: (invoice.currency || "GBP").toLowerCase(),
-        customer: account.stripeCustomerId,
-        payment_method: account.card.paymentMethodId,
-        off_session: "true",
-        confirm: "true",
-        description: `Invoice ${invoice.number}`,
-        "metadata[invoiceId]": String(invoice._id),
-        "metadata[invoiceNumber]": invoice.number || "",
-        "metadata[accountId]": String(account._id),
-      },
-      key,
-      // One charge per invoice, whatever retries or overlapping runs do.
-      { idempotencyKey: `bill-${invoice._id}` }
-    );
-
-    if (intent?.status !== "succeeded") {
-      return fail(
-        intent?.status === "requires_action"
-          ? "your bank asked you to confirm the payment"
-          : `the payment is ${intent?.status || "not complete"}`
-      );
-    }
-
-    await creditInvoice({
-      invoiceId: String(invoice._id),
-      amountPence: intent.amount_received ?? owed,
-      reference: intent.id,
-      eventId: "billing run",
-    });
-    await BillingAccountModel.updateOne(
-      { _id: account._id },
-      { $unset: { cardFailedAt: "", cardFailure: "" } }
-    );
-    await emailAccount(account, {
-      subject: `Receipt for ${invoice.number}`,
-      heading: "Thank you — payment received",
-      html:
-        `<p>We have taken ${escapeHtml(formatMoney(owed, invoice.currency))} for invoice ` +
-        `${escapeHtml(invoice.number)} from your ${escapeHtml(account.card.brand || "card")} ` +
-        `ending ${escapeHtml(account.card.last4 || "")}.</p>`,
-    });
-    return { charged: true, reference: intent.id };
-  } catch (error) {
-    const s = error?.stripe;
-    const reason =
-      s?.code === "authentication_required"
-        ? "your bank asked you to confirm the payment"
-        : s?.decline_code
-          ? `the card was declined (${s.decline_code.replace(/_/g, " ")})`
-          : error?.message || "the payment failed";
-    return fail(reason);
-  }
 }
 
 /**
@@ -346,7 +200,7 @@ async function billAccount(account, companies, { now, by }) {
 
   let payment;
   if (account.paymentMethod === "card" && account.card?.paymentMethodId) {
-    payment = await chargeInvoice(account, invoice);
+    payment = await chargeInvoice(account, invoice, { now });
   } else {
     await emailAccount(account, {
       subject: `Invoice ${invoice.number} — ${formatMoney(invoice.grossPence, invoice.currency)}`,
@@ -418,8 +272,13 @@ export async function runSubscriptionBilling({ now = new Date(), force = false, 
       failed.push({ account: group.account.name, reason: error?.message });
     }
   }
+  // Declined cards whose retry day has come (cardCharges.js).
+  const retried = await retryDeclinedCharges({ now, accountId }).catch((error) => {
+    console.log("[billing] retries failed:", error?.message);
+    return [];
+  });
   const locks = await syncPaymentLocks({ now, accountId });
-  return { enabled: true, billed, failed, locks };
+  return { enabled: true, billed, failed, retried, locks };
 }
 
 /**

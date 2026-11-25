@@ -42,7 +42,8 @@ if (!process.env.TAG_KEY_MASTER) process.env.TAG_KEY_MASTER = "b".repeat(64);
 /* ------------------------------------------------------------ fake Stripe */
 
 const stripeCalls = [];
-let declineNext = false;
+// How many of the next charges to decline.
+let declines = 0;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -54,8 +55,8 @@ globalThis.fetch = async (url, init = {}) => {
     new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
 
   if (path === "/payment_intents") {
-    if (declineNext) {
-      declineNext = false;
+    if (declines > 0) {
+      declines -= 1;
       return json(402, {
         error: { type: "card_error", code: "card_declined", decline_code: "insufficient_funds", message: "Your card has insufficient funds." },
       });
@@ -284,7 +285,7 @@ async function main() {
   });
 
   await check("a declined card is noted, and the bill left to pay", async () => {
-    declineNext = true;
+    declines = 1;
     const res = await runSubscriptionBilling({ now: new Date("2027-02-01T09:00:00Z") });
     assert.equal(res.billed[0].charged, false);
     assert.match(res.billed[0].reason, /insufficient funds/);
@@ -292,6 +293,64 @@ async function main() {
     assert.ok(acc.cardFailedAt);
     const unpaid = await db.collection("invoices").findOne({ accountId, status: "issued" });
     assert.ok(unpaid, "the bill is not left to pay");
+  });
+
+  /* ------------------------------------------------------------ retries */
+
+  const febBill = async () =>
+    db.collection("invoices").findOne({ accountId, periodFrom: new Date("2027-02-01T00:00:00Z") });
+
+  await check("no retry before its day", async () => {
+    const res = await runSubscriptionBilling({ now: new Date("2027-02-03T09:00:00Z") });
+    assert.equal(res.retried.length, 0);
+    assert.equal((await febBill()).status, "issued");
+  });
+
+  await check("THE POINT: three days after a decline, the card is tried again", async () => {
+    const before = stripeCalls.filter((c) => c.path === "/payment_intents").length;
+    const res = await runSubscriptionBilling({ now: new Date("2027-02-04T09:00:00Z") });
+    assert.equal(res.retried.length, 1);
+    assert.equal(res.retried[0].charged, true);
+    const inv = await febBill();
+    assert.equal(inv.status, "paid");
+    assert.deepEqual(inv.chargeAttempts.map((a) => [a.kind, a.ok]), [["first", false], ["retry", true]]);
+    const calls = stripeCalls.filter((c) => c.path === "/payment_intents");
+    assert.equal(calls.length, before + 1);
+    assert.equal(calls.at(-1).headers["Idempotency-Key"], `bill-${inv._id}-2`, "a retry is a new charge");
+    const acc = await db.collection("billingaccounts").findOne({ _id: accountId });
+    assert.equal(acc.cardFailedAt, undefined, "the failure is cleared");
+  });
+
+  await check("…twice at most, then it stops", async () => {
+    declines = 3;
+    await runSubscriptionBilling({ now: new Date("2027-03-01T09:00:00Z") });
+    await runSubscriptionBilling({ now: new Date("2027-03-04T09:00:00Z") });
+    await runSubscriptionBilling({ now: new Date("2027-03-06T09:00:00Z") });
+    const later = await runSubscriptionBilling({ now: new Date("2027-03-20T09:00:00Z") });
+    assert.equal(later.retried.length, 0);
+    const inv = await db.collection("invoices").findOne({ accountId, periodFrom: new Date("2027-03-01T00:00:00Z") });
+    assert.equal(inv.chargeAttempts.length, 3);
+    assert.ok(inv.chargeAttempts.every((a) => !a.ok));
+    assert.equal(inv.status, "issued");
+  });
+
+  await check("THE POINT: a new card pays what is owed, and reopens the account", async () => {
+    const inv = await db.collection("invoices").findOne({ accountId, periodFrom: new Date("2027-03-01T00:00:00Z") });
+    await syncPaymentLocks({ accountId, now: new Date(inv.dueAt.getTime() + 15 * 86400000) });
+    assert.equal(
+      companyAccess(await db.collection("companies").findOne({ _id: london })).level,
+      "locked"
+    );
+    const outcome = await saveCardFromSession(`cs_for_${accountId}`);
+    assert.match(outcome, new RegExp(`paid ${inv.number}`));
+    const after = await db.collection("invoices").findOne({ _id: inv._id });
+    assert.equal(after.status, "paid");
+    assert.equal(after.chargeAttempts.at(-1).kind, "new card");
+    assert.equal(
+      companyAccess(await db.collection("companies").findOne({ _id: london })).level,
+      "full",
+      "still locked after paying"
+    );
   });
 
   /* ------------------------------------------------------- unpaid → lock */

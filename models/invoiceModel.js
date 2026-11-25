@@ -109,6 +109,20 @@ const invoiceSchema = new mongoose.Schema(
     accountId: mongoose.Schema.Types.ObjectId,
     periodFrom: Date,
     periodTo: Date,
+    // Every time the saved card was tried for this invoice, oldest first —
+    // the first charge, the retries after a decline, a newly saved card.
+    // What decides whether another retry is due (lib/billing.js retryDue).
+    chargeAttempts: [
+      {
+        at: { type: Date, required: true },
+        ok: { type: Boolean, required: true },
+        // "first", "retry", "new card"
+        kind: String,
+        reason: String,
+        reference: String,
+        _id: false,
+      },
+    ],
 
     lines: [lineSchema],
     currency: { type: String, default: "GBP" },

@@ -123,9 +123,17 @@ export async function finishCardSetup({ sessionId } = {}) {
         description: `Card ${outcome.replace(/^saved /, "")}`,
       });
     }
+    const paid = outcome.match(/; paid (.+?)(;|$)/)?.[1];
+    const notPaid = outcome.match(/; could not pay (.+)$/)?.[1];
     return {
       success: saved,
-      message: saved ? "Card saved — your bills will be paid with it" : `Card not saved: ${outcome}`,
+      message: !saved
+        ? `Card not saved: ${outcome}`
+        : paid
+          ? `Card saved, and ${paid} paid with it`
+          : notPaid
+            ? `Card saved, but it could not pay ${notPaid}`
+            : "Card saved — your bills will be paid with it",
     };
   } catch (error) {
     console.log("finishCardSetup error:", error?.message);

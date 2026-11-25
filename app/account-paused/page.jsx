@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * It checks the session itself instead.
  */
 export default async function AccountPausedPage({ searchParams }) {
-  const { paid } = (await searchParams) || {};
+  const { paid, card, session_id: sessionId } = (await searchParams) || {};
   const session = await auth();
   const user = session?.user;
   if (!user) redirect("/auth");
@@ -64,7 +64,12 @@ export default async function AccountPausedPage({ searchParams }) {
             and comes back as soon as the account is reopened.
           </p>
           {/* An unpaid bill is the usual reason, and paying it the way out. */}
-          {owner && <PayNow justPaid={paid ? String(paid) : ""} />}
+          {owner && (
+            <PayNow
+              justPaid={paid ? String(paid) : ""}
+              cardSessionId={card === "done" && sessionId ? String(sessionId) : ""}
+            />
+          )}
           {owner && contact && (
             <p>
               To reopen it, email{" "}
