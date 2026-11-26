@@ -41,6 +41,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
+import { useTerms } from "@/app/admin/providers";
+import { entryKind } from "@/lib/rotaCategories";
 
 const WeekRotaTable = ({
   currentWeek,
@@ -60,6 +62,22 @@ const WeekRotaTable = ({
     fetchFn: getSelectProjects,
     queryKey: ["selectProjects"],
   });
+  const { t } = useTerms();
+
+  // What each choice means comes from the category's rule
+  // (lib/rotaCategories.js), not from what it is called: "off" has no hours,
+  // "place" needs a site / branch / class.
+  const categoryFor = (value) => categories.find((c) => c.value === value);
+  const kindOf = (value) => categoryFor(value)?.kind || entryKind({ category: value });
+  // The day off, and the everyday working choice, for filling a week in.
+  const offValue = categories.find((c) => c.kind === "off")?.value || "OFF";
+  const workCategory =
+    categories.find((c) => c.kind === "work") || categories.find((c) => c.kind === "place");
+  const workValue = workCategory?.value || "OFFICE";
+  const hoursFor = (value, fallback = ["09:00", "17:00"]) => {
+    const c = categoryFor(value);
+    return c?.startTime && c?.endTime ? [c.startTime, c.endTime] : fallback;
+  };
 
   // When editing an already-submitted rota we require a documented reason for
   // the change (UK data-accuracy). These drive that confirmation dialog.
@@ -115,22 +133,43 @@ const WeekRotaTable = ({
 
           let updatedScheduleArray = [...schedule.schedule];
 
+          // Choosing a category brings its rule with it: a day off loses its
+          // hours and place, and a category with set hours fills them in.
+          const categoryChange = (entry) => {
+            if (field !== "category") return {};
+            const kind = kindOf(value);
+            if (kind === "off") return { kind, startTime: "00:00", endTime: "00:00", site: undefined };
+            const c = categoryFor(value);
+            const hours =
+              c?.startTime && c?.endTime
+                ? { startTime: c.startTime, endTime: c.endTime }
+                : entry?.startTime && entry.startTime !== "00:00"
+                  ? {}
+                  : { startTime: "09:00", endTime: "17:00" };
+            return { kind, ...hours, ...(kind === "place" ? {} : { site: undefined }) };
+          };
+
           if (existingDayIndex !== -1) {
             // If day exists, update the field
+            const current = updatedScheduleArray[existingDayIndex];
             updatedScheduleArray[existingDayIndex] = {
-              ...updatedScheduleArray[existingDayIndex],
+              ...current,
               date,
               day,
               [field]: value,
+              ...categoryChange(current),
             };
           } else {
             // If day is missing, add it
+            const [start, end] = hoursFor(workValue);
             updatedScheduleArray.push({
               [field]: value,
               date,
-              category: field === "category" ? value : "OFFICE",
-              startTime: field === "startTime" ? value : "09:00",
-              endTime: field === "endTime" ? value : "17:00",
+              day,
+              category: field === "category" ? value : workValue,
+              startTime: field === "startTime" ? value : start,
+              endTime: field === "endTime" ? value : end,
+              ...categoryChange(null),
             });
           }
 
@@ -175,7 +214,7 @@ const WeekRotaTable = ({
                 // Copying last week forward would otherwise roster people onto
                 // a day the office is shut.
                 category: nonWorking(entry.day, dateFor(entry.day))
-                  ? "OFF"
+                  ? offValue
                   : entry.category,
                 startTime: nonWorking(entry.day, dateFor(entry.day))
                   ? "00:00"
@@ -211,7 +250,7 @@ const WeekRotaTable = ({
             if (nonWorking(day, dateFor(day))) {
               return {
                 day,
-                category: "OFF",
+                category: offValue,
                 startTime: "00:00",
                 endTime: "00:00",
                 date: format(
@@ -223,7 +262,7 @@ const WeekRotaTable = ({
 
             // If the day already exists and is OFF or HOLIDAY, return as is
             if (
-              existingDay?.category === "OFF" ||
+              kindOf(existingDay?.category) === "off" ||
               existingDay?.category === "Holiday"
             ) {
               return existingDay;
@@ -237,9 +276,9 @@ const WeekRotaTable = ({
                 addDays(currentWeek, days.indexOf(day)),
                 "yyyy-MM-dd"
               ),
-              category: "OFFICE",
-              startTime: "09:00",
-              endTime: "18:00",
+              category: workValue,
+              startTime: hoursFor(workValue, ["09:00", "18:00"])[0],
+              endTime: hoursFor(workValue, ["09:00", "18:00"])[1],
             };
           });
 
@@ -313,12 +352,12 @@ const WeekRotaTable = ({
           return;
         }
 
-        if (category === "OFFICE/SITE" && !site) {
-          missingDays.push(`${date} (missing site)`);
+        if (kindOf(category) === "place" && !site) {
+          missingDays.push(`${date} (missing ${t("site").toLowerCase()})`);
           return;
         }
 
-        if (category !== "OFF") {
+        if (kindOf(category) !== "off") {
           if (!startTime || !endTime) {
             missingDays.push(`${date} (missing time)`);
             return;
@@ -425,8 +464,10 @@ const WeekRotaTable = ({
                     const isPendingLeaveDay =
                       schedule.pendingLeaveDates?.includes(date);
                     const isOff =
-                      dayLabel === "Sunday" || daySchedule.category === "OFF";
-                    const isOfficeSite = daySchedule.category === "OFFICE/SITE";
+                      dayLabel === "Sunday" ||
+                      kindOf(daySchedule.category) === "off";
+                    const isOfficeSite =
+                      kindOf(daySchedule.category) === "place";
                     // if (isHoliday) {
                     //   return (
                     //     <TableCell key={date}>
@@ -534,7 +575,7 @@ const WeekRotaTable = ({
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue placeholder="Select Site" />
+                                <SelectValue placeholder={`Select ${t("site")}`} />
                               </SelectTrigger>
                               <SelectContent>
                                 {siteProjects?.map((site) => (

@@ -20,9 +20,12 @@ import {
 import { useAvatar } from "../Avatar/AvatarContext";
 import { useFetchQuery } from "@/hooks/use-query";
 import { getWeeklyRotaByWeekStartDate } from "@/server/weeklyRotaServer/weeklyRotaServer";
+import { isOff, kindColour, needsPlace } from "@/lib/rotaCategories";
+import { useTerms } from "@/app/admin/providers";
 
 const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export default function EmployeePerformance() {
+  const { t } = useTerms();
   const { slug } = useAvatar();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [weekStart, setWeekStart] = useState(
@@ -61,20 +64,8 @@ export default function EmployeePerformance() {
     setWeekStart(startOfWeek(today, { weekStartsOn: 1 }));
   };
 
-  const shiftColor = (category) => {
-    switch (category) {
-      case "OFFICE":
-        return "bg-indigo-100 border-indigo-300 text-indigo-800";
-      case "OFFICE/SITE":
-        return "bg-green-100 border-green-300 text-green-800";
-      case "Work from Home":
-        return "bg-yellow-100 border-yellow-300 text-yellow-800";
-      case "OFF":
-        return "bg-red-100 border-red-300 text-red-800";
-      default:
-        return "bg-gray-100 border-gray-300 text-gray-800";
-    }
-  };
+  // Coloured by each day's rule (lib/rotaCategories.js), not its name.
+  const shiftColor = (shift) => kindColour(shift);
 
   return (
     <div className="space-y-6">
@@ -132,12 +123,10 @@ export default function EmployeePerformance() {
                   dayShifts.map((shift, index) => (
                     <Card
                       key={shift.index}
-                      className={`overflow-hidden border rounded-b-md rounded-t-none ${shiftColor(
-                        shift.category
-                      )}`}
+                      className={`overflow-hidden border rounded-b-md rounded-t-none ${shiftColor(shift)}`}
                     >
                       <CardContent className="p-3">
-                        {shift.category !== "OFF" ? (
+                        {!isOff(shift) ? (
                           <>
                             <div>
                               <Clock className="h-4 w-4 inline mr-1" />
@@ -147,14 +136,14 @@ export default function EmployeePerformance() {
                               <Clock className="h-4 w-4 inline mr-1" />
                               <span className="text-sm">{shift.endTime}</span>
                             </div>
-                            <p className="text-xs mt-1">{shift.category}</p>
+                            <p className="text-xs mt-1">{shift.label || shift.category}</p>
                           </>
                         ) : (
-                          <p className="text-xs mt-0.5">{shift.category}</p>
+                          <p className="text-xs mt-0.5">{shift.label || shift.category}</p>
                         )}
-                        {shift.category === "OFFICE/SITE" && (
+                        {needsPlace(shift) && (
                           <p className="text-xs mt-0.5">
-                            <span className="font-medium">Site:</span>{" "}
+                            <span className="font-medium">{t("site")}:</span>{" "}
                             {shift.site}
                           </p>
                         )}

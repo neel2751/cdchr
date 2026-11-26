@@ -127,6 +127,15 @@ const STEPS = [
     feature: "leave",
   },
   {
+    key: "rota",
+    group: "Time and attendance",
+    title: "Check your shift types",
+    body: "The choices on the weekly rota — Office, Off, at a {site} — and their usual hours. Rename them or add your own.",
+    href: "/admin/weeklyRota",
+    feature: "weeklyRota",
+    review: true,
+  },
+  {
     key: "clockIn",
     group: "Time and attendance",
     title: "Choose how people clock in",

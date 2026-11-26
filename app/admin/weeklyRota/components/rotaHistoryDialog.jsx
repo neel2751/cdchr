@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { useFetchQuery } from "@/hooks/use-query";
 import { getWeeklyRotaVersions } from "@/server/weeklyRotaServer/weeklyRotaServer";
+import { describeEntry } from "@/lib/rotaCategories";
 
 const changeTypeStyles = {
   created: "text-emerald-600",
@@ -31,15 +32,9 @@ const changeTypeStyles = {
 };
 
 // Render a single day cell the same way the CSV export reads it.
+// By each day's rule (lib/rotaCategories.js), not its category's name.
 function formatCell(entry) {
-  if (!entry) return "";
-  const { category, startTime, endTime, site } = entry;
-  if (category === "OFF" || category === "Holiday") return "OFF";
-  if (category === "OFFICE/SITE") {
-    return `${category}${site ? " - " + site : ""} (${startTime}–${endTime})`;
-  }
-  if (!category) return "";
-  return `${category} (${startTime}–${endTime})`;
+  return describeEntry(entry);
 }
 
 function SnapshotTable({ attendanceData = [] }) {

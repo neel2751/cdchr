@@ -15,7 +15,12 @@
  *
  * Each has office staff and departments, its places, its people, two weeks of
  * attendance up to today (some people in now, some on a break, some gone
- * home), leave balances and requests, and announcements. All four are on a
+ * home), leave balances and requests, announcements, weekly rotas and shift
+ * types, a policy library with read receipts, profile change requests, a
+ * reception desk and visitor book, expenses with receipts, each office
+ * employee's documents, a media library, and a leaver. The documents,
+ * policies and receipts are small sample PDFs stored in the company's own
+ * folder of the bucket (scripts/lib/demo-extras.mjs), so they open. All four are on a
  * package, billed together in one account, so Plan & Billing shows real
  * numbers.
  *
@@ -47,6 +52,8 @@
  *   --name=…      the owner's name (default Alex Morgan)
  *   --editable    leave the companies changeable (not demo) — to tweak the
  *                 sample data by hand. The Access tab's switch does the same.
+ *   --no-files    do not store the sample PDFs (documents, policies, receipts)
+ *                 in the bucket; the records are made but will not open.
  *
  * Talks to the driver directly, so it is not subject to TENANT_ENFORCEMENT.
  */
@@ -57,6 +64,7 @@ import bcrypt from "bcryptjs";
 
 import { industryTemplate } from "../data/terminology.js";
 import { featuresForPreset } from "../data/features.js";
+import { fileStore, seedExtras } from "./lib/demo-extras.mjs";
 
 dotenv.config();
 
@@ -70,6 +78,7 @@ const option = (name, fallback = "") => {
 const APPLY = flag("apply");
 const REMOVE = flag("remove");
 const EDITABLE = flag("editable");
+const NO_FILES = flag("no-files");
 const OWNER_EMAIL = option("email", "demo@example.com").trim().toLowerCase();
 const OWNER_NAME = option("name", "Alex Morgan").trim();
 const GIVEN_PASSWORD = option("password");
@@ -291,6 +300,8 @@ async function main() {
       return;
     }
     await wipe(db, existingIds);
+    const removedFiles = await (await fileStore({ enabled: !NO_FILES })).clear(existingIds);
+    if (removedFiles) console.log(`Removed ${removedFiles} files from storage.`);
     await db.collection("tenantmemberships").deleteMany({ tenantId: { $in: existingIds } });
     await db.collection("billingaccounts").deleteMany({ seedMarker: MARKER });
     await db.collection("companies").deleteMany({ _id: { $in: existingIds } });
@@ -367,6 +378,9 @@ async function main() {
 
   // Rebuild: clear every row of theirs, then write it fresh.
   await wipe(db, allIds);
+  // Their files too: the sample PDFs behind documents, policies and receipts.
+  const files = await fileStore({ enabled: !NO_FILES });
+  await files.clear(allIds);
 
   // One customer account for the four, the construction company as main.
   const account = await db.collection("billingaccounts").findOneAndUpdate(
@@ -395,6 +409,7 @@ async function main() {
       now,
       ownerHash,
       nobodyHash,
+      files,
       isDefault: spec.key === "construction",
     });
     await db.collection("companies").updateOne(
@@ -430,6 +445,27 @@ async function main() {
         (root ? `   https://${spec.slug}.${root}` : "")
     );
   }
+  const extrasLine = summary
+    .map(([spec, made]) => {
+      const e = made.extras || {};
+      const bits = [
+        e.rotas && `${e.rotas} rotas`,
+        e.policies && `${e.policies} policies`,
+        e.requests && `${e.requests} change requests`,
+        e.reception && "a reception desk",
+        e.visitors && `${e.visitors} visitors`,
+        e.expenses && `${e.expenses} expenses`,
+        e.documents && `${e.documents} documents`,
+      ].filter(Boolean);
+      return `  ${spec.name.padEnd(28)} ${bits.join(", ")}`;
+    })
+    .join("\n");
+  console.log(`\n${extrasLine}`);
+  console.log(
+    files.live
+      ? `\n  ${files.uploaded} sample PDFs stored, so documents, policies and receipts open.`
+      : `\n  Files: none stored (${files.note}). Documents, policies and receipts are listed but will not open.`
+  );
   console.log(
     EDITABLE
       ? "\n  --editable: these can be changed. Switch them back to demo on each company's Access tab."
@@ -478,7 +514,7 @@ async function safetyProblems(db, demoIds) {
 
 /* --------------------------------------------------------- one company */
 
-async function seedCompany(db, spec, { tenantId, today, now, ownerHash, nobodyHash, isDefault }) {
+async function seedCompany(db, spec, { tenantId, today, now, ownerHash, nobodyHash, files, isDefault }) {
   const random = rng(spec.key);
   const pick = (list) => list[Math.floor(random() * list.length)];
   const between = (min, max) => Math.round(min + random() * (max - min));
@@ -568,6 +604,36 @@ async function seedCompany(db, spec, { tenantId, today, now, ownerHash, nobodyHa
       delete: false,
     }))
   );
+
+  // Someone who has left, so Previous Office Staff is not empty.
+  await insert("officeemployes", [
+    {
+      name: "Jordan Fletcher",
+      email: slugEmail("Jordan Fletcher", spec.domain),
+      phoneNumber: phone(199),
+      password: nobodyHash,
+      roleType: "Administrator",
+      department: departments.Management,
+      company: tenantId,
+      employeId: "EMP099",
+      immigrationType: "British",
+      employeType: "Full-Time",
+      dayPerWeek: 5,
+      weeklyHourType: "fixed",
+      isActive: false,
+      isAdmin: false,
+      isSuperAdmin: false,
+      countryOfWork: "United Kingdom",
+      joinDate: new Date(today.getTime() - 500 * DAY),
+      endDate: new Date(today.getTime() - 40 * DAY),
+      statusDate: new Date(today.getTime() - 40 * DAY),
+      emergencyName: "Next of kin",
+      rightToWorkChecks: [],
+      carryForwardOverrides: [],
+      mustChangePassword: false,
+      delete: false,
+    },
+  ]);
 
   // The owner's membership: how one login reaches all four.
   await db.collection("tenantmemberships").updateOne(
@@ -968,7 +1034,31 @@ async function seedCompany(db, spec, { tenantId, today, now, ownerHash, nobodyHa
     })
   );
 
-  return { office: office.length, people: current.length, places: places.length };
+  // Rotas, policies, change requests, reception, visitors, expenses,
+  // documents and media (scripts/lib/demo-extras.mjs).
+  const template = industryTemplate(spec.industry);
+  const extras = await seedExtras({
+    db,
+    spec,
+    tenantId,
+    today,
+    now,
+    office,
+    ownerId,
+    places,
+    current,
+    officeLocation,
+    nobodyHash,
+    offDays,
+    files,
+    insert,
+    id,
+    random,
+    terms: template.terms,
+    features: featuresForPreset(template.featurePreset) || {},
+  });
+
+  return { office: office.length, people: current.length, places: places.length, extras };
 }
 
 main()

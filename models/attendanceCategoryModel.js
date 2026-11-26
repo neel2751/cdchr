@@ -15,6 +15,17 @@ const attendanceCategorySchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // What choosing it means on a rota — lib/rotaCategories.js. Absent on
+    // categories made before rules existed; read from the value then.
+    kind: {
+      type: String,
+      enum: ["work", "place", "off"],
+    },
+    // Hours filled in when it is chosen. Not used for "off".
+    startTime: { type: String },
+    endTime: { type: String },
+    // The order on the rota's dropdown.
+    sortOrder: { type: Number, default: 0 },
     isActive: {
       type: Boolean,
       default: true,

@@ -1,5 +1,6 @@
 "use server";
 
+import { stampRotaEntries } from "./rotaCategoryStore";
 import { connect } from "@/db/db";
 import WeeklyRotaModel from "@/models/weeklyRotaModel";
 import WeeklyRotaVersionModel from "@/models/weeklyRotaVersionModel";
@@ -68,6 +69,8 @@ export const handleWeeklyRotaWithStatus = withAudit(
       if (!validDate) return { success: false, message: "Date is not valid" };
 
       const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      // Each day carries its category's name and rule as they are today.
+      data = await stampRotaEntries(data);
 
       if (weekId) {
         const existing = await WeeklyRotaModel.findById({ _id: weekId }).lean();

@@ -25,7 +25,8 @@
  *   node --import ./scripts/lib/action-loader.mjs scripts/test-demo-seed.mjs
  */
 import assert from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import http from "node:http";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
@@ -56,11 +57,74 @@ function check(name, fn) {
 const EMAIL = "demo@example.com";
 const PASSWORD = "Demo-pass-123";
 
+/**
+ * Run the seed script. Asynchronous, so the fake storage below — in this same
+ * process — can answer it.
+ */
 function seed(...extra) {
-  return execFileSync(
-    process.execPath,
-    ["--no-warnings", "scripts/seed-demo.mjs", ...extra],
-    { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["--no-warnings", "scripts/seed-demo.mjs", ...extra],
+      { env: { ...process.env, ...storageEnv }, encoding: "utf8" },
+      (error, stdout, stderr) => {
+        if (error) return reject(Object.assign(error, { stdout, stderr }));
+        resolve(stdout);
+      }
+    );
+  });
+}
+
+/**
+ * A stand-in for the bucket: keeps what is PUT, lists by prefix, deletes.
+ * Enough S3 for the seed's sample PDFs, without touching a real bucket.
+ */
+const stored = new Map();
+let storageEnv = {};
+function fakeStorage() {
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    const [, , ...rest] = url.pathname.split("/"); // /bucket/key…
+    const key = decodeURIComponent(rest.join("/"));
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      if (req.method === "PUT") {
+        stored.set(key, Buffer.concat(chunks));
+        res.writeHead(200, { ETag: '"x"' });
+        return res.end();
+      }
+      if (req.method === "GET" && url.searchParams.get("list-type") === "2") {
+        const prefix = url.searchParams.get("prefix") || "";
+        const keys = [...stored.keys()].filter((k) => k.startsWith(prefix));
+        res.writeHead(200, { "Content-Type": "application/xml" });
+        return res.end(
+          `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated>` +
+            keys.map((k) => `<Contents><Key>${k}</Key><Size>1</Size></Contents>`).join("") +
+            `</ListBucketResult>`
+        );
+      }
+      if (req.method === "POST" && url.searchParams.has("delete")) {
+        const body = Buffer.concat(chunks).toString();
+        for (const m of body.matchAll(/<Key>([^<]+)<\/Key>/g)) stored.delete(m[1]);
+        res.writeHead(200, { "Content-Type": "application/xml" });
+        return res.end(`<?xml version="1.0" encoding="UTF-8"?><DeleteResult></DeleteResult>`);
+      }
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  return new Promise((resolve) =>
+    server.listen(0, "127.0.0.1", () => {
+      storageEnv = {
+        AWS_ENDPOINT_URL_S3: `http://127.0.0.1:${server.address().port}`,
+        AWS_BUCKET_NAME: "demo-bucket",
+        AWS_ACCESS_ID: "test",
+        AWS_ACCESS_PORTAL_KEY: "test",
+        AWS_REGION: "eu-west-2",
+      };
+      resolve(server);
+    })
   );
 }
 
@@ -107,6 +171,7 @@ async function main() {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
   await mongoose.connection.db.dropDatabase();
   const db = mongoose.connection.db;
+  const storage = await fakeStorage();
 
   const { LoginData } = await import("@/server/authServer/authServer");
   const { reachesOnlyDemoCompanies } = await import("@/server/tenantServer/demoLogin");
@@ -128,7 +193,7 @@ async function main() {
     await db.collection("officeemployes").insertOne({ tenantId: real, email: "boss@real.test", name: "Boss" });
     let failed = false;
     try {
-      seed("--apply", "--email=boss@real.test", `--password=${PASSWORD}`);
+      await seed("--apply", "--email=boss@real.test", `--password=${PASSWORD}`);
     } catch (e) {
       failed = true;
       assert.match(String(e.stderr), /already belongs to a real account/);
@@ -138,8 +203,9 @@ async function main() {
   });
 
   await check("--apply makes four demo companies, one login", async () => {
-    const out = seed("--apply", `--password=${PASSWORD}`);
+    const out = await seed("--apply", `--password=${PASSWORD}`);
     assert.match(out, /Demo companies are ready/);
+    assert.match(out, /sample PDFs stored/);
     const companies = await db.collection("companies").find({ seedMarker: "demo" }).toArray();
     assert.equal(companies.length, 4);
     assert.ok(companies.every((c) => c.billing?.demo === true && c.status === "active"));
@@ -216,6 +282,58 @@ async function main() {
     assert.equal(res.success, true, res.message);
     const plan = JSON.parse(res.data);
     assert.ok(plan.plan || plan.current || plan.packages, "a plan to show");
+  });
+
+  await check("the rest of the company: rotas, policies, requests, desk, visitors, expenses, documents", async () => {
+    const t = construction._id;
+    const count = (c, q = {}) => db.collection(c).countDocuments({ tenantId: t, ...q });
+    const kinds = await db.collection("attendancecategories").find({ tenantId: t }).toArray();
+    assert.deepEqual(kinds.map((k) => k.kind).sort(), ["off", "place", "work"]);
+    assert.ok(kinds.some((k) => k.attendanceCategoryName === "Office / Site"), "in the company's words");
+    const tuitionKinds = await db.collection("attendancecategories").find({ tenantId: bySlug["demo-tuition"]._id }).toArray();
+    assert.ok(tuitionKinds.some((k) => k.attendanceCategoryName === "Office / Class"));
+    assert.equal(await count("weeklyrotas"), 3);
+    const rota = await db.collection("weeklyrotas").findOne({ tenantId: t });
+    const days = rota.attendanceData.flatMap((a) => a.schedule);
+    assert.ok(days.some((d) => d.kind === "place" && d.site), "managers at their sites");
+    assert.ok(days.every((d) => d.kind !== "off" || d.startTime === "00:00"));
+    assert.ok((await count("policies", { status: "active" })) >= 5);
+    assert.ok(await count("policyreceipts", { acknowledgedAt: { $ne: null } }));
+    assert.ok(await count("profilechangerequests", { status: "pending" }));
+    assert.equal(await count("officeusers", { isReception: true }), 1);
+    assert.ok(await count("visitors"));
+    assert.equal(await db.collection("visitors").countDocuments({ tenantId: bySlug["demo-restaurant"]._id }), 0,
+      "a restaurant has no visitor log");
+    assert.ok(await count("expenses", { status: "pending" }));
+    assert.ok(await count("documents"));
+    assert.ok(await count("media"));
+    // Every file a record points at is stored, in the company's own folder.
+    const keys = [
+      ...(await db.collection("documents").find({ tenantId: t }).toArray()).flatMap((d) => d.documentsFiles.map((f) => f.key)),
+      ...(await db.collection("policyversions").find({ tenantId: t }).toArray()).map((v) => v.file.key),
+      ...(await db.collection("expenses").find({ tenantId: t }).toArray()).flatMap((e) => e.receiptFiles.map((f) => f.key)),
+      ...(await db.collection("media").find({ tenantId: t }).toArray()).map((m) => m.key),
+    ];
+    assert.ok(keys.length > 20);
+    for (const key of keys) {
+      assert.ok(key.startsWith(`tenants/${t}/`), key);
+      assert.ok(stored.get(key)?.subarray(0, 5).toString() === "%PDF-", `stored: ${key}`);
+    }
+  });
+
+  await check("Previous Office Staff lists the leaver — and an empty list is not an error", async () => {
+    const { getOfficeEmployee } = await import("@/server/officeServer/officeServer");
+    await asOwnerIn(construction);
+    const list = (status) =>
+      getOfficeEmployee({ page: 1, pageSize: 10, query: "", filter: { company: "", role: "", type: "", visaStatus: "", status } });
+    let res = await list("inactive");
+    assert.equal(res.success, true, res.message);
+    assert.deepEqual(JSON.parse(res.data).map((p) => p.name), ["Jordan Fletcher"]);
+    // Nobody matching: empty, not "Something went wrong".
+    res = await getOfficeEmployee({ page: 1, pageSize: 10, query: "zzz-nobody", filter: { status: "inactive" } });
+    assert.equal(res.success, true, res.message);
+    assert.equal(res.totalCount, 0);
+    assert.deepEqual(JSON.parse(res.data), []);
   });
 
   /* ----------------------------------------------------------- view-only */
@@ -305,7 +423,7 @@ async function main() {
   await check("--apply again refreshes the data, same companies", async () => {
     const before = await db.collection("companies").find({ seedMarker: "demo" }).project({ _id: 1 }).toArray();
     const people = await db.collection("employes").countDocuments({ tenantId: construction._id });
-    seed("--apply", `--password=${PASSWORD}`);
+    await seed("--apply", `--password=${PASSWORD}`);
     const after = await db.collection("companies").find({ seedMarker: "demo" }).project({ _id: 1 }).toArray();
     assert.deepEqual(after.map((c) => String(c._id)).sort(), before.map((c) => String(c._id)).sort());
     assert.equal(await db.collection("employes").countDocuments({ tenantId: construction._id }), people);
@@ -315,16 +433,22 @@ async function main() {
   });
 
   await check("--remove takes everything away, and only that", async () => {
-    seed("--remove");
+    await seed("--remove");
     assert.equal(await db.collection("companies").countDocuments({ seedMarker: "demo" }), 0);
     const ids = companies.map((c) => c._id);
     for (const name of ["officeemployes", "employes", "clockrecords", "projectsites", "tenantmemberships", "leaverequests"]) {
       assert.equal(await db.collection(name).countDocuments({ tenantId: { $in: ids } }), 0, name);
     }
     assert.equal(await db.collection("billingaccounts").countDocuments({}), 0);
+    assert.equal(
+      [...stored.keys()].filter((k) => ids.some((id) => k.startsWith(`tenants/${id}/`))).length,
+      0,
+      "the files are gone too"
+    );
     assert.ok(await db.collection("officeemployes").findOne({ email: "boss@real.test" }), "the real company is untouched");
   });
 
+  storage.close();
   await mongoose.disconnect();
   for (const [s, n] of results) console.log(`${s === "pass" ? "✓" : "✗"} ${n}`);
   const failed = results.filter(([s]) => s !== "pass").length;

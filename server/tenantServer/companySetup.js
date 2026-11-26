@@ -3,18 +3,21 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import RoleTypesModel from "@/models/roleTypeModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
 import { runWithTenant } from "@/lib/tenantContext";
+import { resolveTerms } from "@/data/terminology";
+import { addStarterCategories } from "../weeklyRotaServer/rotaCategoryStore";
 
 /**
  * A new company and the person who runs it, made together — for self-serve
  * signup (authServer/signupServer.js) and for a company the platform admin
  * creates (provisionServer.js), so the two cannot drift apart.
  *
- * Four records, in the caller's transaction so a failure half way cannot
+ * Five kinds of record, in the caller's transaction so a failure half way cannot
  * leave a company nobody can sign in to:
  *   the company;
  *   its first department — OfficeEmploye.department is required, so the
  *     owner cannot exist without one, and "Management" is a fair default;
  *   the owner's employee record, as super admin;
+ *   the starter weekly rota categories;
  *   the membership that lets that login reach the company.
  *
  * NOT "use server": it trusts what it is given. Callers check who is asking.
@@ -78,6 +81,11 @@ export async function createCompanyWithOwner({ company, owner, isDefault = true,
       ],
       { session }
     );
+
+    // The weekly rota's choices, in the company's words — "Office / Class"
+    // for a tuition centre — so a rota can be made on day one. The company
+    // changes them on the rota screen (lib/rotaCategories.js).
+    await addStarterCategories(resolveTerms(created), { tenantId: created._id, session });
 
     await TenantMembershipModel.create(
       [

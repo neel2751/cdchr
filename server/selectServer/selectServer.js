@@ -2,6 +2,7 @@
 
 import { connect } from "@/db/db";
 import AttendanceCategoryModel from "@/models/attendanceCategoryModel";
+import { entryKind } from "@/lib/rotaCategories";
 import CompanyModel from "@/models/companyModel";
 import { filterMenuByFeatures } from "@/lib/tenantPlan";
 import { getTenantFeatures } from "@/lib/tenantFeatures";
@@ -328,18 +329,18 @@ export const getSelectAttendanceCategory = async () => {
   if (denied) return denied;
 
   try {
-    const categories = await AttendanceCategoryModel.aggregate([
-      {
-        $match: { isDeleted: false, isActive: true }, // Filters documents where delete is false
-      },
-      {
-        $project: {
-          _id: 0,
-          value: "$attendanceCategoryValue", // Renames `_id` to `value`
-          label: "$attendanceCategoryName", // Renames `roleTitle` to `name`
-        },
-      },
-    ]).exec();
+    // With each one's rule and hours (lib/rotaCategories.js), so the rota
+    // knows what choosing it means without a word wired into the screen.
+    const rows = await AttendanceCategoryModel.find({ isDeleted: false, isActive: true })
+      .sort({ sortOrder: 1, createdAt: 1 })
+      .lean();
+    const categories = rows.map((c) => ({
+      value: c.attendanceCategoryValue,
+      label: c.attendanceCategoryName,
+      kind: entryKind(c),
+      startTime: c.startTime || "",
+      endTime: c.endTime || "",
+    }));
     if (!categories || categories.length === 0) {
       return { success: false, message: "No Data Found" };
     } else {

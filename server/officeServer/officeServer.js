@@ -585,8 +585,10 @@ export const getOfficeEmployee = async (filterData) => {
       },
     ];
     const officeEmployee = await OfficeEmployeeModel.aggregate(pipeline);
-    const totalCount = officeEmployee[0].totalCount[0].count;
-    const result = officeEmployee[0].result;
+    // An empty list has no count row at all. Reading [0].count off it threw,
+    // and an empty Previous Office Staff page said "Something went wrong".
+    const totalCount = officeEmployee[0]?.totalCount?.[0]?.count ?? 0;
+    const result = officeEmployee[0]?.result ?? [];
 
     // Annotate each employee with current account-lock status so admins can see
     // which accounts are locked out by repeated failed logins.

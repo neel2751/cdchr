@@ -29,6 +29,7 @@ import RotaHistoryDialog from "./components/rotaHistoryDialog";
 import { PaginationWithLinks } from "@/components/pagination/pagination";
 import { AddWeeklyRota } from "./addRota";
 import { Button } from "@/components/ui/button";
+import { describeEntry } from "@/lib/rotaCategories";
 
 const Rota = ({ searchParams }) => {
   const currentPage = parseInt(searchParams?.page || "1");
@@ -88,17 +89,9 @@ const Rota = ({ searchParams }) => {
           return;
         }
 
-        const { category, startTime, endTime, site } = entry;
-
-        if (category === "OFF" || category === "Holiday") {
-          row.push("OFF");
-        } else if (category === "OFFICE/SITE") {
-          row.push(
-            `${category}${site ? " - " + site : ""} (${startTime}–${endTime})`
-          );
-        } else {
-          row.push(`${category} (${startTime}–${endTime})`);
-        }
+        // By the day's rule (lib/rotaCategories.js). Quoted: a name or a
+        // place can hold a comma.
+        row.push(`"${describeEntry(entry).replace(/"/g, '""')}"`);
       });
 
       return row.join(",");

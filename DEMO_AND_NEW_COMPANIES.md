@@ -15,7 +15,22 @@ branches / classes):
 
 Each has office staff and departments, two weeks of attendance up to **today**
 (people in now, on a break, gone home), leave balances, approved/pending
-requests, announcements, and a package on Plan & Billing.
+requests, announcements, a package on Plan & Billing, and:
+
+* **Weekly rota:** last week, this week and next, plus the shift types (see section 4).
+* **Policies:** a library with published policies and who has read and acknowledged them.
+* **Change requests:** staff asking HR to change their name, email or date of birth.
+* **Reception desk:** a front-desk login and a visitor book (construction and
+  tuition; a restaurant has no visitor log).
+* **Expenses:** claims against each site, branch or class, with receipts.
+* **Documents:** each office employee's contract, right-to-work check, ID and certificate.
+* **Media management:** the documents and receipts, plus a small company library.
+* **A leaver:** someone on Previous Office Staff.
+
+The documents, policies and receipts are small sample PDFs marked "SAMPLE
+DOCUMENT". They're stored in each demo company's own folder of your storage
+bucket, so they open like real ones. Without storage set up, or with
+`--no-files`, they're listed but won't open.
 
 **They are view-only.** Anyone can look at everything; nothing can be added,
 changed, clocked or paid. They are never billed and send no emails. The demo
@@ -61,7 +76,7 @@ fresh every day, add a crontab line on the server:
   **Demo company** off, make your changes, then turn it back on. (Or run with
   `--editable`.) Running `--apply` again throws hand changes away.
 * **To remove everything:** `npm run demo:seed -- --remove`. That deletes the
-  four companies and every record in them.
+  four companies, every record in them, and their sample files.
 
 ## 2. Creating a company from the platform console
 
@@ -102,3 +117,28 @@ the same form with that company's owner already filled in.
 3. Demo: sign in with the demo login. There's no two-factor prompt, you land
    in Northgate Construction, and a blue banner says it's a demo. Switch to
    each company. Try to add an employee or change the branding: it is refused.
+
+## 4. Shift types (weekly rota categories)
+
+The choices on the weekly rota used to be fixed words: "OFF", "OFFICE" and
+"OFFICE/SITE" were wired into the screens. Now each one is a **shift type** with
+a rule:
+
+| Rule | On the rota |
+|---|---|
+| Working | start and end time |
+| Working at a site / branch / class | times, and which one (in the company's own words) |
+| Not working | no hours |
+
+Each can also have usual hours, filled in when it's chosen.
+
+* **New companies** get the usual set in their own words: *Office*,
+  *Office / Site* (or *Office / Branch*, *Office / Class*) and *Off*. Their setup
+  checklist has a "Check your shift types" step.
+* **Existing companies** keep their categories. The old ones still behave as
+  before, and a category they added themselves counts as "Working".
+* **To change them:** Weekly Rota → **Shift types**. Add (e.g. *Teaching a
+  class*, working at a class, 16:00–18:00), rename, change the rule, or remove.
+  **Use the usual set** adds any of the standard three that are missing.
+* **Rotas already saved don't change** when a shift type is renamed or
+  removed. Each saved day keeps the name and rule it had.
