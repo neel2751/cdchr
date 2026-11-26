@@ -43,7 +43,9 @@ export async function runAnnouncementPublishJob() {
   for (const tenant of tenants) {
     // A locked company (lib/tenantAccess.js) gets nothing sent on its behalf
     // until it is reopened.
-    if (companyAccess(tenant).level === "locked") continue;
+    // Nor a demo company: its people are made up (scripts/seed-demo.mjs).
+    const tenantAccess = companyAccess(tenant);
+    if (tenantAccess.level === "locked" || tenantAccess.reason === "demo") continue;
     // A company whose plan excludes the module should not have anything go out
     // for it, even if a draft was written while it was still switched on.
     //

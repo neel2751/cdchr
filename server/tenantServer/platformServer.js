@@ -117,6 +117,13 @@ export async function getTenantDetail(tenantId) {
     const employeeCount = await runWithTenant(tenantId, () =>
       OfficeEmployeeModel.countDocuments({ delete: { $ne: true } })
     );
+    // Who runs it — so "New company for this owner" knows whose.
+    const owners = await runWithTenant(tenantId, () =>
+      OfficeEmployeeModel.find({ isSuperAdmin: true, delete: { $ne: true } })
+        .select("name email")
+        .sort({ _id: 1 })
+        .lean()
+    );
 
     // Best-effort: the console should still render if the bucket is
     // unreachable, so a failure here shows "unknown" rather than an error page.
@@ -157,6 +164,7 @@ export async function getTenantDetail(tenantId) {
         // (billingServer/trialAbuse.js).
         signup: tenant.signup || null,
         employeeCount,
+        owners: owners.map((o) => ({ name: o.name, email: o.email })),
         storage,
         createdAt: tenant.createdAt,
         platformRootDomain: process.env.PLATFORM_ROOT_DOMAIN || "",
@@ -168,64 +176,8 @@ export async function getTenantDetail(tenantId) {
   }
 }
 
-/** Provision a new tenant. */
-export async function createTenant({ name, slug, description } = {}) {
-  try {
-    const auth = await requirePlatformAdmin();
-    if (auth.error) return { success: false, message: auth.error };
-
-    const trimmed = String(name || "").trim();
-    if (!trimmed) return { success: false, message: "Name is required" };
-
-    const wanted = String(slug || "").trim().toLowerCase();
-    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(wanted)) {
-      return {
-        success: false,
-        message: "Address must be lowercase letters, numbers or hyphens",
-      };
-    }
-
-    await connect();
-    if (await CompanyModel.findOne({ slug: wanted }).lean().exec()) {
-      return { success: false, message: "That address is taken" };
-    }
-
-    const created = await CompanyModel.create({
-      name: trimmed,
-      description: String(description || "").trim(),
-      slug: wanted,
-      status: "trial",
-      domains: [],
-      isActive: true,
-      delete: false,
-    });
-
-    await logAuditDirect({
-      actor: {
-        _id: auth.user._id,
-        name: auth.user.name,
-        email: auth.user.email,
-        role: "platformAdmin",
-      },
-      action: "Platform.createTenant",
-      module: "Platform",
-      tenantId: String(created._id),
-      entityId: String(created._id),
-      description: `Created company ${trimmed}`,
-      after: { name: trimmed, slug: wanted },
-    });
-
-    await invalidateTenantCache();
-    return {
-      success: true,
-      message: `${trimmed} created`,
-      data: JSON.stringify({ _id: String(created._id) }),
-    };
-  } catch (error) {
-    console.log("createTenant error:", error?.message);
-    return { success: false, message: "Could not create the company" };
-  }
-}
+// Creating a company — with the person who runs it — is in
+// provisionServer.js.
 
 const STATUSES = new Set(["active", "trial", "suspended", "cancelled"]);
 
@@ -414,6 +366,38 @@ export async function setTenantAccessLock(tenantId, { level = null, message = ""
     },
     level ? "Platform.lockTenant" : "Platform.unlockTenant",
     level ? `Set access to ${level}` : "Lifted access lock"
+  );
+}
+
+/**
+ * Make a company a demo, or stop it being one (lib/tenantAccess.js): a demo
+ * is view-only for everyone in it, never billed, and sends no reminders.
+ * scripts/seed-demo.mjs makes the demo companies; this is for turning one
+ * off to change its sample data by hand, and back on afterwards.
+ */
+export async function setTenantDemo(tenantId, on) {
+  return asPlatformAdmin(
+    tenantId,
+    async (id) => {
+      await connect();
+      const before = await CompanyModel.findById(id).select("billing.demo").lean();
+      if (!before) return { success: false, message: "Company not found" };
+      await CompanyModel.updateOne(
+        { _id: createObjectId(id) },
+        on ? { $set: { "billing.demo": true } } : { $unset: { "billing.demo": "" } }
+      );
+      invalidateCompanyAccess(id);
+      return {
+        success: true,
+        message: on
+          ? "Demo company — everyone can look, nobody can change anything"
+          : "No longer a demo — it can be changed, and is billed like any other",
+        before: { demo: !!before.billing?.demo },
+        after: { demo: !!on },
+      };
+    },
+    on ? "Platform.setDemo" : "Platform.unsetDemo",
+    on ? "Made it a demo company" : "Stopped it being a demo company"
   );
 }
 

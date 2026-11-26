@@ -64,6 +64,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import NewCompanyDialog from "../../newCompanyDialog";
 import {
   listSupportSessions,
   startSupportSession,
@@ -131,9 +132,13 @@ const TenantDetail = ({ tenant }) => {
               {tenant.status}
             </Badge>
             {tenant.access && tenant.access.level !== "full" && (
-              <Badge variant={ACCESS_VARIANT[tenant.access.level] || "outline"}>
-                {ACCESS_LABEL[tenant.access.level]}
-              </Badge>
+              tenant.access.reason === "demo" ? (
+                <Badge variant="outline">Demo</Badge>
+              ) : (
+                <Badge variant={ACCESS_VARIANT[tenant.access.level] || "outline"}>
+                  {ACCESS_LABEL[tenant.access.level]}
+                </Badge>
+              )
             )}
             {tenant.access?.reason === "trial" && tenant.access.daysLeft != null && (
               <span>
@@ -149,6 +154,14 @@ const TenantDetail = ({ tenant }) => {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {tenant.owners?.[0]?.email && (
+            // Another branch or business for the same person.
+            <NewCompanyDialog
+              ownerEmail={tenant.owners[0].email}
+              label="New company for this owner"
+              variant="outline"
+            />
+          )}
           <SupportVisitButton tenant={tenant} />
           {tenant.status !== "suspended" ? (
             <Button

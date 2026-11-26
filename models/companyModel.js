@@ -171,6 +171,12 @@ const billingSchema = new mongoose.Schema(
     // "trial"; see lib/tenantAccess.js for what follows it.
     trialEndsAt: { type: Date },
     lock: { type: accessLockSchema, default: undefined },
+    // A demo company, filled with sample data to show customers
+    // (scripts/seed-demo.mjs): always view-only, never billed, and no reminder
+    // emails go out for it. Kept with the billing state because, like a lock,
+    // it decides what the company may do — and every reader of access already
+    // reads `billing`. See lib/tenantAccess.js.
+    demo: { type: Boolean },
     // Trial reminder emails already sent, one per stage, so a daily job never
     // sends the same one twice. See server/tenantServer/trialReminderJob.js.
     trialReminders: { type: [String], default: undefined },

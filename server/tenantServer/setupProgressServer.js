@@ -2,7 +2,7 @@
 
 import { connect } from "@/db/db";
 import { isValidObjectId } from "@/lib/mongodb";
-import { escapeTenant } from "@/lib/tenantContext";
+import { companyWriteRefusal, escapeTenant } from "@/lib/tenantContext";
 import { isFeatureEnabled } from "@/lib/tenantPlan";
 import { withAudit, recordAudit } from "@/lib/audit";
 import { fillTerms, resolveTerms } from "@/data/terminology";
@@ -290,6 +290,8 @@ export const markSetupStep = withAudit(
       if (mark !== null && mark !== "done" && mark !== "skipped") {
         return { success: false, message: "Unknown mark" };
       }
+      const refusal = await companyWriteRefusal();
+      if (refusal) return { success: false, message: refusal };
 
       await connect();
       const update =
@@ -318,6 +320,8 @@ export async function setSetupChecklistHidden(hidden) {
   try {
     const auth = await requireOwner();
     if (auth.error) return { success: false, message: auth.error };
+    const refusal = await companyWriteRefusal();
+    if (refusal) return { success: false, message: refusal };
     await connect();
     await CompanyModel.updateOne(
       { _id: auth.tenantId },

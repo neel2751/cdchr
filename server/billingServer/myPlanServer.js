@@ -1,5 +1,6 @@
 "use server";
 
+import { companyWriteRefusal } from "@/lib/tenantContext";
 import { connect } from "@/db/db";
 import { isValidObjectId } from "@/lib/mongodb";
 import { recordAudit, withAudit } from "@/lib/audit";
@@ -158,6 +159,8 @@ export const setOverageMode = withAudit(
       if (!OVERAGE_MODES.includes(mode)) {
         return { success: false, message: "Unknown choice" };
       }
+      const refusal = await companyWriteRefusal();
+      if (refusal) return { success: false, message: refusal };
       await connect();
       await CompanyModel.updateOne(
         { _id: auth.tenantId },

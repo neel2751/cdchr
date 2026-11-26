@@ -22,7 +22,7 @@ import CompanyModel from "@/models/companyModel";
 const TTL_MS = 30_000;
 const store = (globalThis.__cdchrTenantAccessCache ??= new Map());
 
-const FIELDS = "name status delete billing.trialEndsAt billing.lock";
+const FIELDS = "name status delete billing.trialEndsAt billing.lock billing.demo";
 
 export async function getCompanyAccess(tenantId, { fresh = false } = {}) {
   const key = tenantId ? String(tenantId) : "";

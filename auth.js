@@ -11,6 +11,7 @@ import { LoginData, storeSession } from "@/server/authServer/authServer";
 import { passwordSecurityState } from "@/server/authServer/passwordSecurity";
 import { assertCanSwitchTenant } from "@/server/tenantServer/membershipServer";
 import { activeSupportSession } from "@/server/tenantServer/supportServer";
+import { reachesOnlyDemoCompanies } from "@/server/tenantServer/demoLogin";
 import {
   LOGIN_ERROR,
   codeForLoginMessage,
@@ -259,7 +260,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.role === "superAdmin" ||
           user.role === "platformAdmin";
         user.requiresTwoFactor = enabled;
-        user.mustSetup2FA = privileged && !enabled;
+        // Except a shared demo login that reaches nothing but demo companies
+        // — view-only and made up — see server/tenantServer/demoLogin.js.
+        user.mustSetup2FA =
+          privileged && !enabled && !(await reachesOnlyDemoCompanies(user));
       }
       return true;
     },

@@ -9,11 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ACCESS_RULES } from "@/lib/tenantAccess";
 import {
   dismissSignupFlags,
   setTenantAccessLock,
+  setTenantDemo,
   setTenantStatus,
   setTenantTrialEnd,
 } from "@/server/tenantServer/platformServer";
@@ -76,6 +78,8 @@ function whereItIs(access, status) {
       return access.level === "locked"
         ? "Locked by hand. Only the super admin can sign in."
         : "Read-only by hand. People can look and export, but not change anything. Clocking in still works.";
+    case "demo":
+      return "Demo company. Everyone can sign in and look; nobody can change anything. Never billed, no reminder emails.";
     case "suspended":
       return "Suspended. Only the super admin can sign in.";
     case "cancelled":
@@ -178,6 +182,26 @@ export default function AccessTab({ tenant, run, isPending }) {
             )}
           </div>
         </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle className="text-base">Demo company</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              For showing customers. View-only for everyone, never billed, and
+              no reminder emails. Turn it off to change the sample data by hand,
+              then back on. Two-factor is skipped only for a login whose every
+              company is a demo.
+            </p>
+          </div>
+          <Switch
+            checked={!!tenant.billing?.demo}
+            disabled={isPending}
+            onCheckedChange={(on) => run(() => setTenantDemo(tenant._id, on))}
+            aria-label="Demo company"
+          />
+        </CardHeader>
       </Card>
 
       <Card>

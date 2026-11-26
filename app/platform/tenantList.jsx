@@ -7,8 +7,6 @@ import {
   Globe,
   PauseCircle,
   Users,
-  Plus,
-  Loader2,
 } from "lucide-react";
 
 import SearchDebounce from "@/components/search/searchDebounce";
@@ -24,21 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import Link from "next/link";
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { createTenant } from "@/server/tenantServer/platformServer";
+import NewCompanyDialog from "./newCompanyDialog";
 import { useFetchQuery } from "@/hooks/use-query";
 import { getTenants } from "@/server/tenantServer/tenantServer";
 
@@ -50,11 +34,8 @@ const STATUS_VARIANT = {
 };
 
 /**
- * Read-only tenant list for the platform console.
- *
- * Phase 1 deliberately stops at reading. Creating and editing tenants — and in
- * particular writing domains, which changes who can reach what — lands once the
- * tenant scoping in Phase 2/3 is enforced.
+ * The tenant list for the platform console, and "New company"
+ * (newCompanyDialog.jsx).
  */
 const TenantList = ({ searchParams, stats }) => {
   const currentPage = parseInt(searchParams?.page || "1", 10);
@@ -109,7 +90,7 @@ const TenantList = ({ searchParams, stats }) => {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <SearchDebounce placeholder="Search name, slug or domain" />
-            <NewTenantDialog />
+            <NewCompanyDialog />
           </div>
         </CardHeader>
 
@@ -259,89 +240,6 @@ const TenantList = ({ searchParams, stats }) => {
   );
 };
 
-/** Provision a company. Status starts as "trial" until the plan is set. */
-const NewTenantDialog = () => {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [isPending, startTransition] = useTransition();
-
-  // Suggest an address from the name, but let it be overridden.
-  const onName = (value) => {
-    setName(value);
-    setSlug(
-      value
-        .toLowerCase()
-        .replace(/&/g, " and ")
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 63)
-    );
-  };
-
-  const submit = () =>
-    startTransition(async () => {
-      const res = await createTenant({ name, slug });
-      if (res?.success) {
-        toast.success(res.message);
-        setOpen(false);
-        setName("");
-        setSlug("");
-        router.refresh();
-      } else {
-        toast.error(res?.message || "Could not create the company");
-      }
-    });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="size-4" />
-          New company
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>New company</DialogTitle>
-          <DialogDescription>
-            Creates an empty tenant. Add its super admin and branding afterwards.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="t-name">Company name</Label>
-            <Input
-              id="t-name"
-              value={name}
-              placeholder="Acme Ltd"
-              onChange={(e) => onName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="t-slug">Workspace address</Label>
-            <Input
-              id="t-slug"
-              value={slug}
-              placeholder="acme"
-              onChange={(e) => setSlug(e.target.value)}
-            />
-          </div>
-          <Button
-            className="w-full"
-            disabled={isPending || !name.trim() || !slug.trim()}
-            onClick={submit}
-          >
-            {isPending && <Loader2 className="size-4 animate-spin" />}
-            Create company
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
 export default TenantList;
 
 /**
@@ -350,6 +248,7 @@ export default TenantList;
  */
 function AccessHint({ access }) {
   if (!access) return null;
+  if (access.reason === "demo") return <Badge variant="outline">demo</Badge>;
   if (access.level === "readOnly" || access.level === "locked") {
     return (
       <Badge variant="destructive">

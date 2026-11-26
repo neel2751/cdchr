@@ -50,6 +50,12 @@ export function accessNotice(access, role) {
     text,
     owner,
     // The trial countdown is information; everything after it needs action.
-    tone: access.level === "full" ? "info" : access.level === "grace" ? "warning" : "danger",
+    // A demo company is read-only on purpose; nothing is wrong.
+    tone:
+      access.level === "full" || access.reason === "demo"
+        ? "info"
+        : access.level === "grace"
+          ? "warning"
+          : "danger",
   };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { companyWriteRefusal } from "@/lib/tenantContext";
 import { connect } from "@/db/db";
 import { createObjectId, isValidObjectId } from "@/lib/mongodb";
 import CompanyModel from "@/models/companyModel";
@@ -155,6 +156,8 @@ export const handleCompany = async (data, id) => {
   try {
     const auth = await requireOwnCompany(id);
     if (auth.error) return { success: false, message: auth.error };
+    const refusal = await companyWriteRefusal();
+    if (refusal) return { success: false, message: refusal };
 
     await connect();
 
@@ -198,6 +201,8 @@ export const companyStatus = async (data) => {
   try {
     const auth = await requireOwnCompany(data?.id);
     if (auth.error) return { success: false, message: auth.error };
+    const refusal = await companyWriteRefusal();
+    if (refusal) return { success: false, message: refusal };
 
     await connect();
     await CompanyModel.updateOne(
@@ -219,6 +224,8 @@ export const companyDelete = async (data) => {
   try {
     const auth = await requireOwnCompany(data?.id);
     if (auth.error) return { success: false, message: auth.error };
+    const refusal = await companyWriteRefusal();
+    if (refusal) return { success: false, message: refusal };
 
     await connect();
     await CompanyModel.updateOne(

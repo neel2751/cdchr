@@ -9,8 +9,6 @@ import OfficeEmployeeModel from "@/models/officeEmployeeModel";
 import OfficeUserModel from "@/models/officeModel";
 import PendingSignupModel from "@/models/pendingSignupModel";
 import PlatformUserModel from "@/models/platformUserModel";
-import RoleTypesModel from "@/models/roleTypeModel";
-import TenantMembershipModel from "@/models/tenantMembershipModel";
 import TrialOfferModel from "@/models/trialOfferModel";
 import { getClientIp } from "@/lib/clientIp";
 import {
@@ -23,9 +21,9 @@ import {
 import { logAuditDirect } from "@/lib/audit";
 import { emailButton } from "@/lib/emailTemplate";
 import { isValidObjectId, startSession } from "@/lib/mongodb";
-import { escapeTenant, runWithTenant } from "@/lib/tenantContext";
+import { escapeTenant } from "@/lib/tenantContext";
+import { slugComplaint } from "@/lib/workspaceSlug";
 import {
-  RESERVED_SUBDOMAINS,
   normalizeHost,
   originForHost,
   platformRootDomain,
@@ -34,6 +32,7 @@ import { hashPassword } from "@/utils/bcrypt";
 import { getServerSideProps } from "../session/session";
 import { sendTenantMail } from "../email/tenantMail";
 import { invalidateTenantCache } from "../tenantServer/tenantServer";
+import { createCompanyWithOwner } from "../tenantServer/companySetup";
 import { INDUSTRY_TEMPLATES, industryTemplate } from "@/data/terminology";
 import { featuresForPreset } from "@/data/features";
 import { trialEndFrom } from "@/lib/tenantAccess";
@@ -66,10 +65,6 @@ const TOKEN_TTL_HOURS = 24;
 const RESEND_COOLDOWN_MS = 60 * 1000;
 const MIN_PASSWORD_LENGTH = 8;
 
-// The department every new company starts with. A company needs at least one,
-// because OfficeEmploye.department is required — the owner cannot be created
-// without it — and "Management" is a defensible default for the founder.
-const FIRST_DEPARTMENT = "Management";
 
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -77,25 +72,6 @@ function hashToken(token) {
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Same shape the company schema and the platform console enforce. */
-const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-/**
- * Why a slug cannot be used, or "" when it is fine.
- * Format only — availability needs the database and is checked separately.
- */
-function slugComplaint(slug) {
-  if (!slug) return "Pick a workspace address";
-  if (slug.length < 3) return "Use at least 3 characters";
-  if (slug.length > 63) return "Use 63 characters or fewer";
-  if (!SLUG_PATTERN.test(slug)) {
-    return "Use lowercase letters, numbers and hyphens, not starting or ending with a hyphen";
-  }
-  // These resolve to the platform's own hosts, so a tenant can never hold one.
-  if (RESERVED_SUBDOMAINS.has(slug)) return "That address is reserved";
-  return "";
 }
 
 /**
@@ -595,105 +571,46 @@ export async function completeSignup(rawToken) {
 
     try {
       await session.withTransaction(async () => {
-        const [company] = await CompanyModel.create(
-          [
-            {
-              name: pending.companyName,
-              description: "",
-              slug: pending.slug,
-              // Every self-serve workspace starts on trial; the platform
-              // console is what promotes one to "active".
-              status: "trial",
-              // The business type they chose: its words and form from the
-              // first sign-in, and the modules that suit it switched on. The
-              // platform console can change either later.
-              industry: template.key,
-              features: featuresForPreset(template.featurePreset) || {},
-              // When the trial stops being free — lib/tenantAccess.js says
-              // what follows. Without it a self-serve company was free for
-              // ever.
-              billing: {
-                trialEndsAt: trialEndFrom(new Date(), trialDays),
-                ...(offer ? { trialOffer: offer.code } : {}),
-              },
-              signup: {
-                email: pending.email,
-                emailDomain: emailDomain(pending.email),
-                phoneKey: phoneKey(pending.phoneNumber) || undefined,
-                ip: pending.ip || undefined,
-                nameKey: nameKey(pending.companyName),
-                at: new Date(),
-                ...(flags.length ? { flags } : {}),
-              },
-              domains: [],
-              isActive: true,
-              delete: false,
+        created = await createCompanyWithOwner({
+          company: {
+            name: pending.companyName,
+            description: "",
+            slug: pending.slug,
+            // Every self-serve workspace starts on trial; the platform
+            // console is what promotes one to "active".
+            status: "trial",
+            // The business type they chose: its words and form from the
+            // first sign-in, and the modules that suit it switched on. The
+            // platform console can change either later.
+            industry: template.key,
+            features: featuresForPreset(template.featurePreset) || {},
+            // When the trial stops being free — lib/tenantAccess.js says
+            // what follows. Without it a self-serve company was free for
+            // ever.
+            billing: {
+              trialEndsAt: trialEndFrom(new Date(), trialDays),
+              ...(offer ? { trialOffer: offer.code } : {}),
             },
-          ],
-          { session }
-        );
-
-        const tenantId = String(company._id);
-
-        // tenantId is set explicitly on each document as well as scoping the
-        // block: the plugin stamps from context, but being explicit means a
-        // record can never land in the wrong company even if context is lost.
-        await runWithTenant(tenantId, async () => {
-          const [department] = await RoleTypesModel.create(
-            [
-              {
-                tenantId: company._id,
-                roleTitle: FIRST_DEPARTMENT,
-                roleDescription: "Created with the workspace",
-              },
-            ],
-            { session }
-          );
-
-          const [owner] = await OfficeEmployeeModel.create(
-            [
-              {
-                tenantId: company._id,
-                name: pending.name,
-                email: pending.email,
-                phoneNumber: pending.phoneNumber,
-                // Already hashed at signup — never re-hash.
-                password: pending.passwordHash,
-                department: department._id,
-                roleType: FIRST_DEPARTMENT,
-                company: company._id,
-                employeType: "Full-Time",
-                immigrationType: "British",
-                joinDate: new Date(),
-                countryOfWork: "United Kingdom",
-                isActive: true,
-                // The founder runs the company. Hard-coded rather than taken
-                // from the form: this whole flow is unauthenticated.
-                isAdmin: true,
-                isSuperAdmin: true,
-                delete: false,
-              },
-            ],
-            { session }
-          );
-
-          await TenantMembershipModel.create(
-            [
-              {
-                userId: owner._id,
-                userModel: "OfficeEmploye",
-                email: pending.email,
-                tenantId: company._id,
-                role: "superAdmin",
-                // Their only company, so it is where they land at sign-in.
-                isDefault: true,
-                isActive: true,
-              },
-            ],
-            { session }
-          );
-
-          created = { company, owner };
+            signup: {
+              email: pending.email,
+              emailDomain: emailDomain(pending.email),
+              phoneKey: phoneKey(pending.phoneNumber) || undefined,
+              ip: pending.ip || undefined,
+              nameKey: nameKey(pending.companyName),
+              at: new Date(),
+              ...(flags.length ? { flags } : {}),
+            },
+          },
+          owner: {
+            name: pending.name,
+            email: pending.email,
+            phoneNumber: pending.phoneNumber,
+            // Already hashed at signup.
+            passwordHash: pending.passwordHash,
+          },
+          // Their only company, so it is where they land at sign-in.
+          isDefault: true,
+          session,
         });
 
         pending.usedAt = new Date();

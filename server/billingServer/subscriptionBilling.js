@@ -58,7 +58,7 @@ const DAY_MS = 86400000;
 /**
  * Companies due a bill: paying, on a package, and billed up to today or
  * never. A locked company is not billed — it cannot use what it would be
- * paying for. Read-only still is.
+ * paying for. Read-only still is. A demo company never is.
  */
 async function dueCompanies(now, accountId) {
   return CompanyModel.find({
@@ -67,6 +67,8 @@ async function dueCompanies(now, accountId) {
     "billing.plan": { $nin: [null, ""] },
     "billing.planAppliedAt": { $ne: null },
     "billing.lock.level": { $ne: "locked" },
+    // A demo company is shown to customers, not sold to one.
+    "billing.demo": { $ne: true },
     $or: [
       { "billing.paidThrough": { $exists: false } },
       { "billing.paidThrough": null },

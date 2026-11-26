@@ -171,6 +171,39 @@ async function linkCompaniesForEmail(email, matches) {
   }
 }
 
+/**
+ * Is this "duplicate" one person who runs several companies, on purpose?
+ *
+ * A company the platform admin creates for an existing owner
+ * (server/tenantServer/provisionServer.js) gives them a record there with the
+ * same email — that is how a person is in two companies here — and a
+ * membership linking each one. That is not the accident reportDuplicateLogin
+ * exists to surface, and must not be refused when DUPLICATE_LOGIN_POLICY is
+ * "block".
+ *
+ * So: every match is an office record, each in a different company, and every
+ * one of those companies already lists this email as a member. Anything else
+ * — a site or reception account, two records in one company, a company with
+ * no membership — is still reported.
+ */
+async function isOneOwnerOfLinkedCompanies(email, matches) {
+  try {
+    if (!matches.every((m) => m.userType === "office" && m.user?.tenantId)) return false;
+    const tenants = matches.map((m) => String(m.user.tenantId));
+    if (new Set(tenants).size !== tenants.length) return false;
+    const linked = await escapeTenant("login: are these companies linked", () =>
+      TenantMembershipModel.countDocuments({
+        email: String(email || "").trim().toLowerCase(),
+        tenantId: { $in: matches.map((m) => m.user.tenantId) },
+        isActive: true,
+      })
+    );
+    return linked === tenants.length;
+  } catch {
+    return false;
+  }
+}
+
 /** Log a duplicate and record it, without ever failing the login for it. */
 async function reportDuplicateLogin(email, matches) {
   const describe = matches
@@ -273,7 +306,7 @@ const verifyCredentials = async (email, password, deviceId) => {
    * `matches` is ordered deterministically (see findAccountsByEmail), so the
    * pick below is at least stable. The duplicate is reported either way.
    */
-  if (matches.length > 1) {
+  if (matches.length > 1 && !(await isOneOwnerOfLinkedCompanies(email, matches))) {
     await reportDuplicateLogin(email, matches);
     // One identity, several companies: link them so the switcher can move
     // between them after signing in.

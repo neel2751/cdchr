@@ -154,6 +154,13 @@ export async function performClockAction(args) {
         "This company's account is locked, so clocking in is paused. Please speak to your manager.",
     };
   }
+  // A demo company's records are its sample data. Nobody works there.
+  if (access.reason === "demo") {
+    return {
+      success: false,
+      message: "This is a demo company, so clocking in is switched off.",
+    };
+  }
   // Read-only stops people changing records, not turning up to work: a
   // missing clock-in is a wrong timesheet later. So clocking carries on.
   return essentialWrite("clocking in while the company is read-only", () =>

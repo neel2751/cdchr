@@ -42,6 +42,14 @@ async function requireBillingOwner() {
   return { user, company, account, isMain, mainName };
 }
 
+// A demo company is shown, not sold: nobody adds a card to it. (Read-only for
+// an unpaid bill must still be able to — paying is how it reopens — so this
+// asks about the demo, not about read-only.)
+const DEMO_REFUSAL = {
+  success: false,
+  message: "This is a demo company, so payment details cannot be added",
+};
+
 const cardView = (account) =>
   account?.card?.paymentMethodId
     ? {
@@ -93,6 +101,7 @@ export async function startCardSetup({ returnUrl } = {}) {
   try {
     const auth = await requireBillingOwner();
     if (auth.error) return { success: false, message: auth.error };
+    if (auth.company.billing?.demo) return DEMO_REFUSAL;
     if (!auth.isMain) {
       return { success: false, message: `Your bill is paid by ${auth.mainName}` };
     }
@@ -111,6 +120,7 @@ export async function finishCardSetup({ sessionId } = {}) {
   try {
     const auth = await requireBillingOwner();
     if (auth.error) return { success: false, message: auth.error };
+    if (auth.company.billing?.demo) return DEMO_REFUSAL;
     if (!auth.account) return { success: false, message: "No card was being added" };
     const outcome = await saveCardFromSession(sessionId, {
       expectAccountId: auth.account._id,
@@ -148,6 +158,7 @@ export const setMyPaymentMethod = withAudit(
     try {
       const auth = await requireBillingOwner();
       if (auth.error) return { success: false, message: auth.error };
+      if (auth.company.billing?.demo) return DEMO_REFUSAL;
       if (!auth.isMain) {
         return { success: false, message: `Your bill is paid by ${auth.mainName}` };
       }
@@ -184,6 +195,7 @@ export const removeMyCard = withAudit(
     try {
       const auth = await requireBillingOwner();
       if (auth.error) return { success: false, message: auth.error };
+      if (auth.company.billing?.demo) return DEMO_REFUSAL;
       if (!auth.isMain || !auth.account) {
         return { success: false, message: "There is no card to remove" };
       }

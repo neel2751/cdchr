@@ -102,7 +102,12 @@ async function loadSetupState() {
 
   if (!settings.configuredAt && categories.length > 0) {
     settings.configuredAt = settings.createdAt || new Date();
-    await settings.save();
+    // Best-effort: the answer is right whether or not it is remembered, and a
+    // read-only company (lib/tenantAccess.js) cannot remember it — which must
+    // not stop its leave screens opening.
+    await settings.save().catch((error) =>
+      console.log("leave setup: could not record configuredAt:", error?.message)
+    );
   }
 
   return { settings, categories };

@@ -1,5 +1,6 @@
 "use server";
 
+import { companyWriteRefusal } from "@/lib/tenantContext";
 import { connect } from "@/db/db";
 import CompanyModel from "@/models/companyModel";
 import TenantMembershipModel from "@/models/tenantMembershipModel";
@@ -92,6 +93,8 @@ async function requireCompanyAdmin(tenantId) {
 async function asCompanyAdmin(tenantId, op, describe) {
   const auth = await requireCompanyAdmin(tenantId);
   if (auth.error) return { success: false, message: auth.error };
+  const refusal = await companyWriteRefusal();
+  if (refusal) return { success: false, message: refusal };
 
   const result = await op(auth.tenantId);
   if (result?.success) {
@@ -264,6 +267,8 @@ export const uploadTenantLogo = withAudit(
   async (tenantId, formData) => {
     const auth = await requireCompanyAdmin(tenantId);
     if (auth.error) return { success: false, message: auth.error };
+    const refusal = await companyWriteRefusal();
+    if (refusal) return { success: false, message: refusal };
 
     const file = formData?.get?.("file");
     if (!file || typeof file.arrayBuffer !== "function") {

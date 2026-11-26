@@ -53,7 +53,9 @@ export async function runPolicyReviewJob({ now = new Date(), send = sendTenantMa
   for (const tenant of tenants) {
     // A locked company (lib/tenantAccess.js) gets nothing sent on its behalf
     // until it is reopened.
-    if (companyAccess(tenant).level === "locked") continue;
+    // Nor a demo company: its people are made up (scripts/seed-demo.mjs).
+    const tenantAccess = companyAccess(tenant);
+    if (tenantAccess.level === "locked" || tenantAccess.reason === "demo") continue;
     if (!isFeatureEnabled(tenant.features, "policies")) continue;
     results.tenants++;
     const one = await runWithTenant(String(tenant._id), () =>
